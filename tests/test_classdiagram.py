@@ -189,6 +189,8 @@ def test_default_value_may_be_a_json_number_or_boolean():
     ({"kind": "interface", "stereotype": "Interface"}, "«interface»"),
     ({"kind": "enum", "stereotype": "Enumeration"}, "«enumeration»"),
     ({"kind": "abstract", "stereotype": "abstract"}, None),
+    ({"kind": "interface", "stereotype": " interface "}, "«interface»"),
+    ({"stereotype": " entity "}, "«entity»"),
     ({"kind": "abstract", "stereotype": "entity"}, "«entity»"),
     ({"kind": "enum", "stereotype": "flags"}, "«enumeration, flags»"),
 ])
@@ -249,6 +251,24 @@ def test_name_on_a_vertical_line_clears_it_by_the_gap():
     assert name.y == pytest.approx(130)
     assert name.box[0] == pytest.approx(50 + C.NAME_GAP)  # 아래로 가는 선의 왼쪽은 화면 오른쪽
     assert not touches_a_line(d, name.box)
+
+
+def test_name_spots_keep_the_gap_on_both_sides_even_for_tall_glyphs():
+    text = "█"  # 잉크가 줄 상자 아래로 나가 글자 상자의 위아래가 비대칭이다
+    b = T.place(0, 0, text, False, "mm").box
+    assert b[3] > -b[1] + 1
+    above, below = C.name_spots(((0, 0), (100, 0)), text)
+    assert T.place(*above, text, False, "mm").box[3] == pytest.approx(-C.NAME_GAP)
+    assert T.place(*below, text, False, "mm").box[1] == pytest.approx(C.NAME_GAP)
+
+
+def test_long_names_are_cut_in_messages():
+    long = "N" * 500
+    with pytest.raises(C.InputError) as e:
+        C.parse({"classes": [{"name": long, "left": 0, "top": 0}],
+                 "relations": [{"kind": "association", "from": long, "to": "M" * 500}]})
+    (problem,) = e.value.problems
+    assert problem.startswith("relations[0].to: 이름이 'MMM") and len(problem) < 150
 
 
 def test_name_goes_on_the_longest_segment_and_other_side_if_blocked():
@@ -396,8 +416,8 @@ def cls0(**fields):
     (cls0(left="10"), "classes[0].left: 수여야 한다(받은 값 '10')"),
     (cls0(top=True), "classes[0].top: 수여야 한다"),
     (cls0(left=float("nan")), "classes[0].left: 수여야 한다"),
-    (cls0(left=1e9), "classes[0].left: -1e+06~1e+06 사이여야 한다"),
-    (cls0(width=-5), "classes[0].width: 0~1e+06 사이여야 한다"),
+    (cls0(left=1e9), "classes[0].left: -1000000~1000000 사이여야 한다"),
+    (cls0(width=-5), "classes[0].width: 0~1000000 사이여야 한다"),
     (cls0(name="B"), "classes[1].name: classes[0]와 이름이 같다"),
     (cls0(name="  "), "classes[0].name: 비어 있다"),
     (cls0(name=3), "classes[0].name: 문자열이어야 한다"),
@@ -425,9 +445,9 @@ def cls0(**fields):
     (rel(navigable="forward"), "relations[0].navigable: 'to' · 'from' · 'both' · 'none' 가운데 하나여야 한다"),
     (rel(to="A"), "relations[0]: 자기 자신으로 가는 관계는 꺾는 점(via)이 둘 이상 있어야"),
     (rel(to="A", via=[[200, 24]]), "relations[0]: 자기 자신으로 가는 관계는 꺾는 점(via)이 둘 이상 있어야"),
-    (cls0(left=10 ** 400), "classes[0].left: -1e+06~1e+06 사이여야 한다(받은 값 1000"),
-    (cls0(left=float("inf")), "classes[0].left: -1e+06~1e+06 사이여야 한다(받은 값 inf)"),
-    (cls0(left=10 ** 5000), "classes[0].left: -1e+06~1e+06 사이여야 한다(받은 값 (아주 큰 정수))"),
+    (cls0(left=10 ** 400), "classes[0].left: -1000000~1000000 사이여야 한다(받은 값 1000"),
+    (cls0(left=float("inf")), "classes[0].left: -1000000~1000000 사이여야 한다(받은 값 inf)"),
+    (cls0(left=10 ** 5000), "classes[0].left: -1000000~1000000 사이여야 한다(받은 값 (아주 큰 정수))"),
     (cls0(attributes=[{"name": "a", "default": 10 ** 5000}]), "classes[0].attributes[0].default: 수가 너무 크다"),
     (rel(via=[[1]]), "relations[0].via[0]: [x, y]여야 한다"),
     (rel(via=[[1, "2"]]), "relations[0].via[0][1]: 수여야 한다"),

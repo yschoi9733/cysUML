@@ -4,8 +4,9 @@
 키우고(왼쪽·위는 그대로) 선 끝·다중도·이름 글자의 자리만 계산한다. 상자 안 글자 자리, 선 끝, 다중도 자리는 StarUML이
 그리는 모양을 따른 기존 규칙이다.
 
-틀린 입력은 그리기 전에 InputError로 돌려준다. 문제마다 "classes[0].left: …"처럼 입력 안의 자리를 붙이고, 한 번에
-모두 모아 알린다.
+틀린 입력은 그리기 전에 InputError로 돌려준다. 문제마다 "classes[0].left: …"처럼 입력 안의 자리를 붙인다. 읽기(parse)의
+문제를 한 번에 모두 모아 알리고, 읽기가 통과하면 자리 잡기(layout)에서 선을 그을 수 없는 문제를 한 번에 모두 모아 알린다 —
+선 끝은 상자 크기를 알아야 정해지므로 상자가 다 읽혀야 잴 수 있다.
 """
 from __future__ import annotations
 
@@ -237,7 +238,7 @@ class _Reader:
             self.fail(path, f"수여야 한다(받은 값 {_show(v)})")
             return None
         if not least <= f <= COORD_LIMIT:
-            self.fail(path, f"{least:g}~{COORD_LIMIT:g} 사이여야 한다(받은 값 {_show(v)})")
+            self.fail(path, f"{least:.0f}~{COORD_LIMIT:.0f} 사이여야 한다(받은 값 {_show(v)})")
             return None
         return f
 
@@ -292,7 +293,8 @@ class _Reader:
         return Row(f"{visibility}{name}" + (f": {type_}" if type_ else "") + (f" = {default}" if default else ""), static)
 
     def default(self, v, path: str) -> Optional[str]:
-        """속성 기본값. 문자열은 그대로, 수와 참거짓은 JSON 표기(0·0.5·true)로 쓴다."""
+        """속성 기본값. 문자열은 다른 글자처럼 비어 있지 않아야 하고(빈 문자열 값은 "\\"\\""로 쓴다), 수와 참거짓은 JSON
+        표기(0·0.5·true)로 쓴다."""
         if isinstance(v, bool):
             return "true" if v else "false"
         if isinstance(v, (int, float)):
@@ -328,8 +330,8 @@ class _Reader:
         kind = self.choice(o["kind"], _at(path, "kind"), CLASS_KINDS) if "kind" in o else "class"
         stereotype = None
         if "stereotype" in o:
-            stereotype = self.text(o["stereotype"], _at(path, "stereotype"))
-            if stereotype and (stereotype.lstrip()[:1] in "«<" or stereotype.rstrip()[-1:] in "»>"):
+            stereotype = self.text(o["stereotype"], _at(path, "stereotype"), name=True)
+            if stereotype and (stereotype[:1] in "«<" or stereotype[-1:] in "»>"):
                 self.fail(_at(path, "stereotype"), f"«» 없이 이름만 쓴다(받은 값 {_show(stereotype)})")
         literals = ()
         if "literals" in o and kind == "enum":
@@ -403,14 +405,14 @@ class _Reader:
                           f"classes[{seen[name]}]와 이름이 같다 — 관계가 이름으로 상자를 가리키므로 이름은 달라야 한다")
             else:
                 seen[name] = i
-        known = ", ".join(repr(n) for n in list(seen)[:20]) + (" …" if len(seen) > 20 else "")
+        known = ", ".join(_show(n) for n in list(seen)[:20]) + (" …" if len(seen) > 20 else "")
         relations = []
         for i, v in enumerate(self.items(o["relations"], "relations") if "relations" in o else []):
             path = _at("relations", i)
             source, target, r = self.relation(v, path)
             missing = [(key, n) for key, n in (("from", source), ("to", target)) if n is not None and n not in seen]
             for key, n in missing:
-                self.fail(_at(path, key), f"이름이 {n!r}인 상자가 없다(있는 상자: {known or '없음'})")
+                self.fail(_at(path, key), f"이름이 {_show(n)}인 상자가 없다(있는 상자: {known or '없음'})")
             if r is not None and not missing:
                 relations.append(r)
         return Diagram(tuple(c for _, c in read if c is not None), tuple(relations))
@@ -481,7 +483,7 @@ def name_spots(points: tuple[Point, ...], text: str) -> list[Point]:
     b = T.place(0, 0, text, False, "mm").box
     out = []
     for nx, ny in ((uy, -ux), (-uy, ux)):
-        reach = max(cx * nx + cy * ny for cx in (b[0], b[2]) for cy in (b[1], b[3]))
+        reach = max(-(cx * nx + cy * ny) for cx in (b[0], b[2]) for cy in (b[1], b[3]))  # 선을 마주 보는 쪽 끝까지
         out.append(((x1 + x2) / 2 + nx * (reach + NAME_GAP), (y1 + y2) / 2 + ny * (reach + NAME_GAP)))
     return out
 
@@ -582,7 +584,7 @@ def _route(r: Relation, a: T.Box, b: T.Box, path: str) -> tuple[Optional[tuple[P
     ca, cb = _center(a), _center(b)
     if r.via:
         start, end = _exit(a, ca, r.via[0]), _exit(b, cb, r.via[-1])
-        problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} 상자 {name!r}({_fmt_rect(rect)}) 안이나 "
+        problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} 상자 {_show(name)}({_fmt_rect(rect)}) 안이나 "
                     "변 위에 있다 — 상자 밖으로 옮긴다"
                     for p, rect, name, j, key in ((start, a, r.source, 0, "from"), (end, b, r.target, len(r.via) - 1, "to"))
                     if p is None]
@@ -591,7 +593,7 @@ def _route(r: Relation, a: T.Box, b: T.Box, path: str) -> tuple[Optional[tuple[P
     else:
         start, end = _exit(a, ca, cb), _exit(b, cb, ca)
         if start is None or end is None or (end[0] - start[0]) * (cb[0] - ca[0]) + (end[1] - start[1]) * (cb[1] - ca[1]) <= 0:
-            return None, [f"{path}: 상자 {r.source!r}와 {r.target!r}가 겹치거나 맞닿아 둘 사이에 선을 그을 자리가 없다 — "
+            return None, [f"{path}: 상자 {_show(r.source)}와 {_show(r.target)}가 겹치거나 맞닿아 둘 사이에 선을 그을 자리가 없다 — "
                           "떼어 놓거나 상자 밖을 도는 꺾는 점(via)을 준다"]
     assert start is not None and end is not None
     points = (start, *r.via, end)
@@ -603,7 +605,7 @@ def _route(r: Relation, a: T.Box, b: T.Box, path: str) -> tuple[Optional[tuple[P
     for key, rect, name in (("from", a, r.source),) + ((("to", b, r.target),) if r.target != r.source else ()):
         inner = _grow(rect, -EDGE_SLACK)
         if any(_hits(p, q, inner) for p, q in zip(points, points[1:])):
-            problems.append(f"{path}: 선이 {key} 상자 {name!r}({_fmt_rect(rect)}) 안을 지난다 — 꺾는 점을 그 상자 밖으로 "
+            problems.append(f"{path}: 선이 {key} 상자 {_show(name)}({_fmt_rect(rect)}) 안을 지난다 — 꺾는 점을 그 상자 밖으로 "
                             "돌린다")
     lengths = [math.dist(p, q) for p, q in zip(points, points[1:])]
     head, tail = shape_lengths(r)
@@ -673,14 +675,14 @@ def _draw_relation(c: Canvas, r: PlacedRelation) -> None:
     if kind in ("generalization", "realization"):
         c.closed_arrow(pts[-1], pts[-2], filled=False, size=TRIANGLE[0], half=TRIANGLE[1], owner=o)
     elif kind == "dependency":
-        c.open_arrow(pts[-1], pts[-2], owner=o)
+        c.open_arrow(pts[-1], pts[-2], size=ARROW, owner=o)
     else:
         if kind != "association":
-            c.diamond(pts[0], pts[1], filled=kind == "composition", owner=o)
+            c.diamond(pts[0], pts[1], filled=kind == "composition", size=DIAMOND, owner=o)
         if r.relation.navigable in ("to", "both"):
-            c.open_arrow(pts[-1], pts[-2], owner=o)
+            c.open_arrow(pts[-1], pts[-2], size=ARROW, owner=o)
         if r.relation.navigable in ("from", "both"):
-            c.open_arrow(pts[0], pts[1], owner=o)
+            c.open_arrow(pts[0], pts[1], size=ARROW, owner=o)
 
 
 def _draw_box(c: Canvas, p: PlacedBox) -> None:
