@@ -305,6 +305,18 @@ class Drawing:
 # ---------------------------------------------------------------- 입력 읽기
 
 
+def _wrapped(s: str) -> bool:
+    """s 전체가 대괄호 한 쌍에 싸였는지(첫 "["의 짝이 마지막 글자인지)."""
+    if s[:1] != "[" or s[-1:] != "]":
+        return False
+    depth = 0
+    for i, ch in enumerate(s):
+        depth += {"[": 1, "]": -1}.get(ch, 0)
+        if depth == 0:
+            return i == len(s) - 1
+    return False
+
+
 class _SeqReader(_Reader):
     def position(self, v, path: str, upper: int) -> Optional[int]:
         """messages 안의 자리(0~upper의 정수)."""
@@ -320,8 +332,9 @@ class _SeqReader(_Reader):
         return v
 
     def condition(self, v, path: str) -> Optional[str]:
+        """조건 글자. 도구가 대괄호를 씌우므로, 전체를 감싼 대괄호는 받지 않는다(안쪽 대괄호 "[x] or [y]"는 받는다)."""
         s = self.text(v, path)
-        if s is not None and s[:1] == "[" and s[-1:] == "]":
+        if s is not None and _wrapped(s):
             self.fail(path, f"대괄호 없이 조건만 쓴다(받은 값 {_show(s)})")
             return None
         return s
@@ -507,6 +520,7 @@ class _Bar:
     terms: set = field(default_factory=set)
     protected: bool = False
     top_off: float = 0.0  # 윗변 = top번째 일의 높이 + top_off(alt 칸 나눔선 아래에서 이어지는 막대만 0이 아니다)
+    parent: Optional[_Bar] = None  # 이 막대를 연 호출을 보낸 막대 — 닫을 때 밑변을 넘겨받는다
     depth: int = 0
     last: int = 0  # terms 가운데 가장 늦은 일의 차례(다 놓인 뒤에야 밑변이 정해진다)
 
@@ -523,18 +537,18 @@ def _ends_after(bar: _Bar, e: int) -> bool:
 
 
 class _Activations:
-    """막대를 잇는 규칙(기존 코드와 같다).
+    """막대를 잇는 규칙.
 
     - 액터가 아닌 생명선을 부르면 그 생명선에 막대를 연다. 열린 막대는 부른 순서대로 쌓인다.
     - 보내는 생명선에 열린 막대가 있으면 그 위에 쌓인 막대(그가 부른 쪽)를 닫는다. 액터가 보내거나, 열린 막대가 없는
       생명선이 보내면 열린 막대를 모두 닫는다(열린 막대가 없는 생명선은 그 자리에서 막대를 연다). 반환은 막대 없이 보내도
       다른 막대를 닫지 않는다 — 받는 쪽이 기다리던 막대가 끊기지 않게.
-    - 반환은 보내는 막대를 그 높이에서 닫는다. 받는 생명선에 열린 막대가 있으면 그 위를 닫고 잇고, 없으면 그 자리에서
-      연다(다른 막대는 닫지 않는다).
+    - 반환은 보내는 막대(와 그 위에 남은 막대)를 그 높이에서 닫는다. 받는 생명선에 열린 막대가 있으면 그 위를 닫고 잇고,
+      없으면 그 자리에서 연다(다른 막대는 닫지 않는다).
     - 액터가 받는 호출은 높이 ACT_H로 그린다. 만드는 메시지는 막대를 만들지 않는다.
-    닫는 막대의 밑변은 "윗변 + ACT_H"와 그 막대가 마지막으로 주고받은 높이 가운데 아래쪽이고, 그 위에 쌓였던 막대보다는
-    아래다. 위 막대가 메시지 높이에서 끝났으면 아래 막대는 그보다 CLEAR만큼 더 잇는다 — 그 메시지 선이 아래 막대 생명선을
-    지날 때 선이 막대 밑변을 따라가지 않게(그 밑변은 메시지 높이와 같이 움직여 메시지를 내려서는 못 비킨다).
+    닫는 막대의 밑변은 "윗변 + ACT_H"와 그 막대가 마지막으로 주고받은 높이 가운데 아래쪽이고, 그 막대가 부른 막대보다는
+    아래다. 부른 막대가 메시지 높이에서 끝났으면 그보다 CLEAR만큼 더 잇는다 — 그 메시지 선이 이 막대 생명선을 지날 때 선이
+    막대 밑변을 따라가지 않게(그 밑변은 메시지 높이와 같이 움직여 메시지를 내려서는 못 비킨다).
 
     프레임 규칙: 프레임 첫 메시지가 닫을 막대는 프레임 앞에서 닫는다. 그때 남아 열려 있던 막대는 부른 쪽이 메시지를 보내도
     프레임 안에서 닫지 않고(protected) 프레임 밑변 아래까지 잇는다 — 그런 막대의 밑변은 막대 높이로만 정해져 프레임 윗변
@@ -549,9 +563,9 @@ class _Activations:
         self.bars: list[_Bar] = []
         self.kept: list[_Bar] = []  # 지금 프레임이 열릴 때 열려 있던 막대(쌓인 차례대로, alt는 지금 칸에서 잇는 막대)
 
-    def open(self, life: int, e: int, fixed: bool = False) -> _Bar:
+    def open(self, life: int, e: int, fixed: bool = False, parent: Optional[_Bar] = None) -> _Bar:
         """막대를 연다. fixed(액터가 받는 호출)면 높이 ACT_H로 끝나 쌓지 않는다."""
-        b = _Bar(life, e, {(e, ACT_H)})
+        b = _Bar(life, e, {(e, ACT_H)}, parent=parent)
         self.bars.append(b)
         if not fixed:
             self.stack.append(b)
@@ -561,10 +575,9 @@ class _Activations:
         return next((b for b in reversed(self.stack) if b.life == life), None)
 
     def _close(self, b: _Bar) -> None:
-        i = next(k for k, x in enumerate(self.stack) if x is b)
-        del self.stack[i]
-        if i:
-            self.stack[i - 1].terms |= {(j, off or CLEAR) for j, off in b.terms}
+        self.stack.remove(b)
+        if b.parent is not None and b.parent in self.stack:
+            b.parent.terms |= {(j, off or CLEAR) for j, off in b.terms}
 
     def close_above(self, b: _Bar) -> None:
         i = next(k for k, x in enumerate(self.stack) if x is b)
@@ -586,6 +599,11 @@ class _Activations:
         d = None
         if kind == "reply":
             if s is not None:
+                # 위에 남은 것은 프레임이 지키던 막대뿐이다(나머지는 send_from이 닫았다). 부른 쪽이 반환하면 함께 끝나고,
+                # 이 반환 선이 그 생명선을 지날 수 있어 선 아래로 CLEAR만큼 잇는다
+                for x in reversed(self.stack[self.stack.index(s) + 1:]):
+                    self._close(x)
+                    x.terms.add((e, CLEAR))
                 self._close(s)  # 반환 높이는 부모에게 넘기지 않는다 — 건너뛰는 반환이 사이 막대 끝을 선 위에 두지 않게
                 s.terms.add((e, 0))
             if not dst_actor:
@@ -599,7 +617,7 @@ class _Activations:
             if s is not None:
                 s.terms.add((e, 0))
             if kind == "call":
-                d = self.open(dst, e, fixed=dst_actor)
+                d = self.open(dst, e, fixed=dst_actor, parent=s)
         return s, d
 
     def send_from(self, src: int, kind: str, src_actor: bool) -> Optional[_Bar]:
@@ -623,10 +641,13 @@ class _Activations:
         """alt 칸 나눔: 앞 칸에서 연 막대를 닫고, 프레임이 열릴 때의 막대로 돌아간다. 앞 칸에서 반환해 끝난 막대는 이 칸에서
         이어 가는 막대를 새로 연다."""
         self.close_all()  # 남는 것은 지킨 막대뿐이고, 쌓인 차례는 kept와 같다
+        now: dict[int, _Bar] = {}  # 바꾼 막대 → 이 칸에서 잇는 막대
         for i, b in enumerate(self.kept):
             if b not in self.stack:
-                self.kept[i] = _Bar(b.life, e, {(e, EDGE_CLEAR)}, protected=True, top_off=EDGE_CLEAR)
+                parent = now.get(id(b.parent), b.parent) if b.parent is not None else None
+                self.kept[i] = _Bar(b.life, e, {(e, EDGE_CLEAR)}, protected=True, top_off=EDGE_CLEAR, parent=parent)
                 self.bars.append(self.kept[i])
+                now[id(b)] = self.kept[i]
         self.stack = list(self.kept)
 
     def frame_end(self, e: int) -> None:
@@ -711,12 +732,14 @@ def _plan(d: Diagram) -> _Plan:
             acts.ref(e)
     acts.close_all()
     bars = acts.bars
-    # 감싸는 막대는 먼저 시작한 막대다. 같은 칸 나눔에서 함께 이어 가는 막대는 높이가 같아, 먼저 연(아래에 쌓인) 막대를 앞으로 친다
+    # 깊이는 이 막대가 시작할 때 아직 열려 있는 같은 생명선 막대 가운데 가장 깊은 것 + 1이다 — 시간이 겹치는 막대끼리 깊이가
+    # 늘 달라 옆으로 비켜 그려진다. 같은 칸 나눔에서 함께 이어 가는 막대는 높이가 같아, 먼저 연(아래에 쌓인) 막대를 앞으로 친다
     order = {id(b): i for i, b in enumerate(bars)}
     for b in bars:
         b.last = max(j for j, _ in b.terms)
-        b.depth = sum(1 for o in bars if o.life == b.life and (o.top, order[id(o)]) < (b.top, order[id(b)])
-                      and _ends_after(o, b.top))
+    for b in sorted(bars, key=lambda b: (b.top, order[id(b)])):
+        b.depth = max((o.depth + 1 for o in bars if o.life == b.life and (o.top, order[id(o)]) < (b.top, order[id(b)])
+                       and _ends_after(o, b.top)), default=0)
     created = {index[m.target]: k for k, m in enumerate(d.messages) if m.kind == "create"}
     spanning = []
     for k, m in enumerate(d.messages):
@@ -749,7 +772,7 @@ def _label_lines(m: Message) -> list[str]:
 
 
 def _label_below(m: Message, rightward: bool) -> bool:
-    """오른쪽으로 가는 호출·만드는 메시지는 글자를 선 위에, 왼쪽으로 가는 메시지와 반환은 선 아래에 쓴다(기존 코드와 같다)."""
+    """오른쪽으로 가는 호출·만드는 메시지는 글자를 선 위에, 왼쪽으로 가는 메시지와 반환은 선 아래에 쓴다."""
     return m.kind == "reply" or not rightward
 
 

@@ -311,6 +311,29 @@ def test_bar_kept_through_a_branch_that_does_not_use_it_goes_on_after_the_alt():
     assert b.top <= late.y == b.bottom and late.start == b.rect[0]
 
 
+def test_bar_opened_by_a_reply_hands_its_end_only_to_its_caller():
+    # D는 반환을 받아 막대를 연다(부른 막대가 없다). 그 막대가 닫힐 때 스택 아래의 B를 늘리지 않는다
+    lay = lay_of(life("A", "B", "C", "D", "E"),
+                 [call("A", "B", "f"), reply("C", "D", "r"), call("D", "E", "f"), call("D", "E", "f"), call("D", "E", "f"),
+                  call("A", "B", "f")])
+    first_b = bars_of(lay, "B")[0]
+    assert first_b.bottom == lay.messages[0].y + S.ACT_H
+
+
+def test_callee_kept_by_a_frame_ends_when_its_caller_returns():
+    messages = [call("U", "A", "f"), call("A", "B", "f"), call("B", "C", "f"), reply("C", "B"), reply("A", "U")]
+    lay = lay_of(life("U", "A", "B", "C", actor=("U",)), messages, frames=[{"kind": "loop", "first": 2, "last": 4}])
+    (a,), (b,) = bars_of(lay, "A"), bars_of(lay, "B")
+    assert a.bottom == lay.messages[4].y and b.bottom <= lay.messages[4].y + S.CLEAR
+    assert rule_breaks(lay) == []
+
+
+def test_brackets_inside_a_condition_are_kept():
+    d = S.parse({"participants": life("A", "B"), "messages": [call("A", "B")],
+                 "frames": [{"kind": "opt", "first": 0, "last": 0, "condition": "[x] or [y]"}]})
+    assert d.fragments[0].branches[0].condition == "[x] or [y]"
+
+
 def test_reply_to_a_lifeline_without_a_bar_keeps_other_bars():
     lay = lay_of(life("A", "B", "C", "D"), [call("A", "B"), call("B", "C"), reply("C", "D", "r"), reply("B", "A")])
     (a,), (b,) = bars_of(lay, "A"), bars_of(lay, "B")
@@ -492,7 +515,7 @@ def attached(m, b, x):
 
 
 def rule_breaks(lay):
-    """기존 코드의 배치 테스트(그린 기록을 읽어 보던 규칙)를 배치 결과로 본다. 걸린 것을 글로 돌려준다."""
+    """교류도 배치 규칙(설계 #1 "검사"의 교류도 항목과 그 밖의 겹침)을 배치 결과로 본다. 걸린 것을 글로 돌려준다."""
     out = []
     labels = [(m.owner, lab.box) for m in lay.messages for lab in m.labels]
     conds = [(f.owner, lab.box) for f in lay.frames for lab in f.conditions]
@@ -527,7 +550,8 @@ def rule_breaks(lay):
     for f in [*lay.frames, *lay.refs]:
         for b in lay.bars:
             over_top, over_bottom = b.top < f.top < b.bottom, b.top < f.bottom < b.bottom
-            returns = any(m.message.kind == "reply" and m.y == b.bottom and attached(m, b, m.start) for m in lay.messages)
+            # 프레임 안 메시지에서 끝나는 막대(그 생명선이나 부른 쪽이 반환했다)는 윗변을 건너도 짧게 잘린 꼴이 아니다
+            returns = any(f.top < m.y < f.bottom and 0 <= b.bottom - m.y <= S.CLEAR for m in lay.messages)
             goes_on = any(b.top == y + S.EDGE_CLEAR for y in getattr(f, "dividers", ()))  # 앞 칸에서 반환한 막대를 이어 간다
             if over_bottom and not over_top and not goes_on or over_top and not over_bottom and not returns:
                 out.append(f"{f.owner}가 {b.owner} 막대를 자른다")
@@ -564,6 +588,12 @@ def test_random_inputs_keep_the_layout_rules(seed):
     data = random_diagram(seed)
     lay = S.layout(S.parse(data))
     assert rule_breaks(lay) == [], data
+
+
+@pytest.mark.parametrize("seed", [1422, 2819, 6427])
+def test_random_inputs_that_once_broke_the_rules(seed):
+    # 400 밖에서 겹친 막대 깊이가 같게 나오던 입력(alt 칸에서 이어 가는 막대·반환으로 연 막대가 겹친다)
+    assert rule_breaks(S.layout(S.parse(random_diagram(seed)))) == []
 
 
 def test_random_inputs_cover_the_interesting_cases():
