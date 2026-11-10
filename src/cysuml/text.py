@@ -31,7 +31,8 @@ Box = tuple[float, float, float, float]
 @lru_cache(maxsize=2)
 def _codepoints(korean: bool) -> frozenset[int]:
     """그 글꼴에 있는 글자. 보통과 굵게의 글자 목록은 같다(테스트가 확인한다)."""
-    return frozenset(TTFont(str(FONT_DIR / _FILES[korean, False]), lazy=True).getBestCmap())
+    with TTFont(str(FONT_DIR / _FILES[korean, False]), lazy=True) as f:
+        return frozenset(f.getBestCmap())
 
 
 def is_korean(ch: str) -> bool:

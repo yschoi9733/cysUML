@@ -36,10 +36,15 @@ def test_fonts_come_from_the_package():
     assert (T.FONT_DIR / "NotoSansKR-LICENSE.txt").is_file()
 
 
+def cmap(name):
+    with TTFont(str(T.FONT_DIR / name), lazy=True) as f:
+        return set(f.getBestCmap())
+
+
 @pytest.mark.parametrize("ch", ["가", "힣", "ㄱ", "ᄀ", "漢", "。", "（", "㈜", "※", "①", "★", "◆", "⇒", "℃", "✓"])
 def test_characters_missing_from_liberation_use_noto(ch):
     assert T.is_korean(ch)
-    assert ord(ch) in TTFont(str(T.FONT_DIR / "NotoSansKR-Regular.otf"), lazy=True).getBestCmap()
+    assert ord(ch) in cmap("NotoSansKR-Regular.otf")
 
 
 @pytest.mark.parametrize("ch", ["A", "z", "0", " ", "«", "»", "·", "…", "→", "é", "_"])
@@ -50,9 +55,7 @@ def test_latin_font_characters(ch):
 def test_regular_and_bold_cover_the_same_characters():
     for regular, bold in (("LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf"),
                           ("NotoSansKR-Regular.otf", "NotoSansKR-Bold.otf")):
-        a = TTFont(str(T.FONT_DIR / regular), lazy=True).getBestCmap()
-        b = TTFont(str(T.FONT_DIR / bold), lazy=True).getBestCmap()
-        assert set(a) == set(b)
+        assert cmap(regular) == cmap(bold)
 
 
 def test_split_runs():

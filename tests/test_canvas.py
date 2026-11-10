@@ -38,10 +38,11 @@ def test_shapes_are_recorded_in_logical_coordinates():
     diamond = rec[4]
     assert isinstance(diamond, Polygon) and diamond.fill == "white"
     assert flat(diamond.points) == pytest.approx(flat([(120, 50), (129, 56), (138, 50), (129, 44)]))
-    heads = rec[5:7]
-    assert all(isinstance(h, Line) and h.points[0] == (120, 150) for h in heads)
-    assert all(math.dist(*h.points) == pytest.approx(10) for h in heads)
-    assert rec[7] == Ellipse(240, 20, 12, 12)
+    head = rec[5]
+    assert isinstance(head, Line) and len(head.points) == 3 and head.points[1] == (120, 150)
+    assert math.dist(head.points[0], head.points[1]) == pytest.approx(10)
+    assert math.dist(head.points[2], head.points[1]) == pytest.approx(10)
+    assert rec[6] == Ellipse(240, 20, 12, 12)
     assert rec[-1] == Mask(60, 145, 70, 155)
 
 
@@ -119,7 +120,25 @@ def test_text_record_keeps_its_placement_and_normalized_text():
     r = c.records[-1]
     assert r.text == "주문 Order"
     assert r.placement == T.place(10, 20, "주문 Order", anchor="mm") and r.box == r.placement.box
-    assert Text(10, 20, "주문 Order", False, "mm").placement == r.placement  # 손으로 만든 기록도 놓인다
+    hand = Text(10, 20, unicodedata.normalize("NFD", "주문 Order"), False, "mm")  # 손으로 만든 기록도 모으고 놓는다
+    assert hand.text == "주문 Order" and hand.placement == r.placement
+
+
+def test_bg_flag_is_recorded_as_bool():
+    c = Canvas()
+    c.text(0, 0, "a", bg=0)
+    c.text(0, 20, "b", bg=1)
+    assert [r.bg for r in c.records if isinstance(r, Text)] == [False, True]
+
+
+@pytest.mark.parametrize("scale", [0.25, 0.75, 1.6])
+def test_zero_size_boxes_render_at_any_scale(scale):
+    c = Canvas(scale)
+    c.rect(10, 10, 0, 10)
+    c.ellipse(20, 10, 0, 0)
+    c.rect(30, 10, 5, 5)
+    c.erase(31, 11, 31, 11)
+    c.to_image()
 
 
 def test_bends_are_joined_round_in_solid_and_dashed_lines():
@@ -242,6 +261,9 @@ def test_box_outline_coordinates_are_rounded_to_centre_the_border():
     painter = _Painter(Image.new("L", (1, 1)), 0, 0, 6.4)
     assert painter.lw == 6
     assert painter._outlined(10, 10, 40, 20) == [(61, 61), (322, 194)]
+    thin = _Painter(Image.new("L", (1, 1)), 0, 0, 1)
+    assert thin._outlined(12, 12, 0, 0) == [(12, 12), (12, 12)]  # round()였으면 (12, 12)~(11, 11)로 뒤집힌다
+    assert thin._pixels(10.5, 2.5, 13.5, 4.5) == [(11, 3), (13, 4)]
 
 
 def test_self_crossing_polygon_is_accepted():

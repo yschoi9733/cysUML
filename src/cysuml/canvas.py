@@ -80,6 +80,7 @@ class Text:
     placement: T.Placement = field(default=None, compare=False, repr=False)  # type: ignore[assignment]
 
     def __post_init__(self):
+        object.__setattr__(self, "text", T.normalize(self.text))
         if self.placement is None:
             object.__setattr__(self, "placement", T.place(self.x, self.y, self.text, self.bold, self.anchor))
 
@@ -211,7 +212,7 @@ class Canvas:
         bold = bool(bold)
         s = T.normalize(s)
         placed = T.place(x, y, s, bold, anchor)
-        laid = bg and placed.ink is not None
+        laid = bool(bg) and placed.ink is not None
         if laid:
             l, t, r, b = placed.ink
             self.erase(l - BG_MARGIN, t - BG_MARGIN, r + BG_MARGIN, b + BG_MARGIN, owner=owner)
@@ -224,15 +225,18 @@ class Canvas:
 
     def open_arrow(self, tip: Point, frm: Point, size: float = 10, spread: float = math.radians(28),
                    owner: Optional[str] = None) -> None:
-        """frm에서 tip으로 가는 선 끝의 열린 화살촉(두 갈래 선). spread는 선과 갈래 사이 각(라디안, 직각 미만)이다."""
+        """frm에서 tip으로 가는 선 끝의 열린 화살촉. 갈래 끝 → tip → 갈래 끝의 꺾은선 하나로 기록해 tip을 둥글게 잇는다.
+        spread는 선과 갈래 사이 각(라디안, 직각 미만)이다."""
         tip, c, s, (size, spread) = _head(tip, frm, size, spread)
         if spread >= math.pi / 2:
             raise ValueError(f"화살촉 갈래 각은 직각보다 작아야 한다: {spread}")
-        arms = []
+        ends = []
         for turn in (-spread, spread):
             ct, st = math.cos(turn), math.sin(turn)
-            arms.append(_line([tip, (tip[0] + size * (c * ct - s * st), tip[1] + size * (s * ct + c * st))], None, owner))
-        self.records.extend(arms)
+            ends.append((tip[0] + size * (c * ct - s * st), tip[1] + size * (s * ct + c * st)))
+        if tip in ends:
+            raise ValueError(f"화살촉 갈래 길이가 0이다: {size}")
+        self.records.append(_line([ends[0], tip, ends[1]], None, owner))
 
     def closed_arrow(self, tip: Point, frm: Point, filled: bool = True, size: float = 10, half: float = 4.5,
                      owner: Optional[str] = None) -> None:
@@ -316,12 +320,17 @@ class _Painter:
     def _p(self, p: Point) -> Point:
         return (p[0] - self.minx) * self.k, (p[1] - self.miny) * self.k
 
+    def _pixels(self, x0: float, y0: float, x1: float, y1: float) -> list[tuple[int, int]]:
+        # Pillow 상자는 좌표를 정수로 자르고 오른쪽·아래 끝 픽셀을 포함한다. [x0, x1) 범위를 칠하게 반올림해 넘긴다
+        # (round()는 .5를 짝수로 보내 끝이 앞보다 작아질 수 있어 늘 올림 쪽으로 반올림한다).
+        l, t = math.floor(x0 + 0.5), math.floor(y0 + 0.5)
+        return [(l, t), (max(l, math.floor(x1 + 0.5) - 1), max(t, math.floor(y1 + 0.5) - 1))]
+
     def _outlined(self, left: float, top: float, width: float, height: float) -> list[tuple[int, int]]:
-        # Pillow는 상자 테두리를 안쪽으로 칠하고, 좌표를 정수로 자르며 오른쪽·아래 끝을 포함한다. 반 획씩 넓히고 반올림해
-        # 선과 같이 변 가운데로 칠하게 한다.
+        # Pillow는 상자 테두리를 안쪽으로 칠한다. 반 획씩 넓혀 선과 같이 변 가운데로 칠하게 한다.
         (x0, y0), (x1, y1) = self._p((left, top)), self._p((left + width, top + height))
         h = self.lw / 2
-        return [(round(x0 - h), round(y0 - h)), (round(x1 + h) - 1, round(y1 + h) - 1)]
+        return self._pixels(x0 - h, y0 - h, x1 + h, y1 + h)
 
     def _stroke(self, pts: list[Point], closed: bool = False) -> None:
         # Pillow의 joint="curve"는 굵기 4px 이하에서 꺼진다. 이음은 꺾는 점마다 획 굵기의 점을 찍어 직접 둥글게 한다.
@@ -350,7 +359,7 @@ class _Painter:
             elif isinstance(r, Text):
                 self.text(r)
             elif isinstance(r, Mask):
-                self.d.rectangle([self._p((r.left, r.top)), self._p((r.right, r.bottom))], fill="white")
+                self.d.rectangle(self._pixels(*self._p((r.left, r.top)), *self._p((r.right, r.bottom))), fill="white")
             else:
                 raise TypeError(f"그릴 줄 모르는 기록이다: {r!r}")
 
@@ -373,10 +382,15 @@ class _Painter:
             (x1, y1), (x2, y2) = r.points[i], r.points[i + 1]
             return x1 + (x2 - x1) * t, y1 + (y2 - y1) * t
 
-        k = 0
+        k, j = 0, 1  # j: 아직 지나지 않은 첫 꺾는 점. 칸이 앞으로만 가므로 되돌아가 훑지 않는다.
         while k * period < total:
             a, b = k * period, min(k * period + on, total)
-            bends = [r.points[i] for i in range(1, len(done) - 1) if a < done[i] < b]
+            while j < len(done) - 1 and done[j] <= a:
+                j += 1
+            bends, i = [], j
+            while i < len(done) - 1 and done[i] < b:
+                bends.append(r.points[i])
+                i += 1
             self._stroke([self._p(p) for p in [at(a), *bends, at(b)]])
             k += 1
 
