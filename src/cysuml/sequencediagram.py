@@ -545,7 +545,8 @@ class _Activations:
       다른 막대를 닫지 않는다 — 받는 쪽이 기다리던 막대가 끊기지 않게.
     - 반환은 보내는 막대(와 그 위에 남은 막대)를 그 높이에서 닫는다. 받는 생명선에 열린 막대가 있으면 그 위를 닫고 잇고,
       없으면 그 자리에서 연다(다른 막대는 닫지 않는다).
-    - 액터가 받는 호출은 높이 ACT_H로 그린다. 만드는 메시지는 막대를 만들지 않는다.
+    - 액터가 받는 호출은 높이 ACT_H로 그리고 쌓지 않는다. 그 액터가 다른 메시지를 보내기 전에 대답(반환)하거나 반환을 받으면
+      그 막대를 그 높이까지 잇는다. 만드는 메시지는 막대를 만들지 않는다.
     닫는 막대의 밑변은 "윗변 + ACT_H"와 그 막대가 마지막으로 주고받은 높이 가운데 아래쪽이고, 그 막대가 부른 막대보다는
     아래다. 부른 막대가 메시지 높이에서 끝났으면 그보다 CLEAR만큼 더 잇는다 — 그 메시지 선이 이 막대 생명선을 지날 때 선이
     막대 밑변을 따라가지 않게(그 밑변은 메시지 높이와 같이 움직여 메시지를 내려서는 못 비킨다).
@@ -565,14 +566,25 @@ class _Activations:
         self.bars: list[_Bar] = []
         self.kept: list[_Bar] = []    # 지금 프레임이 열릴 때 열려 있던 막대(쌓인 차례대로, alt는 지금 칸에서 잇는 막대)
         self.ended: list[bool] = []   # kept 자리마다, 앞 칸에서 반환한 적이 있는지
+        self.frame_top = 0            # 지금 프레임 윗변의 일 차례
+        self.called: dict[int, _Bar] = {}  # 액터 → 아직 대답하지 않은 마지막 호출의 막대
 
     def open(self, life: int, e: int, fixed: bool = False, parent: Optional[_Bar] = None) -> _Bar:
-        """막대를 연다. fixed(액터가 받는 호출)면 높이 ACT_H로 끝나 쌓지 않는다."""
+        """막대를 연다. fixed(액터가 받는 호출)면 높이 ACT_H로 쌓지 않고, 부른 막대를 그만큼 잇는다(부른 쪽이 먼저 끝나지
+        않게). 그 액터가 대답하면 그 막대에서 나가 대답까지 잇는다."""
         b = _Bar(life, e, {(e, ACT_H)}, parent=parent)
         self.bars.append(b)
         if not fixed:
             self.stack.append(b)
+        else:
+            self.called[life] = b
+            if parent is not None:
+                parent.terms.add((e, ACT_H))
         return b
+
+    def _forget_calls_inside(self) -> None:
+        """프레임(칸) 안에서 부른 액터 막대는 그 밖의 대답에 잇지 않는다 — 막대가 프레임 선을 한쪽만 건너지 않게."""
+        self.called = {k: b for k, b in self.called.items() if b.top < self.frame_top}
 
     def find(self, life: int) -> Optional[_Bar]:
         return next((b for b in reversed(self.stack) if b.life == life), None)
@@ -597,11 +609,16 @@ class _Activations:
                 ) -> tuple[Optional[_Bar], Optional[_Bar]]:
         """메시지 하나를 넣고 (선이 시작하는 막대, 화살촉이 닿는 막대)를 돌려준다. 막대가 없는 끝은 None이다."""
         s = self.send_from(src, kind, src_actor)
-        if s is None and not src_actor and kind != "reply":
+        if src_actor:
+            answered = self.called.pop(src, None)
+            if kind == "reply" and answered is not None:  # 불린 액터가 대답한다
+                s = answered
+                s.terms.add((e, 0))
+        elif s is None and kind != "reply":
             s = self.open(src, e)
         d = None
         if kind == "reply":
-            if s is not None:
+            if s is not None and s in self.stack:
                 # 위에 남은 것은 프레임이 지키던 막대뿐이다(나머지는 send_from이 닫았다). 부른 쪽이 반환하면 함께 끝나고,
                 # 이 반환 선이 그 생명선을 지날 수 있어 선 아래로 CLEAR만큼 잇는다
                 for x in reversed(self.stack[self.stack.index(s) + 1:]):
@@ -609,7 +626,11 @@ class _Activations:
                     x.terms.add((e, CLEAR))
                 self._close(s)  # 반환 높이는 부모에게 넘기지 않는다 — 건너뛰는 반환이 사이 막대 끝을 선 위에 두지 않게
                 s.terms.add((e, 0))
-            if not dst_actor:
+            if dst_actor:
+                d = self.called.get(dst)  # 대답을 기다리는 액터로 들어오는 반환은 그 막대에 닿는다
+                if d is not None:
+                    d.terms.add((e, 0))
+            else:
                 d = self.find(dst)
                 if d is not None:
                     self.close_above(d)
@@ -633,18 +654,20 @@ class _Activations:
             self.close_all()
         return s
 
-    def frame_start(self, src: int, kind: str, src_actor: bool) -> None:
+    def frame_start(self, src: int, kind: str, src_actor: bool, e: int) -> None:
         """프레임 첫 메시지가 닫을 막대는 프레임 앞에서 닫고, 남은 막대를 프레임 끝까지 지킨다."""
         self.send_from(src, kind, src_actor)
         for b in self.stack:
             b.protected = True
         self.kept = list(self.stack)
         self.ended = [False] * len(self.kept)
+        self.frame_top = e
 
     def branch(self, e: int) -> None:
         """alt 칸 나눔: 앞 칸에서 연 막대를 닫고, 프레임이 열릴 때의 막대로 돌아간다. 앞 칸에서 반환해 끝난 막대는 이 칸에서
         이어 가는 막대를 새로 연다."""
         self.close_all()  # 남는 것은 지킨 막대뿐이고, 쌓인 차례는 kept와 같다
+        self._forget_calls_inside()
         now: dict[int, _Bar] = {}  # 바꾼 막대 → 이 칸에서 잇는 막대
         for i, b in enumerate(self.kept):
             if b not in self.stack:
@@ -657,6 +680,7 @@ class _Activations:
 
     def frame_end(self, e: int) -> None:
         self.close_all()
+        self._forget_calls_inside()
         for i in reversed(range(len(self.kept))):
             b = self.kept[i]
             b.protected = False
@@ -734,7 +758,7 @@ def _plan(d: Diagram) -> _Plan:
         elif ev.kind == "start":
             m = d.messages[d.fragments[ev.item].first]
             s = index[m.source]
-            acts.frame_start(s, m.kind, actor[s])
+            acts.frame_start(s, m.kind, actor[s], e)
         elif ev.kind == "branch":
             acts.branch(e)
         elif ev.kind == "end":
@@ -1064,7 +1088,8 @@ class _Placer:
                                            tuple(Label(text, x, y + dy) for text, x, dy in labels_rel)))
 
     def _edge(self, e: int) -> float:
-        return max(self.floor + FRAME_GAP, self._closed_bottom(e) + EDGE_CLEAR)
+        """프레임·칸·ref의 가로 선 높이. 맨 처음 일이어도 그 안 첫 메시지가 FIRST보다 위로 가지 않게 한다."""
+        return max(self.floor + FRAME_GAP, self._closed_bottom(e) + EDGE_CLEAR, FIRST - FRAME_HEAD)
 
     def start(self, e: int, f: Fragment) -> None:
         y = self._edge(e)

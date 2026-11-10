@@ -232,6 +232,26 @@ def test_deeply_nested_bars_stay_inside_the_frame():
     assert max(b.rect[2] for b in lay.bars) < f.right
 
 
+def test_caller_of_an_actor_lasts_as_long_as_the_actors_bar():
+    lay = lay_of(life("U", "A", "V", actor=("U", "V")), [call("U", "A", "go()"), call("A", "V", "ask()"), call("U", "A", "again()")])
+    a = bars_of(lay, "A")[0]
+    (v,) = bars_of(lay, "V")
+    assert a.bottom >= v.bottom
+
+
+def test_called_actor_answers_from_its_bar():
+    lay = lay_of(life("A", "V", actor=("V",)), [call("A", "V", "ask()"), reply("V", "A", "ans")])
+    (v,) = bars_of(lay, "V")
+    m = lay.messages[1]
+    assert m.start == v.rect[0] and v.bottom == m.y
+
+
+def test_frame_first_keeps_the_first_message_at_its_usual_height():
+    plain = lay_of(life("A", "B"), [call("A", "B", "x")])
+    framed = lay_of(life("A", "B"), [call("A", "B", "x")], frames=[{"kind": "loop", "first": 0, "last": 0}])
+    assert framed.messages[0].y >= plain.messages[0].y == S.FIRST
+
+
 def test_actor_gets_a_short_bar_only_when_called():
     lay = lay_of(life("U", "A", actor=("U",)), [call("U", "A"), call("A", "U", "show()"), reply("A", "U")])
     (u,) = bars_of(lay, "U")
