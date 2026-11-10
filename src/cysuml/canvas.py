@@ -17,6 +17,7 @@ SCALE = 1.6
 SS = 4
 PAD = 12
 BG_MARGIN = 2
+MAX_PIXELS = 150_000_000  # SS배로 그리는 그림판의 픽셀 수 상한(회색조라 1픽셀 1바이트). 기본 배율에서 논리 약 1900×1900
 
 Point = tuple[float, float]
 Box = T.Box
@@ -96,8 +97,23 @@ def _points(pts: Iterable[Point], least: int) -> tuple[Point, ...]:
     return out
 
 
+def _size(width: float, height: float) -> None:
+    if width < 0 or height < 0:
+        raise ValueError(f"크기가 음수다: {width}×{height}")
+
+
+def _direction(tip: Point, frm: Point) -> tuple[float, float]:
+    """tip에서 frm으로 가는 단위 벡터."""
+    dx, dy = frm[0] - tip[0], frm[1] - tip[1]
+    n = math.hypot(dx, dy)
+    if n == 0:
+        raise ValueError(f"선 끝 장식의 방향을 정할 수 없다(두 점이 같다): {tip}")
+    return dx / n, dy / n
+
+
 class Canvas:
-    """box(왼, 위, 오른, 아래)는 그릴 논리 좌표 범위다. 결과는 그린 곳 둘레로 잘라 내므로 넉넉해도 된다."""
+    """box(왼, 위, 오른, 아래)는 그릴 논리 좌표 범위다. 결과는 그린 곳 둘레로 잘라 내지만, 그림판은 이 범위 전체를
+    SS×scale배로 잡으므로 그린 것에 맞춰 준다(MAX_PIXELS를 넘으면 ValueError)."""
 
     def __init__(self, box: Box, scale: float = SCALE):
         minx, miny, maxx, maxy = box
@@ -106,7 +122,10 @@ class Canvas:
         self.minx, self.miny = minx, miny
         self.scale = scale
         self.k = scale * SS
-        self.img = Image.new("L", (math.ceil((maxx - minx) * self.k), math.ceil((maxy - miny) * self.k)), 255)
+        size = (math.ceil((maxx - minx) * self.k), math.ceil((maxy - miny) * self.k))
+        if size[0] * size[1] > MAX_PIXELS:
+            raise ValueError(f"그림이 너무 크다: 논리 {maxx - minx:g}×{maxy - miny:g}, 배율 {scale:g}")
+        self.img = Image.new("L", size, 255)
         self.d = ImageDraw.Draw(self.img)
         self.lw = max(1, round(self.k))
         self.records: list[Record] = []
@@ -137,12 +156,14 @@ class Canvas:
 
     def rect(self, left: float, top: float, width: float, height: float, fill: Optional[str] = "white",
              owner: Optional[str] = None) -> None:
+        _size(width, height)
         self.records.append(Rect(left, top, width, height, fill, owner))
         self.d.rectangle([self._p((left, top)), self._p((left + width, top + height))], outline="black", width=self.lw,
                          fill=fill)
 
     def ellipse(self, left: float, top: float, width: float, height: float, fill: Optional[str] = "white",
                 owner: Optional[str] = None) -> None:
+        _size(width, height)
         self.records.append(Ellipse(left, top, width, height, fill, owner))
         self.d.ellipse([self._p((left, top)), self._p((left + width, top + height))], outline="black", width=self.lw,
                        fill=fill)
@@ -160,26 +181,29 @@ class Canvas:
             l, t, r, b = placed.ink
             self.erase(l - BG_MARGIN, t - BG_MARGIN, r + BG_MARGIN, b + BG_MARGIN, owner=owner)
         self.records.append(Text(x, y, s, bold, anchor, placed.box, bg, masked, owner))
-        for left, part, korean in placed.runs:
-            self.d.text(self._p((left, placed.baseline)), part, fill="black", font=T.font(korean, bold, T.SIZE * self.k),
-                        anchor="ls")
+        # 조각째 그리면 이 크기에서 힌팅으로 반올림된 글자 폭이 쌓여 기록한 상자와 어긋난다. 글자를 잰 자리에 하나씩 놓는다.
+        for left, ch, korean in placed.glyphs:
+            if not ch.isspace():
+                self.d.text(self._p((left, placed.baseline)), ch, fill="black", font=T.font(korean, bold, T.SIZE * self.k),
+                            anchor="ls")
 
     def erase(self, left: float, top: float, right: float, bottom: float, owner: Optional[str] = None) -> None:
+        _size(right - left, bottom - top)
         self.records.append(Mask(left, top, right, bottom, owner))
         self.d.rectangle([self._p((left, top)), self._p((right, bottom))], fill="white")
 
     def open_arrow(self, tip: Point, frm: Point, size: float = 10, spread: float = math.radians(28),
                    owner: Optional[str] = None) -> None:
         """frm에서 tip으로 가는 선 끝의 열린 화살촉(두 갈래 선)."""
-        a = math.atan2(frm[1] - tip[1], frm[0] - tip[0])
-        for s in (-spread, spread):
-            self.line([tip, (tip[0] + size * math.cos(a + s), tip[1] + size * math.sin(a + s))], owner=owner)
+        c, s = _direction(tip, frm)
+        for turn in (-spread, spread):
+            ct, st = math.cos(turn), math.sin(turn)
+            self.line([tip, (tip[0] + size * (c * ct - s * st), tip[1] + size * (s * ct + c * st))], owner=owner)
 
     def closed_arrow(self, tip: Point, frm: Point, filled: bool = True, size: float = 10, half: float = 4.5,
                      owner: Optional[str] = None) -> None:
         """닫힌 삼각형 화살촉. 채우면 호출 메시지, 비우면(크기 18·9) 상속·실체화다."""
-        a = math.atan2(frm[1] - tip[1], frm[0] - tip[0])
-        c, s = math.cos(a), math.sin(a)
+        c, s = _direction(tip, frm)
         base = (tip[0] + c * size, tip[1] + s * size)
         self.poly([tip, (base[0] - s * half, base[1] + c * half), (base[0] + s * half, base[1] - c * half)],
                   fill="black" if filled else "white", owner=owner)
@@ -187,8 +211,7 @@ class Canvas:
     def diamond(self, tip: Point, frm: Point, filled: bool = True, size: float = 18, half: float = 6,
                 owner: Optional[str] = None) -> None:
         """선 끝의 마름모. 채우면 합성, 비우면 집합이다."""
-        a = math.atan2(frm[1] - tip[1], frm[0] - tip[0])
-        c, s = math.cos(a), math.sin(a)
+        c, s = _direction(tip, frm)
         mid = (tip[0] + c * size / 2, tip[1] + s * size / 2)
         far = (tip[0] + c * size, tip[1] + s * size)
         self.poly([tip, (mid[0] - s * half, mid[1] + c * half), far, (mid[0] + s * half, mid[1] - c * half)],

@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 
 import pytest
+from fontTools.ttLib import TTFont
 
 from cysuml import text as T
 
@@ -34,14 +35,23 @@ def test_fonts_come_from_the_package():
     assert (T.FONT_DIR / "NotoSansKR-LICENSE.txt").is_file()
 
 
-@pytest.mark.parametrize("ch", ["가", "힣", "ㄱ", "ᄀ", "漢", "。", "（", "㈜"])
-def test_korean_font_characters(ch):
+@pytest.mark.parametrize("ch", ["가", "힣", "ㄱ", "ᄀ", "漢", "。", "（", "㈜", "※", "①", "★", "◆", "⇒", "℃", "✓"])
+def test_characters_missing_from_liberation_use_noto(ch):
     assert T.is_korean(ch)
+    assert ord(ch) in TTFont(str(T.FONT_DIR / "NotoSansKR-Regular.otf"), lazy=True).getBestCmap()
 
 
-@pytest.mark.parametrize("ch", ["A", "z", "0", " ", "«", "»", "·", "→", "é", "_"])
+@pytest.mark.parametrize("ch", ["A", "z", "0", " ", "«", "»", "·", "…", "→", "é", "_"])
 def test_latin_font_characters(ch):
     assert not T.is_korean(ch)
+
+
+def test_regular_and_bold_cover_the_same_characters():
+    for regular, bold in (("LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf"),
+                          ("NotoSansKR-Regular.otf", "NotoSansKR-Bold.otf")):
+        a = TTFont(str(T.FONT_DIR / regular), lazy=True).getBestCmap()
+        b = TTFont(str(T.FONT_DIR / bold), lazy=True).getBestCmap()
+        assert set(a) == set(b)
 
 
 def test_split_runs():
@@ -60,6 +70,7 @@ def test_split_runs():
     ("회원 Member", False, 75.203125),
     ("«interface»", False, 64.34375),
     ("0..*", False, 19.515625),
+    ("※ 참고 ①", False, 57.125),
 ])
 def test_width_is_fixed(s, bold, width):
     assert T.text_width(s, bold) == pytest.approx(width, abs=0.02)
@@ -82,11 +93,22 @@ def test_place_left_and_middle_anchor():
         assert p.box[1] < p.baseline < p.box[3]
 
 
-def test_runs_follow_each_other_on_one_baseline():
-    p = T.place(0, 0, "Order 주문 Item")
-    assert [part for _, part, _ in p.runs] == ["Order ", "주문", " Item"]
-    assert p.runs[1][0] == pytest.approx(T.text_width("Order "))
-    assert p.runs[2][0] == pytest.approx(T.text_width("Order 주문"))
+def test_glyphs_are_placed_one_by_one_across_fonts():
+    p = T.place(5, 0, "Order 주문 Item")
+    assert "".join(ch for _, ch, _ in p.glyphs) == "Order 주문 Item"
+    xs = {i: x for i, (x, _, _) in enumerate(p.glyphs)}
+    assert xs[0] == 5
+    assert xs[6] == pytest.approx(5 + T.text_width("Order ")) and p.glyphs[6][2]
+    assert xs[8] == pytest.approx(5 + T.text_width("Order 주문")) and not p.glyphs[8][2]
+    assert list(xs.values()) == sorted(xs.values())
+    last_x, last, _ = p.glyphs[-1]
+    assert last_x + T.text_width(last) == pytest.approx(p.box[2])
+
+
+def test_glyph_positions_keep_kerning():
+    p = T.place(0, 0, "AV")
+    assert T.text_width("AV") < T.text_width("A") + T.text_width("V")
+    assert p.glyphs[1][0] == pytest.approx(T.text_width("AV") - T.text_width("V"))
 
 
 def test_ink_of_mixed_text_stays_in_line_box():

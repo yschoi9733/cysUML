@@ -94,6 +94,24 @@ def test_bg_text_erases_the_line_under_it():
     assert pixel(c, l - 5, 20) == 0
 
 
+def drawn_extent(c):
+    l, _, r, _ = c.img.point(lambda p: 255 if p < 128 else 0).getbbox()
+    return l / c.k + c.minx, r / c.k + c.minx
+
+
+@pytest.mark.parametrize("s", ["registerMemberAccountWithVerificationCode()", "회원가입요청을처리한다 longName", "※ 참고 ① Item"])
+def test_drawn_text_matches_its_record_at_any_scale(s):
+    extents = []
+    for scale in (0.5, 1.6, 3.0):
+        c = Canvas((0, 0, 400, 40), scale)
+        c.text(10, 20, s)
+        extents.append(drawn_extent(c))
+        box = c.records[-1].box
+        assert box[0] - 0.5 <= extents[-1][0] and extents[-1][1] <= box[2] + 0.5
+    lefts, rights = [e[0] for e in extents], [e[1] for e in extents]
+    assert max(lefts) - min(lefts) < 0.5 and max(rights) - min(rights) < 0.5
+
+
 def render_text(s):
     c = Canvas((0, 0, 60, 30))
     c.text(5, 15, s)
@@ -137,4 +155,19 @@ def test_invalid_input_is_rejected():
         c.poly([(0, 0), (5, 5)])
     with pytest.raises(ValueError):
         c.text(0, 0, "a", anchor="rs")
+    with pytest.raises(ValueError):
+        c.rect(5, 5, -1, 2)
+    with pytest.raises(ValueError):
+        c.ellipse(5, 5, 2, -1)
+    with pytest.raises(ValueError):
+        c.erase(5, 5, 4, 6)
+    for decorate in (c.open_arrow, c.closed_arrow, c.diamond):
+        with pytest.raises(ValueError):
+            decorate((3, 3), (3, 3))
     assert c.records == []
+
+
+def test_oversized_canvas_is_rejected_before_allocating():
+    with pytest.raises(ValueError, match="너무 크다"):
+        Canvas((0, 0, 5000, 5000))
+    Canvas((0, 0, 1800, 1800))

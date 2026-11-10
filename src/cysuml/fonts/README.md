@@ -9,4 +9,4 @@
 
 둘 다 SIL Open Font License 1.1이다. 라이선스 전문은 `LiberationSans-LICENSE.txt`, `NotoSansKR-LICENSE.txt`에 있다. 글꼴 파일은 받은 그대로이고 고치지 않았다.
 
-Liberation Sans는 Arial과 글자 폭이 같다. 한글·한자·전각 문자는 Noto Sans KR로, 나머지 글자는 Liberation Sans로 글자마다 골라 그린다(`cysuml/text.py`).
+Liberation Sans는 Arial과 글자 폭이 같다. Liberation Sans에 있는 글자는 Liberation Sans로, 없는 글자(한글·한자·※·① 등)는 Noto Sans KR로 글자마다 골라 그린다(`cysuml/text.py`).

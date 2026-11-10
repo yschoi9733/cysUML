@@ -1,8 +1,8 @@
 """글자를 글꼴별 조각으로 나누고, 폭과 자리를 논리 좌표(px)로 잰다.
 
-한글·한자·전각 문자는 Noto Sans KR로, 나머지 글자는 Liberation Sans(Arial과 글자 폭이 같다)로 글자마다 골라 그린다.
-폭과 자리는 큰 기준 크기에서 재서 줄인다. 작은 크기에서 재면 힌팅이 글자마다 폭을 반올림해서, 그림 배율과
-FreeType 버전에 따라 값이 흔들린다.
+Liberation Sans(Arial과 글자 폭이 같다)에 있는 글자는 Liberation Sans로, 없는 글자(한글·한자·※·① 등)는
+Noto Sans KR로 글자마다 골라 그린다. 폭과 글자 자리는 큰 기준 크기에서 재서 줄인다. 작은 크기에서 재면 힌팅이 글자마다
+폭을 반올림해서, 그림 배율과 FreeType 버전에 따라 값이 흔들린다. 그리는 쪽(canvas)도 이 자리에 글자를 하나씩 놓는다.
 """
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from fontTools.ttLib import TTFont
 from PIL import ImageFont
 
 SIZE = 13
@@ -22,26 +23,19 @@ _FILES = {
     (True, True): "NotoSansKR-Bold.otf",
 }
 _REF = 64
-_KOREAN_RANGES = (
-    (0x1100, 0x11FF),  # 한글 자모
-    (0x3000, 0x303F),  # CJK 기호·문장부호
-    (0x3130, 0x318F),  # 한글 호환 자모
-    (0x3200, 0x33FF),  # 괄호·동그라미 문자, CJK 호환 문자(㈜·㎏)
-    (0x3400, 0x4DBF),  # 한자 확장 A
-    (0x4E00, 0x9FFF),  # 한자
-    (0xA960, 0xA97F),  # 한글 자모 확장 A
-    (0xAC00, 0xD7FF),  # 한글 음절, 한글 자모 확장 B
-    (0xF900, 0xFAFF),  # 호환 한자
-    (0xFF00, 0xFFEF),  # 반각·전각 문자
-)
 
 Box = tuple[float, float, float, float]
 
 
+@lru_cache(maxsize=1)
+def _latin_codepoints() -> frozenset[int]:
+    """Liberation Sans에 있는 글자. 보통과 굵게의 글자 목록은 같다(테스트가 확인한다)."""
+    return frozenset(TTFont(str(FONT_DIR / _FILES[False, False]), lazy=True).getBestCmap())
+
+
 def is_korean(ch: str) -> bool:
-    """Noto Sans KR로 그리는 글자인지."""
-    c = ord(ch)
-    return any(lo <= c <= hi for lo, hi in _KOREAN_RANGES)
+    """Noto Sans KR로 그리는 글자인지 — Liberation Sans에 없는 글자다."""
+    return ord(ch) not in _latin_codepoints()
 
 
 def split_runs(s: str) -> list[tuple[str, bool]]:
@@ -71,9 +65,34 @@ ASCENT = _ascent / _REF
 DESCENT = _descent / _REF
 
 
+@dataclass(frozen=True)
+class _Layout:
+    width: float
+    glyphs: tuple[tuple[float, str, bool], ...]
+    ink: Optional[Box]
+
+
 @lru_cache(maxsize=4096)
+def _layout(s: str, bold: bool) -> _Layout:
+    """왼쪽 끝·기준선을 (0, 0)으로 둔 배치. 글자 자리는 커닝까지 든 '그 글자까지의 길이 − 그 글자 폭'이다."""
+    pen = 0.0
+    glyphs = []
+    ink: Optional[Box] = None
+    for part, korean in split_runs(s):
+        f = _ref(korean, bold)
+        for i, ch in enumerate(part):
+            glyphs.append((pen + (f.getlength(part[:i + 1]) - f.getlength(ch)) / _REF, ch, korean))
+        l, t, r, b = f.getbbox(part, anchor="ls")
+        if r > l and b > t:
+            run_ink = (pen + l / _REF, t / _REF, pen + r / _REF, b / _REF)
+            ink = run_ink if ink is None else (
+                min(ink[0], run_ink[0]), min(ink[1], run_ink[1]), max(ink[2], run_ink[2]), max(ink[3], run_ink[3]))
+        pen += f.getlength(part) / _REF
+    return _Layout(pen, tuple(glyphs), ink)
+
+
 def text_width(s: str, bold: bool = False) -> float:
-    return sum(_ref(korean, bold).getlength(part) for part, korean in split_runs(s)) / _REF
+    return _layout(s, bold).width
 
 
 @dataclass(frozen=True)
@@ -81,12 +100,13 @@ class Placement:
     """한 줄 글자를 놓은 자리(논리 좌표).
 
     box는 줄 상자다: 폭은 text_width, 높이는 Liberation Sans의 ascent~descent(한글도 이 안에 든다).
-    ink는 실제로 칠해지는 곳의 상자이고, 공백뿐이면 None이다.
+    glyphs는 글자마다 (왼쪽 x, 글자, Noto Sans KR로 그리는지)다. ink는 글자가 칠해지는 곳의 상자이고(가로는 글자
+    진행 폭을 덮는다), 공백뿐이면 None이다.
     """
 
     box: Box
     baseline: float
-    runs: tuple[tuple[float, str, bool], ...]
+    glyphs: tuple[tuple[float, str, bool], ...]
     ink: Optional[Box]
 
 
@@ -96,20 +116,10 @@ def place(x: float, y: float, s: str, bold: bool = False, anchor: str = "lm") ->
         raise ValueError(f"anchor는 lm·mm만 받는다: {anchor!r}")
     if "\n" in s:
         raise ValueError("한 줄 글자만 놓는다")
-    width = text_width(s, bold)
-    left = x - width / 2 if anchor == "mm" else x
+    lay = _layout(s, bold)
+    left = x - lay.width / 2 if anchor == "mm" else x
     baseline = y + (ASCENT - DESCENT) / 2
     half = (ASCENT + DESCENT) / 2
-    pen = left
-    runs = []
-    ink: Optional[Box] = None
-    for part, korean in split_runs(s):
-        f = _ref(korean, bold)
-        l, t, r, b = f.getbbox(part, anchor="ls")
-        if r > l and b > t:
-            run_ink = (pen + l / _REF, baseline + t / _REF, pen + r / _REF, baseline + b / _REF)
-            ink = run_ink if ink is None else (
-                min(ink[0], run_ink[0]), min(ink[1], run_ink[1]), max(ink[2], run_ink[2]), max(ink[3], run_ink[3]))
-        runs.append((pen, part, korean))
-        pen += f.getlength(part) / _REF
-    return Placement((left, y - half, left + width, y + half), baseline, tuple(runs), ink)
+    ink = None if lay.ink is None else (left + lay.ink[0], baseline + lay.ink[1], left + lay.ink[2], baseline + lay.ink[3])
+    return Placement((left, y - half, left + lay.width, y + half), baseline,
+                     tuple((left + gx, ch, korean) for gx, ch, korean in lay.glyphs), ink)
