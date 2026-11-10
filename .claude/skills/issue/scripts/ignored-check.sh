@@ -1,7 +1,8 @@
 #!/bin/bash
 # git worktree remove 가 함께 지울 무시 대상 파일 중 다시 만들 수 없는 것을 찾는다. 아무것도 지우지 않는다.
 # remove 는 추적 안 된 파일이 있으면 거부하지만 .gitignore 대상은 묻지 않고 디렉터리째 지운다. 이 레포의
-# 무시 대상에는 그림 출력 폴더(diagrams/)·편집기 설정(.vscode/)처럼 다른 곳에 없을 수 있는 것이 들어 있다.
+# 무시 대상에는 비밀 값 파일(.env·.env.*)·그림 출력 폴더(diagrams/)·편집기 설정(.vscode/)처럼 다른 곳에 없을 수 있는
+# 것이 들어 있다.
 #
 # 사용: ignored-check.sh <워크트리 경로>
 #   다른 스크립트와 달리 cwd 가 아니라 인자로 받은 워크트리 안에서 git 을 부른다 — 보는 것이 그 워크트리의
@@ -16,7 +17,8 @@
 #                 keep-more 20+ 줄이 붙는다
 #
 # 다시 만들 수 있는 것으로 치는 것은 /issue 3단계 게이트(uv sync·uv run pytest)와 IDE·하네스가 만드는 자리뿐이다:
-#   - 어느 깊이든 __pycache__ 디렉터리(파이썬이 모듈을 불러올 때 만든다)
+#   - 어느 깊이든 __pycache__ 디렉터리(파이썬이 모듈을 불러올 때 만든다 — scratchpad/ 바로 아래도 그렇다. 사람이 거기
+#     둔 도우미 스크립트를 돌려도 생기는 바이트코드 캐시라 아래 scratchpad 규칙의 "사람이 남긴 것"이 아니다)
 #   - 최상위 .venv·.pytest_cache 디렉터리(uv sync·uv run pytest 가 만든다)
 #   - .claude/settings.local.json 파일(하네스가 그 워크트리에서 받은 허용 설정을 적는다 — 잃어도 다시 묻는다)
 #   - scratchpad/issue-rounds·scratchpad/issue-rereview-rounds 파일(/issue 셀프 리뷰의 셈 기록 — SKILL.md 4단계 "셈 기록",

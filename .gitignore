@@ -13,6 +13,11 @@ __pycache__/
 *.iml
 .vscode/
 
+### 비밀 값 (공개 레포 — 커밋 금지) ###
+.env
+.env.*
+!.env.example
+
 ### macOS ###
 .DS_Store
 

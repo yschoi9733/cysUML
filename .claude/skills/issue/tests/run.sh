@@ -941,6 +941,12 @@ for want in diagrams build dist; do
     bad "ignored: 깊은 $want 는 무시하지 않는다" "src/cysuml/$want/ 가 무시된다 — .gitignore 의 $want 줄을 /$want/ 로 둔다"
   else ok; fi
 done
+# 비밀 값 파일은 다른 곳에 없을 수 있다 — 사람이 본다.
+printf 'OPENAI_API_KEY=x\n' > "$IG/.env"
+run "$R" "$S/ignored-check.sh" "$IG"
+check "ignored: 비밀 값 파일" KEEP
+has "ignored: .env 줄" "keep .env"
+rm -f "$IG/.env"
 mkdir -p "$IG/.vscode"
 printf '{}\n' > "$IG/.vscode/settings.json"
 run "$R" "$S/ignored-check.sh" "$IG"
