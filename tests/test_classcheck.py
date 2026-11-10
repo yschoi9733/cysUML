@@ -273,7 +273,8 @@ def test_siblings_with_slightly_shifted_triangles_are_not_a_trunk():
     r = report([box("P", 200, 0), box("C1", 105, 200), box("C2", 295, 250)],
                [rel("generalization", "C1", "P", via=[[150, 100], [240, 100]]),
                 rel("generalization", "C2", "P", via=[[340, 150], [245, 150]])])
-    assert kinds(r) == ["line_through_head", "line_through_head"]
+    assert kinds(r) == ["line_through_head", "line_through_head", "head_overlap"]
+    assert r.failures[2].elements == ("C1->P", "C2->P")
 
 
 def test_same_child_twice_is_not_a_trunk():
@@ -354,6 +355,29 @@ def test_overlaps_hide_end_shapes_only_near_each_overlapped_piece():
                     via=[[100, 24], [140, 24], [140, -40], [290, -40], [290, 124], [342, 124], [342, 54], [400, 54]])])
     assert kinds(r) == ["line_overlap", "line_through_head"]
     assert r.failures[1].elements == ("C->D", "A->B")
+
+
+@pytest.mark.parametrize("via_y, passed", [(216, False), (300, True)])
+def test_arrowhead_inside_another_relations_triangle_fails(via_y, passed):
+    # 키 큰 B(400, 0, 200×400)의 왼쪽 변에 상속 삼각형(끝 (400, 200))과 의존 화살촉(끝 (400, 208))이 붙는다. 두 선은 닿지 않지만
+    # 화살촉 갈래 끝이 흰 삼각형 안에 들어간다
+    r = report([box("A", 0, 176), box("Cc", 0, 300), box("B", 400, 0, width=200, height=400)],
+               [rel("generalization", "A", "B", via=[[300, 200]]), rel("dependency", "Cc", "B", via=[[300, via_y]])])
+    assert r.passed is passed
+    if not passed:
+        (f,) = r.failures
+        assert f.kind == "head_overlap" and f.elements == ("A->B", "Cc->B")
+        assert "관계 A->B(relations[0])의 삼각형" in f.problem and "관계 Cc->B(relations[1])의 화살촉" in f.problem
+
+
+def test_diagonal_overlap_hides_only_end_shapes_next_to_it():
+    # A→D가 A→C의 대각선 (100, 100)–(300, 300)에 포개진 뒤 x=306 세로로 C 오른쪽 화살촉(x 300~309, y 115~125)을 지난다.
+    # 그 화살촉은 대각선을 덮는 상자 안이지만 대각선에서 100px 넘게 떨어져 있다
+    r = report([box("A", 0, 0), box("C", 210, 96), box("D", 261, -100)],
+               [rel("association", "A", "C", via=[[100, 100], [300, 300], [350, 120]]),
+                rel("association", "A", "D", via=[[100, 100], [300, 300], [306, 300]])])
+    assert kinds(r) == ["line_overlap", "line_through_head"]
+    assert r.failures[1].elements == ("A->D", "A->C") and "화살촉" in r.failures[1].problem
 
 
 def test_diamond_counts_as_an_end_shape():

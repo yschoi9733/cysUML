@@ -14,10 +14,10 @@ import json
 import math
 import numbers
 from dataclasses import dataclass, replace
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from . import text as T
-from .canvas import BG_MARGIN, SCALE, Canvas, Point
+from .canvas import BG_MARGIN, SCALE, Canvas, Line, Point, Polygon, Text
 from .geom import gap, grow, hits, meets, outline
 
 CLASS_KINDS = ("class", "abstract", "interface", "enum")
@@ -169,9 +169,22 @@ class Layout:
 
 
 @dataclass(frozen=True)
+class DrawnRelation:
+    """관계 하나를 그린 기록: 선(line), 선 끝 모양(heads — 삼각형·마름모는 Polygon, 화살촉은 Line), 선 글자(labels —
+    PlacedRelation.labels 차례)."""
+
+    line: Line
+    heads: tuple[Union[Line, Polygon], ...]
+    labels: tuple[Text, ...]
+
+
+@dataclass(frozen=True)
 class Drawing:
+    """drawn은 관계마다(layout.relations 차례) 그린 기록이다 — 검사가 그림판 기록을 거꾸로 짚어 찾지 않게 넘긴다."""
+
     canvas: Canvas
     layout: Layout
+    drawn: tuple[DrawnRelation, ...]
 
 
 # ---------------------------------------------------------------- 입력 읽기
@@ -544,7 +557,7 @@ def _route(r: Relation, a: T.Box, b: T.Box, path: str) -> tuple[Optional[tuple[P
     ca, cb = _center(a), _center(b)
     if r.via:
         start, end = _exit(a, ca, r.via[0]), _exit(b, cb, r.via[-1])
-        problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} 상자 {_show(name)}({_fmt_rect(rect)}) 안이나 "
+        problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} 상자 {_show(name)}({fmt_rect(rect)}) 안이나 "
                     "변 위에 있다 — 상자 밖으로 옮긴다"
                     for p, rect, name, j, key in ((start, a, r.source, 0, "from"), (end, b, r.target, len(r.via) - 1, "to"))
                     if p is None]
@@ -565,7 +578,7 @@ def _route(r: Relation, a: T.Box, b: T.Box, path: str) -> tuple[Optional[tuple[P
     for key, rect, name in (("from", a, r.source),) + ((("to", b, r.target),) if r.target != r.source else ()):
         inner = grow(rect, -EDGE_SLACK)
         if any(hits(p, q, inner) for p, q in zip(points, points[1:])):
-            problems.append(f"{path}: 선이 {key} 상자 {_show(name)}({_fmt_rect(rect)}) 안을 지난다 — 꺾는 점을 그 상자 밖으로 "
+            problems.append(f"{path}: 선이 {key} 상자 {_show(name)}({fmt_rect(rect)}) 안을 지난다 — 꺾는 점을 그 상자 밖으로 "
                             "돌린다")
     lengths = [math.dist(p, q) for p, q in zip(points, points[1:])]
     head, tail = shape_lengths(r)
@@ -622,8 +635,15 @@ def layout(diagram: Diagram) -> Layout:
     return Layout(placed, tuple(out))
 
 
-def _fmt_rect(rect: T.Box) -> str:
-    return f"{rect[0]:g}, {rect[1]:g}, {rect[2] - rect[0]:g}×{rect[3] - rect[1]:g}"
+def fmt_num(v: float) -> str:
+    """오류·검사 문구에 쓰는 수: 소수 한 자리까지(끝의 .0은 뗀다)."""
+    s = f"{round(v, 1) + 0.0:.1f}"
+    return s[:-2] if s.endswith(".0") else s
+
+
+def fmt_rect(rect: T.Box) -> str:
+    """오류·검사 문구에 쓰는 상자 자리: "왼, 위, 폭×높이"."""
+    return f"{fmt_num(rect[0])}, {fmt_num(rect[1])}, {fmt_num(rect[2] - rect[0])}×{fmt_num(rect[3] - rect[1])}"
 
 
 # ---------------------------------------------------------------- 그리기
@@ -676,14 +696,21 @@ def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
     바탕을 깔아 맨 위에 쓴다."""
     lay = layout(diagram)
     c = Canvas(scale)
+    shapes = []
     for r in lay.relations:
+        start = len(c.records)
         _draw_relation(c, r)
+        shapes.append(c.records[start:])
     for p in lay.boxes:
         _draw_box(c, p)
-    for r in lay.relations:
+    drawn = []
+    for r, (line, *heads) in zip(lay.relations, shapes):
+        texts = []
         for lab in r.labels:
             c.text(lab.x, lab.y, lab.text, anchor="mm", bg=True, owner=r.owner)
-    return Drawing(c, lay)
+            texts.append(c.records[-1])  # 흰 바탕(Mask) 다음에 글자를 기록한다
+        drawn.append(DrawnRelation(line, tuple(heads), tuple(texts)))
+    return Drawing(c, lay, tuple(drawn))
 
 
 def render(data: Any, scale: float = SCALE) -> Drawing:

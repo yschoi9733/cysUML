@@ -83,6 +83,21 @@ def test_relation_lines_are_drawn_under_boxes_and_labels_on_top():
     assert set(kinds[last_box + 1:]) == {"Mask", "Text"}
 
 
+def test_drawing_hands_over_each_relations_records():
+    d = C.render({"classes": [{"name": "A", "left": 0, "top": 0}, {"name": "B", "left": 300, "top": 0}],
+                  "relations": [{"kind": "association", "from": "A", "to": "B", "navigable": "both", "name": "has",
+                                 "to_multiplicity": "1"},
+                                {"kind": "realization", "from": "B", "to": "A", "via": [[345, 100], [45, 100]]},
+                                {"kind": "composition", "from": "A", "to": "B", "via": [[45, -60], [345, -60]]}]})
+    for drawn, placed in zip(d.drawn, d.layout.relations, strict=True):
+        assert drawn.line.points == placed.points
+        assert all(r in d.canvas.records and r.owner == placed.owner for r in (drawn.line, *drawn.heads, *drawn.labels))
+        assert [t.text for t in drawn.labels] == [lab.text for lab in placed.labels]
+    heads = [[type(h).__name__ for h in drawn.heads] for drawn in d.drawn]
+    assert heads == [["Line", "Line"], ["Polygon"], ["Polygon", "Line"]]  # 두 화살촉 / 삼각형 / 마름모와 화살촉
+    assert len(d.drawn[0].labels) == 2 and d.drawn[1].labels == ()
+
+
 def test_box_grows_to_fit_text_keeping_left_and_top():
     row = "-aVeryLongAttributeName: SomeLongTypeName = 42"
     d = C.render({"classes": [{"name": "Wide", "left": 10, "top": 20, "attributes": [row],

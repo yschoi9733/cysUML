@@ -49,7 +49,7 @@ def clip(p: Point, q: Point, rect: Box) -> Optional[tuple[Point, Point]]:
         lo, hi = max(lo, t1), min(hi, t2)
         if lo > hi:
             return None
-    return _lerp(p, q, lo), _lerp(p, q, hi)
+    return lerp(p, q, lo), lerp(p, q, hi)
 
 
 def hits(p: Point, q: Point, rect: Box) -> bool:
@@ -152,7 +152,7 @@ def _snap(cum: list[float], s: float, eps: float) -> float:
 def _at(pts: tuple[Point, ...], cum: list[float], s: float) -> Point:
     k = min(max(bisect.bisect_right(cum, s) - 1, 0), len(pts) - 2)
     n = cum[k + 1] - cum[k]
-    return _lerp(pts[k], pts[k + 1], 0.0 if n == 0 else (s - cum[k]) / n)
+    return lerp(pts[k], pts[k + 1], 0.0 if n == 0 else (s - cum[k]) / n)
 
 
 def _unit(p: Point, q: Point) -> Point:
@@ -271,8 +271,23 @@ def alongside(s: tuple[Point, Point], t: tuple[Point, Point], width: float, leas
         lo, hi = max(lo, t1), min(hi, t2)
     if (hi - lo) * lt <= least:
         return None
-    return _lerp(r, w, lo), _lerp(r, w, hi)
+    return lerp(r, w, lo), lerp(r, w, hi)
 
 
-def _lerp(p: Point, q: Point, t: float) -> Point:
+def lerp(p: Point, q: Point, t: float) -> Point:
+    """p에서 q로 가는 선분의 t 자리(0이면 p, 1이면 q)."""
     return p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t
+
+
+def distance(s: tuple[Point, Point], t: tuple[Point, Point], eps: float) -> float:
+    """두 선분 사이의 가장 짧은 거리(만나면 0)."""
+    if touches(s, t, eps):
+        return 0.0
+    return min(_to_segment(v, seg) for v, seg in ((s[0], t), (s[1], t), (t[0], s), (t[1], s)))
+
+
+def _to_segment(v: Point, seg: tuple[Point, Point]) -> float:
+    (p, q) = seg
+    n = (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2
+    k = 0.0 if n == 0 else min(max(((v[0] - p[0]) * (q[0] - p[0]) + (v[1] - p[1]) * (q[1] - p[1])) / n, 0.0), 1.0)
+    return math.dist(v, lerp(p, q, k))
