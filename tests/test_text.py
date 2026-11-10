@@ -139,6 +139,12 @@ def test_line_box_always_covers_the_ink(s, bold):
     assert p.box[1] <= -(T.ASCENT + T.DESCENT) / 2 and p.box[3] >= (T.ASCENT + T.DESCENT) / 2
 
 
+@pytest.mark.parametrize("s", ["가 ", " 가", "A ", "Order 주문  "])
+def test_ink_spans_the_whole_advance(s):
+    p = T.place(0, 0, s)
+    assert p.ink[0] <= 0 and p.ink[2] >= T.text_width(s)
+
+
 def test_blank_text_has_no_ink():
     assert T.place(0, 0, "   ").ink is None
     assert T.place(0, 0, "").ink is None

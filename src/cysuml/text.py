@@ -104,6 +104,8 @@ def _layout(s: str, bold: bool) -> _Layout:
             ink = run_ink if ink is None else (
                 min(ink[0], run_ink[0]), min(ink[1], run_ink[1]), max(ink[2], run_ink[2]), max(ink[3], run_ink[3]))
         pen += f.getlength(part) / _REF
+    if ink is not None:  # 공백뿐인 조각은 높이가 없어 빠지므로, 가로는 진행 폭 전체로 넓힌다
+        ink = (min(ink[0], 0.0), ink[1], max(ink[2], pen), ink[3])
     return _Layout(pen, tuple(glyphs), ink)
 
 
@@ -128,7 +130,7 @@ class Placement:
 
     box는 줄 상자다: 폭은 text_width, 높이는 Liberation Sans의 ascent~descent(한글도 이 안에 든다)이고, 그 밖으로
     칠해지는 글자(Ǻ·█ 등)가 있으면 거기까지 늘어나 ink를 늘 덮는다. glyphs는 글자마다 (왼쪽 x, 글자, Noto Sans KR로
-    그리는지)다. ink는 글자가 칠해지는 곳의 상자이고(가로는 글자 진행 폭을 덮는다), 공백뿐이면 None이다.
+    그리는지)다. ink는 글자가 칠해지는 곳의 상자이고(가로는 글자 진행 폭 전체를 덮는다), 공백뿐이면 None이다.
     """
 
     box: Box

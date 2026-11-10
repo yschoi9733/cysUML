@@ -10,7 +10,7 @@ from __future__ import annotations
 import bisect
 import math
 import numbers
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable, Optional, Union
 
 from PIL import Image, ImageColor, ImageDraw
@@ -18,10 +18,12 @@ from PIL import Image, ImageColor, ImageDraw
 from . import text as T
 
 SCALE = 1.6
+MIN_SCALE = 0.25  # 이보다 작으면 글자가 FreeType이 그릴 수 있는 크기 밑으로 내려간다
 SS = 4
 PAD = 12
 BG_MARGIN = 2
 MIN_DASH = 0.5
+MAX_DASHES = 100_000  # 점선 하나의 칸 수 상한(칸마다 그리기 호출이 하나씩 든다)
 MAX_PIXELS = 150_000_000  # SS배로 그리는 그림판의 픽셀 수 상한(회색조라 1픽셀 1바이트). 기본 배율에서 논리 약 1900×1900
 
 Point = tuple[float, float]
@@ -140,6 +142,8 @@ def _line(pts: Iterable[Point], dash, owner: Optional[str]) -> Line:
         dash = _nums(on, off)
         if min(dash) < MIN_DASH:
             raise ValueError(f"점선 무늬가 너무 짧다(최소 {MIN_DASH}): {dash}")
+        if sum(math.dist(p, q) for p, q in zip(pts, pts[1:])) / sum(dash) > MAX_DASHES:
+            raise ValueError(f"점선 칸이 너무 많다(최대 {MAX_DASHES}): 무늬 {dash}")
     return Line(pts, dash, owner)
 
 
@@ -182,8 +186,8 @@ def _collinear(pts: tuple[Point, ...]) -> bool:
 class Canvas:
     def __init__(self, scale: float = SCALE):
         (scale,) = _nums(scale)
-        if scale <= 0:
-            raise ValueError(f"배율은 0보다 커야 한다: {scale}")
+        if scale < MIN_SCALE:
+            raise ValueError(f"배율은 {MIN_SCALE} 이상이어야 한다: {scale}")
         self.scale = scale
         self.records: list[Record] = []
 
@@ -209,14 +213,12 @@ class Canvas:
              owner: Optional[str] = None) -> None:
         """한 줄 글자. anchor와 y의 뜻은 text.place와 같다. bg면 글자가 칠해지는 곳보다 BG_MARGIN 넓게 흰 바탕을 깐다."""
         x, y = _nums(x, y)
-        bold = bool(bold)
-        s = T.normalize(s)
-        placed = T.place(x, y, s, bold, anchor)
-        laid = bool(bg) and placed.ink is not None
-        if laid:
-            l, t, r, b = placed.ink
-            self.erase(l - BG_MARGIN, t - BG_MARGIN, r + BG_MARGIN, b + BG_MARGIN, owner=owner)
-        self.records.append(Text(x, y, s, bold, anchor, laid, owner, placed))
+        record = Text(x, y, s, bool(bold), anchor, False, owner)
+        ink = record.placement.ink
+        if bg and ink is not None:
+            self.erase(ink[0] - BG_MARGIN, ink[1] - BG_MARGIN, ink[2] + BG_MARGIN, ink[3] + BG_MARGIN, owner=owner)
+            record = replace(record, bg=True)
+        self.records.append(record)
 
     def erase(self, left: float, top: float, right: float, bottom: float, owner: Optional[str] = None) -> None:
         left, top, right, bottom = _nums(left, top, right, bottom)
@@ -283,10 +285,9 @@ class Canvas:
             raise ValueError("그린 것이 없다")
         minx, miny = b[0] - PAD, b[1] - PAD
         fw, fh = (b[2] + PAD - minx) * self.scale, (b[3] + PAD - miny) * self.scale
-        if not (math.isfinite(fw) and math.isfinite(fh)) or fw * fh * SS * SS > MAX_PIXELS:
-            raise ValueError(f"그림이 너무 크다: 논리 {b[2] - b[0]:g}×{b[3] - b[1]:g}, 배율 {self.scale:g}")
-        w, h = max(1, math.ceil(fw)), max(1, math.ceil(fh))
-        if w * SS * h * SS > MAX_PIXELS:
+        w = max(1, math.ceil(fw)) if math.isfinite(fw) else None
+        h = max(1, math.ceil(fh)) if math.isfinite(fh) else None
+        if w is None or h is None or w * SS * h * SS > MAX_PIXELS:
             raise ValueError(f"그림이 너무 크다: 논리 {b[2] - b[0]:g}×{b[3] - b[1]:g}, 배율 {self.scale:g}")
         return minx, miny, w, h
 
@@ -320,14 +321,16 @@ class _Painter:
     def _p(self, p: Point) -> Point:
         return (p[0] - self.minx) * self.k, (p[1] - self.miny) * self.k
 
-    def _pixels(self, x0: float, y0: float, x1: float, y1: float) -> list[tuple[int, int]]:
-        # Pillow 상자는 좌표를 정수로 자르고 오른쪽·아래 끝 픽셀을 포함한다. [x0, x1) 범위를 칠하게 반올림해 넘긴다
-        # (round()는 .5를 짝수로 보내 끝이 앞보다 작아질 수 있어 늘 올림 쪽으로 반올림한다).
-        l, t = math.floor(x0 + 0.5), math.floor(y0 + 0.5)
-        return [(l, t), (max(l, math.floor(x1 + 0.5) - 1), max(t, math.floor(y1 + 0.5) - 1))]
+    @staticmethod
+    def _pixels(x0: float, y0: float, x1: float, y1: float) -> Optional[list[tuple[int, int]]]:
+        # Pillow 상자는 좌표를 정수로 자르고 오른쪽·아래 끝 픽셀을 포함한다. [x0, x1) 범위를 칠하게 반올림해 넘기고, 칠할
+        # 픽셀이 없으면 None이다(round()는 .5를 짝수로 보내 앞뒤가 뒤집힐 수 있어 늘 올림 쪽으로 반올림한다).
+        l, t, r, b = (math.floor(v + 0.5) for v in (x0, y0, x1, y1))
+        return [(l, t), (r - 1, b - 1)] if r > l and b > t else None
 
     def _outlined(self, left: float, top: float, width: float, height: float) -> list[tuple[int, int]]:
-        # Pillow는 상자 테두리를 안쪽으로 칠한다. 반 획씩 넓혀 선과 같이 변 가운데로 칠하게 한다.
+        # Pillow는 상자 테두리를 안쪽으로 칠한다. 반 획씩 넓혀 선과 같이 변 가운데로 칠하게 한다(넓힌 폭이 1픽셀 이상이라
+        # 비지 않는다).
         (x0, y0), (x1, y1) = self._p((left, top)), self._p((left + width, top + height))
         h = self.lw / 2
         return self._pixels(x0 - h, y0 - h, x1 + h, y1 + h)
@@ -337,7 +340,7 @@ class _Painter:
         self.d.line(pts + pts[:1] if closed else pts, fill="black", width=self.lw)
         r = self.lw / 2
         for x, y in pts if closed else pts[1:-1]:
-            self.d.ellipse([x - r, y - r, x + r, y + r], fill="black")
+            self.d.ellipse(self._pixels(x - r, y - r, x + r, y + r), fill="black")
 
     def paint(self, records: Iterable[Record]) -> None:
         for r in records:
@@ -359,7 +362,9 @@ class _Painter:
             elif isinstance(r, Text):
                 self.text(r)
             elif isinstance(r, Mask):
-                self.d.rectangle(self._pixels(*self._p((r.left, r.top)), *self._p((r.right, r.bottom))), fill="white")
+                box = self._pixels(*self._p((r.left, r.top)), *self._p((r.right, r.bottom)))
+                if box:
+                    self.d.rectangle(box, fill="white")
             else:
                 raise TypeError(f"그릴 줄 모르는 기록이다: {r!r}")
 

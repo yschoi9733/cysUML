@@ -131,6 +131,14 @@ def test_bg_flag_is_recorded_as_bool():
     assert [r.bg for r in c.records if isinstance(r, Text)] == [False, True]
 
 
+def test_zero_area_erase_leaves_the_drawing_alone():
+    c = Canvas(8)
+    c.line([(0, 0), (10, 0)])
+    c.erase(5, -5, 5, 5)
+    img = c.to_image()
+    assert pixel(c, img, 5, 0) < 60
+
+
 @pytest.mark.parametrize("scale", [0.25, 0.75, 1.6])
 def test_zero_size_boxes_render_at_any_scale(scale):
     c = Canvas(scale)
@@ -273,7 +281,7 @@ def test_self_crossing_polygon_is_accepted():
 
 
 def test_invalid_input_is_rejected_without_a_record():
-    for scale in (0, -1, math.nan, math.inf, "2", None):
+    for scale in (0, -1, 0.001, 0.2, math.nan, math.inf, "2", None):
         with pytest.raises(ValueError):
             Canvas(scale)
     c = Canvas()
@@ -290,6 +298,7 @@ def test_invalid_input_is_rejected_without_a_record():
         lambda: c.line([(0, 0), (5, 5)], dash=(5, 0)),
         lambda: c.line([(0, 0), (5, 5)], dash=(5,)),
         lambda: c.line([(0, 0), (5, 5)], dash=(5, 4, 3)),
+        lambda: c.line([(0, 0), (100_001, 0)], dash=(0.5, 0.5)),
         lambda: c.rect("1", 2, 3, 4),
         lambda: c.rect(1, 2, 3, 4, fill=123),
         lambda: c.text(0, 0, 123),
