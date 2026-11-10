@@ -604,6 +604,17 @@ git -C "$R" -c core.precomposeunicode=false worktree add -q "$C/fix+15-rereg" fi
   setup_fail "재등록"
 run "$R" "$S/verify-removed.sh" "$SNAP" "$CC/fix+15-rereg"
 check "verify: 지웠다 다른 바이트로 다시 등록됨" REREGISTERED
+# 같은 바이트로 다시 등록되면 스냅숏과 지금 목록만으로는 "그대로 있다"와 가를 수 없다 — gone 줄 없는 STILL_PRESENT 로
+# 내고 문서가 멈춘다(references/worktree.md 3번 "사후 확인"). 머리말이 이 경우를 적고 있다.
+add "$CC/fix+65-same" fix/65-same
+run "$R" "$S/find.sh" "$SNAP" fix/65-same
+g worktree remove -- "$CC/fix+65-same"
+g worktree add -q "$CC/fix+65-same" fix/65-same
+run "$R" "$S/verify-removed.sh" "$SNAP" "$CC/fix+65-same"
+check "verify: 지웠다 같은 바이트로 다시 등록됨" STILL_PRESENT
+if printf '%s\n' "$OUT" | LC_ALL=C grep -q '^gone'; then bad "verify: 그때 gone 줄이 없다" "$OUT"; else ok; fi
+g worktree remove -- "$CC/fix+65-same"
+g branch -D fix/65-same
 
 add "$CC/fix+19-a" fix/19-a
 add "$CC/fix+19-b" fix/19-b
@@ -636,6 +647,13 @@ hasnt "residue: 같은 워크트리를 다른 표기로 또 내지 않음" "work
 run "$R" "$S/residue.sh" 11
 check "residue: 옛 중첩 잔재" RESIDUE
 has "residue: 중첩 고아" "orphan $C/fix/11-nested"
+# 옛 test/ 타입 폴더 아래도 본다 — branch-issue.sh 가 받는 타입인데 빠지면 그 폴더가 통째로 남의 고아로만 나와 CLEAN 이다.
+mkdir -p "$C/test/62-old/src"
+run "$R" "$S/residue.sh" 62
+check "residue: 옛 test/ 타입 폴더 아래 중첩 잔재" RESIDUE
+has "residue: test/ 아래 중첩 고아" "orphan $C/test/62-old"
+hasnt "residue: test 폴더를 통째로 남의 고아로 내지 않는다" "other-orphan $C/test"
+rm -rf "$C/test"
 # 옛 중첩 디렉터리 안의 잔재가 링크여도 잡는다 — 바깥 스캔만 링크를 보면 CLEAN 이 된다(이전 codex 지적).
 mkdir -p "$T/linked-target2"
 ln -s "$T/linked-target2" "$C/fix/60-linked"
@@ -669,6 +687,10 @@ ln -s "$T/linked-target" "$C/fix+50-link"
 run "$R" "$S/residue.sh" 50
 check "residue: 심볼릭 링크 잔재" RESIDUE
 has_prefix "residue: 링크가 고아로 잡힌다" "orphan .*fix+50-link"
+# 번호 없는 머지 정리(references/merge-cleanup.md)가 컨테이너를 훑는 명령도 그 링크를 모은다 — 문서의 명령 그대로다.
+OUT=$(find -H "$C" -mindepth 1 -maxdepth 1 \( -type d -o -type l \))
+has "머지 정리 find: 컨테이너 안 링크도 모은다" "$C/fix+50-link"
+has "머지 정리 find: 디렉터리도 모은다" "$C/fix+9-orphan"
 # 등록된 워크트리를 가리키는 링크: worktree 줄은 링크 경로가 아니라 등록 경로여야 하고(링크 경로로 내면 화면이
 # 실상과 다르고 등록 목록 루프가 -ef 로 진짜 경로를 건너뛴다), 링크 자체는 link 줄로 따로 낸다.
 mkdir -p "$T/regs"
@@ -720,6 +742,12 @@ has "residue: 다른 이슈 고아도 보고" "other-orphan $C/fix+10-work"
 hasnt "residue: 등록된 규약 밖 이름은 고아가 아님" "other-orphan $C/exp-4-other"
 run "$R" "$S/residue.sh" 1a
 check_rc "residue: 숫자 아닌 번호" 2
+# 앞자리 0 번호는 판별식이 5- 와 맞지 않아 fix/5-unique 를 놓치고 CLEAN 을 냈다 — branch-issue.sh 처럼 사용법 오류로 멈춘다.
+run "$R" "$S/residue.sh" 05
+check_rc "residue: 앞자리 0 번호" 2
+hasnt "residue: 앞자리 0 번호로 CLEAN 을 내지 않는다" "CLEAN"
+run "$R" "$S/residue.sh" 0
+check_rc "residue: 0 번" 2
 run "$T" "$S/residue.sh" 5
 check_rc "residue: 레포 밖" 3
 # 컨테이너나 옛 중첩 디렉터리를 읽지 못하면 CLEAN(잔재 없음)을 내지 않고 멈춘다 — CLEAN 이면 2단계가 새
@@ -881,6 +909,17 @@ run "$R" "$S/orphan-check.sh" "$C/fix+54-src"
 check "orphan: 다른 파일 21개째에서 세기를 멈춤" OTHER_FILES
 has "orphan: 20+ 표시" "other-more 20+"
 if [ "$(printf '%s\n' "$OUT" | LC_ALL=C grep -c '^other ')" -eq 20 ]; then ok; else bad "orphan: other 줄은 20개" "$OUT"; fi
+# 딱 20개면 other-more 가 없고, 하나만 늘어도 붙는다 — 새 파일이 21번째 뒤로 가면 other 줄은 그대로일 수 있어서(실측)
+# references/worktree.md 4번 4)가 이 줄까지 본다. 어느 이름이 21번째 뒤로 가는지는 파일 시스템 순서라 줄로만 본다.
+mkdir -p "$C/fix+67-twenty"
+for ((n = 0; n < 20; n++)); do : > "$C/fix+67-twenty/f$n"; done
+run "$R" "$S/orphan-check.sh" "$C/fix+67-twenty"
+check "orphan: 딱 20개" OTHER_FILES
+hasnt "orphan: 딱 20개면 other-more 가 없다" "other-more 20+"
+: > "$C/fix+67-twenty/new"
+run "$R" "$S/orphan-check.sh" "$C/fix+67-twenty"
+has "orphan: 21개가 되면 other-more 가 붙는다" "other-more 20+"
+rm -rf "$C/fix+67-twenty"
 
 # ---------------------------------------------------------------- ignored-check.sh
 # remove 가 묻지 않고 지우는 무시 대상 중 다시 만들 수 없는 것만 KEEP 으로 낸다. 무시 패턴은 이 레포 .gitignore 를
@@ -1117,6 +1156,22 @@ touch "$IG/diagrams/class.png"
 run "$T" "$S/ignored-check.sh" "$IG"
 check "ignored: cwd 가 레포 밖이어도 판정" KEEP
 has "ignored: 그림 출력 폴더 줄(레포 밖 cwd)" "keep diagrams/"
+# 상대경로 인자는 작업 디렉터리 기준으로 푼다 — CDPATH 가 걸리면 cd 가 그쪽 같은 이름으로 가고 그 자리를 stdout 에 찍어
+# 첫 줄이 판정 키워드가 아니게 됐다(skill-repo.sh 와 같은 이유).
+mkdir -p "$T/ign-cdpath/fix+61-ign"
+run "$C" -c 'CDPATH="$1" bash "$2" fix+61-ign' _ "$T/ign-cdpath" "$S/ignored-check.sh"
+check "ignored: CDPATH 가 있어도 작업 디렉터리 기준" KEEP
+has "ignored: CDPATH 쪽이 아니라 그 워크트리를 판정" "keep diagrams/"
+# - 로 시작하는 상대경로도 판정한다 — cd 가 옵션(-66…)이나 OLDPWD(- 하나)로 읽어 들어가지 못했다.
+add "$CC/-66-dash" fix/66-dash
+add "$CC/-" fix/68-lone-dash
+run "$C" "$S/ignored-check.sh" -66-dash
+check "ignored: - 로 시작하는 상대경로" CLEAN
+run "$C" "$S/ignored-check.sh" -
+check "ignored: - 하나인 상대경로" CLEAN
+g worktree remove -- "$CC/-66-dash"
+g worktree remove -- "$CC/-"
+g branch -D fix/66-dash fix/68-lone-dash
 for ((n = 0; n < 25; n++)); do : > "$IG/k$n.pyc"; done
 run "$R" "$S/ignored-check.sh" "$IG"
 check "ignored: 많아도 KEEP" KEEP
@@ -2023,6 +2078,16 @@ done
 if LC_ALL=C grep -Fqx -- '    .claude/settings.local.json | scratchpad/issue-rounds | scratchpad/issue-rereview-rounds)' "$S/ignored-check.sh"; then ok; else bad "문서: ignored-check.sh 가 셈 기록 두 파일을 지워도 되는 것으로 친다" "regenerable()"; fi
 OUT=$(LC_ALL=C grep -nE '셈을 함께 알려|4단계 셈 모름|git config --replace-all' "$SKILL_DIR/SKILL.md")
 if [ -z "$OUT" ]; then ok; else bad "문서: 옛 인계 문구와 브랜치 설정 쓰기가 남지 않았다" "$OUT"; fi
+
+# 번호 없는 머지 정리는 컨테이너의 링크도 모은다 — -type d 만 보면 디렉터리를 가리키는 링크 잔재를 놓친다(residue.sh 와
+# 같은 이유, 위 "머지 정리 find" 테스트). 고아 디렉터리를 지우기 직전의 재확인과 재개 판정은 other-more 줄까지 본다 —
+# 20개를 보여 주고 승인받은 뒤 새 파일이 21번째 뒤로 가면 other 줄은 그대로다(위 orphan-check.sh 의 20개 경계 테스트).
+if LC_ALL=C grep -Fq -- 'find -H "<레포 루트>/.claude/worktrees" -mindepth 1 -maxdepth 1 \( -type d -o -type l \)' "$SKILL_DIR/references/merge-cleanup.md"; then ok; else bad "문서: 번호 없는 머지 정리가 링크도 모은다" "merge-cleanup.md"; fi
+OUT=$(LC_ALL=C grep -nF -- '-maxdepth 1 -type d`' "${DOCS[@]}")
+if [ -z "$OUT" ]; then ok; else bad "문서: 디렉터리만 모으는 옛 find 가 남지 않았다" "$OUT"; fi
+for want in '`OTHER_FILES` 이고, `other-more` 줄이 없고, 사람이' '`OTHER_FILES` 이고 `other-more` 줄 없이 `other` 목록이'; do
+  if LC_ALL=C grep -Fq -- "$want" "$SKILL_DIR/references/worktree.md"; then ok; else bad "문서: 고아 재확인은 other-more 줄까지 본다" "$want"; fi
+done
 
 # 판정 스크립트와 이 테스트는 실행 권한을 둔다(lib.sh 는 불러오기만 하므로 뺀다) — 파일을 새로 써서 바꿔 끼우면 권한이
 # 빠진 채 커밋된다(이전 셀프 리뷰). 작업 트리의 권한과, git 이 인덱스에 올려 둔 모드(올렸으면)를 둘 다 본다 — 작업
