@@ -582,11 +582,11 @@ def _route(r: Relation, a: T.Box, b: T.Box, path: str) -> tuple[Optional[tuple[P
     lengths = [math.dist(p, q) for p, q in zip(points, points[1:])]
     head, tail = shape_lengths(r)
     if len(lengths) == 1 and lengths[0] < head + tail:
-        problems.append(f"{path}: 선 길이 {lengths[0]:.1f}가 양 끝 모양 길이({head:g}+{tail:g})보다 짧다 — 상자를 더 떼어 놓는다")
+        problems.append(f"{path}: 선 길이 {fmt_num(lengths[0])}가 양 끝 모양 길이({fmt_num(head)}+{fmt_num(tail)})보다 짧다 — 상자를 더 떼어 놓는다")
     elif len(lengths) > 1:
         for length, need, key, which in ((lengths[0], head, "from", "첫"), (lengths[-1], tail, "to", "마지막")):
             if length < need:
-                problems.append(f"{path}: {key} 쪽 끝 구간 길이 {length:.1f}가 끝 모양 길이({need:g})보다 짧다 — "
+                problems.append(f"{path}: {key} 쪽 끝 구간 길이 {fmt_num(length)}가 끝 모양 길이({fmt_num(need)})보다 짧다 — "
                                 f"{which} 꺾는 점을 상자에서 더 떼어 놓는다")
     if sum(lengths) > MAX_LINE:
         problems.append(f"{path}: 선 길이 {sum(lengths):.0f}가 {MAX_LINE}을 넘는다 — 상자를 가까이 모은다")

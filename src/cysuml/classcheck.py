@@ -64,8 +64,9 @@ class Finding:
 
 @dataclass(frozen=True)
 class Report:
-    """failures가 비어 있으면 합격이다. crossings는 선끼리 엇갈린 곳(알림), size는 논리 좌표로 잰 그림 폭·높이(둘레 여백
-    포함), png_size는 scale배로 낼 PNG의 픽셀 수다 — 그 배율로는 너무 커 PNG를 그릴 수 없으면 None이다(합격과 따로 본다)."""
+    """failures가 비어 있으면 합격이다. crossings는 선끼리 엇갈린 곳(알림), size는 그린 것의 범위에 둘레 여백을 둔 논리 좌표
+    폭·높이, png_size는 scale배로 낼 PNG의 픽셀 수다 — 그 배율로는 너무 커 PNG를 그릴 수 없으면 None이다(합격과 따로 본다).
+    둘 다 Canvas.measure 값이다."""
 
     failures: tuple[Finding, ...]
     crossings: tuple[Finding, ...]
@@ -109,21 +110,20 @@ class _Box:
 @dataclass(frozen=True)
 class _Head:
     """선 끝 모양 — 삼각형·마름모(흰색이나 검은색으로 칠한 다각형)와 열린 화살촉(갈래 끝 → tip → 갈래 끝의 선). tip은 선 끝에
-    닿은 꼭짓점, key는 같은 모양인지 견주는 열쇠다."""
+    닿은 꼭짓점이다."""
 
     name: str
     points: tuple[Point, ...]
     closed: bool
     tip: Point
     edges: tuple[Segment, ...]
-    key: tuple[Point, ...]
 
     @classmethod
     def of(cls, record: Union[Line, Polygon]) -> _Head:
         closed = isinstance(record, Polygon)
         pts = record.points
         name = ("삼각형" if len(pts) == 3 else "마름모") if closed else "화살촉"
-        return cls(name, pts, closed, pts[0] if closed else pts[1], tuple(outline([record])), pts)
+        return cls(name, pts, closed, pts[0] if closed else pts[1], tuple(outline([record])))
 
     def holds(self, segments: Iterable[Segment]) -> bool:
         """선분 끝점이 이 모양(삼각형·마름모) 안에 있는지."""
@@ -205,7 +205,8 @@ def check(drawing: Drawing) -> Report:
                 *_lines_through_heads(relations, pairs, near), *_head_overlaps(relations, pairs, near),
                 *_lines_through_labels(relations, labels), *_labels_on_boxes(labels, boxes), *_label_overlaps(labels)]
     measured = drawing.canvas.measure()
-    assert measured is not None  # 상자가 하나 이상이다
+    if measured is None:
+        raise ValueError("그린 것이 없다")
     return Report(tuple(failures), tuple(_crossings(relations, pairs)), *measured, drawing.canvas.scale)
 
 
@@ -301,7 +302,8 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box]) -> Itera
             parts = _parts(r.segments, wide)
             if parts:
                 where = _cover(parts)
-                entry = found.get((b.name, where), lambda: (b, where, any(hits(p, q, b.rect) for p, q in parts), []))
+                entry = found.get((b.name, where), lambda: [b, where, False, []])
+                entry[2] = entry[2] or any(hits(p, q, b.rect) for p, q in parts)  # 묶인 선 가운데 하나라도 상자 안을 지나면
                 _add(entry[3], r)
     for b, where, inside_box, rels in found.values():
         what = "선이 상자를 지난다" if inside_box else f"선이 상자에 {BOX_CLEARANCE}px 안으로 붙어 지나간다"
@@ -318,7 +320,7 @@ def _trunk(a: _Relation, b: _Relation) -> bool:
     x, y = a.placed.relation, b.placed.relation
     if not (x.kind == y.kind and x.kind in TRUNK_KINDS and x.target == y.target and x.source != y.source):
         return False
-    return a.end_shape is not None and b.end_shape is not None and _same(a.end_shape.key, b.end_shape.key)
+    return a.end_shape is not None and b.end_shape is not None and _same(a.end_shape.points, b.end_shape.points)
 
 
 def _alongside(s: Segment, t: Segment) -> Optional[Segment]:
@@ -377,7 +379,7 @@ def _lines_through_heads(relations: list[_Relation], pairs: Pairs,
     found = _Places()
 
     def note(passer: _Relation, owner: _Relation, head: _Head, hit: list[Segment]) -> None:
-        entry = found.get((passer is owner, head.key, tuple(hit)), lambda: (passer is owner, head, [], []))
+        entry = found.get((passer is owner, head.points, tuple(hit)), lambda: (passer is owner, head, [], []))
         _add(entry[2], passer)
         _add(entry[3], owner)
 
@@ -411,12 +413,12 @@ def _head_overlaps(relations: list[_Relation], pairs: Pairs,
     found: list[_Places] = []  # 겹친 두 모양마다 {모양 열쇠: (모양, 그 모양을 그린 관계들)}
 
     def note(r: _Relation, a: _Head, o: _Relation, b: _Head) -> None:
-        entry = next((e for e in found if all(any(_same(k, h.key) for k, _ in e.items) for h in (a, b))), None)
+        entry = next((e for e in found if all(any(_same(k, h.points) for k, _ in e.items) for h in (a, b))), None)
         if entry is None:
             entry = _Places()
             found.append(entry)
         for h, rel in ((a, r), (b, o)):
-            _add(entry.get(h.key, lambda: (h, []))[1], rel)
+            _add(entry.get(h.points, lambda: (h, []))[1], rel)
 
     for r in relations:
         for i, a in enumerate(r.heads):

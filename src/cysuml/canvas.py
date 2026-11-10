@@ -11,7 +11,7 @@ import bisect
 import math
 import numbers
 from dataclasses import dataclass, field, replace
-from typing import Iterable, Optional, Union
+from typing import Iterable, Optional, TypeVar, Union
 
 from PIL import Image, ImageColor, ImageDraw
 
@@ -104,6 +104,7 @@ class Mask:
 
 
 Record = Union[Line, Rect, Ellipse, Polygon, Text, Mask]
+R = TypeVar("R", Line, Rect, Ellipse, Polygon, Text, Mask)
 
 
 def _nums(*values) -> tuple[float, ...]:
@@ -191,7 +192,7 @@ class Canvas:
         self.scale = scale
         self.records: list[Record] = []
 
-    def _add(self, record: Record) -> Record:
+    def _add(self, record: R) -> R:
         self.records.append(record)
         return record
 
@@ -306,18 +307,14 @@ class Canvas:
         return fit
 
     def measure(self) -> Optional[tuple[tuple[float, float], Optional[tuple[int, int]]]]:
-        """(PNG가 덮을 논리 좌표 폭·높이 — 그린 것의 범위와 둘레 PAD, to_image가 낼 PNG의 픽셀 크기). 픽셀 크기는 그림이 너무
-        커(MAX_PIXELS) 그릴 수 없으면 None이다. 그린 것이 없으면 통째로 None."""
+        """(그린 것의 범위에 둘레 PAD를 둔 논리 좌표 폭·높이, to_image가 낼 PNG의 픽셀 크기). PNG는 오른쪽·아래를 픽셀에 맞춰
+        늘려 이보다 1/배율 안쪽으로 조금 더 덮는다(frame). 픽셀 크기는 그림이 너무 커(MAX_PIXELS) 그릴 수 없으면 None이다.
+        그린 것이 없으면 통째로 None."""
         b = self.bounds()
         if b is None:
             return None
         fit = self._fit(b)
         return (b[2] - b[0] + 2 * PAD, b[3] - b[1] + 2 * PAD), None if fit is None else (fit[2], fit[3])
-
-    def png_size(self) -> Optional[tuple[int, int]]:
-        """to_image가 낼 PNG의 픽셀 크기. 그린 것이 없거나 그림이 너무 커(MAX_PIXELS) 그릴 수 없으면 None."""
-        m = self.measure()
-        return None if m is None else m[1]
 
     def frame(self) -> Box:
         """결과 PNG가 덮는 논리 좌표 범위: 그린 것의 범위에 PAD만큼 여백을 두고, 오른쪽·아래를 출력 픽셀에 맞춰 늘린다.
