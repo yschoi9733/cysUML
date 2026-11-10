@@ -284,6 +284,12 @@ def test_label_crossing_a_lifeline_wipes_only_under_itself():
     assert isinstance(recs[i - 1], Mask)
 
 
+def test_label_with_ink_past_its_advance_still_fits_beside_bars():
+    # ƴ는 진행 폭보다 오른쪽으로 더 칠해진다 — 칸을 진행 폭으로 재면 B의 끝나지 않은 막대에 글자 상자가 닿았다
+    lay = lay_of(life("A", "B", "C"), [call("B", "A", "f"), call("A", "C", "ƴƴƴƴƴ"), reply("C", "A")])
+    assert rule_breaks(lay) == []
+
+
 def test_label_keeps_out_of_a_bar_on_a_lifeline_it_passes():
     # B가 C를 부른 채 A가 C에 반환하면 사이 생명선 B의 막대가 그 높이를 지난다 — 글자는 B를 건너지 않는 칸에 놓는다
     lay = lay_of(life("A", "B", "C"), [call("A", "B"), call("B", "C"), reply("C", "A", "veryLongResultName")])
@@ -343,7 +349,7 @@ def test_png_comes_out():
 
 NAMES = ["A", "Customer", ": Service", ": 주문 서비스", ": VeryLongRepositoryName", "UI", ": Db"]
 WORDS = ["get", "save(order)", "find(id)", "check()", "send(phoneNumbers, message)", "조회", "결제 승인(금액)",
-         "processPaymentWithRetry(orderId, amount, currency)", "ok", "x", "목록"]
+         "processPaymentWithRetry(orderId, amount, currency)", "ok", "x", "목록", "ƴƴƴƴƴ", "Ȉ(ƴ)"]  # ƴ·Ȉ는 진행 폭 밖으로 칠해진다
 
 
 def random_diagram(seed):
@@ -457,6 +463,9 @@ def rule_breaks(lay):
                 for p in lay.participants if f.left <= p.x <= f.left + tag]
     for r in lay.refs:
         out += [f"{m.owner}가 {r.owner} 상자 안에 있다" for m in lay.messages if r.top - S.PAD < m.y < r.bottom + S.PAD]
+        box = r.name.box
+        if not (r.left + S._tag_width("ref") < box[0] and box[2] < r.right and r.top < box[1] and box[3] < r.bottom):
+            out.append(f"{r.owner} 이름이 상자 밖이나 꼬리표에 닿는다")
     for o, box in conds:
         if right is not None and box[2] > right:
             out.append(f"{o} 조건 글자가 프레임 밖으로 나간다")

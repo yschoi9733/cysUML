@@ -212,10 +212,16 @@ class PlacedParticipant:
 def _head_box(p: Participant, x: float, width: float, top: float) -> Box:
     """머리가 차지하는 상자(액터는 그림과 이름)."""
     if p.kind == "actor":
-        half = max(9, T.text_width(p.name, True) / 2)
         name = T.place(x, top + ACTOR_NAME, p.name, True, "mm").box
-        return x - half, top, x + half, name[3]
+        return min(x - 9, name[0]), top, max(x + 9, name[2]), name[3]
     return x - width / 2, top, x + width / 2, top + HEAD_H
+
+
+def _extent(lines: list[str]) -> tuple[float, float]:
+    """가운데에 놓은 글자 줄들의 상자가 가운데에서 왼쪽·오른쪽으로 닿는 곳(왼쪽은 음수). 진행 폭이 아니라 상자로 잰다 —
+    진행 폭 밖으로 칠해지는 글자(ƴ 등)가 있으면 상자가 그만큼 넓다."""
+    boxes = [T.place(0, 0, s, False, "mm").box for s in lines]
+    return min(b[0] for b in boxes), max(b[2] for b in boxes)
 
 
 @dataclass(frozen=True)
@@ -499,7 +505,6 @@ class _Bar:
     life: int
     top: int
     terms: set = field(default_factory=set)
-    fixed: bool = False
     protected: bool = False
     depth: int = 0
     last: int = 0  # terms 가운데 가장 늦은 일의 차례(다 놓인 뒤에야 밑변이 정해진다)
@@ -538,7 +543,8 @@ class _Activations:
         self.bars: list[_Bar] = []
 
     def open(self, life: int, e: int, fixed: bool = False) -> _Bar:
-        b = _Bar(life, e, {(e, ACT_H)}, fixed)
+        """막대를 연다. fixed(액터가 받는 호출)면 높이 ACT_H로 끝나 쌓지 않는다."""
+        b = _Bar(life, e, {(e, ACT_H)})
         self.bars.append(b)
         if not fixed:
             self.stack.append(b)
@@ -769,7 +775,8 @@ def _columns(d: Diagram, plan: _Plan) -> _Columns:
         lines = _label_lines(m)
         if not lines:
             continue
-        w = max(T.text_width(s) for s in lines)
+        left_off, right_off = _extent(lines)
+        w = right_off - left_off
         s, t = index[m.source], index[m.target]
         lo, hi = sorted((s, t))
         bounds = [lo, *plan.spanning[k], hi]
@@ -862,7 +869,7 @@ class _Placer:
         return max((self._bottom(b, e) for b in self.plan.bars if b.top < e and b.last < e), default=-INF)
 
     def _free_x(self, e: int, start: float, w: float, row: tuple[float, float]) -> float:
-        """row 높이를 지나는 막대를 LABEL_GAP 넘게 비켜, start에서 오른쪽으로 가장 가까운 글자 왼쪽 끝."""
+        """row 높이를 지나는 막대를 LABEL_GAP 넘게 비켜, start에서 오른쪽으로 가장 가까운 폭 w 상자의 왼쪽 끝."""
         blocks = sorted((bx[0] - LABEL_GAP, bx[2] + LABEL_GAP) for _, bx in self._bar_boxes(e)
                         if bx[1] < row[1] and bx[3] > row[0])
         x = start
@@ -874,8 +881,8 @@ class _Placer:
     def _condition(self, e: int, y: float, start: float, text: str) -> Label:
         s = f"[{text}]"
         rel = T.place(0, y + COND_Y, s, False, "lm").box
-        x = self._free_x(e, start, rel[2] - rel[0], (rel[1] - PAD, rel[3] + PAD))
-        label = Label(s, x, y + COND_Y, "lm")
+        left = self._free_x(e, start, rel[2] - rel[0], (rel[1] - PAD, rel[3] + PAD))
+        label = Label(s, left - rel[0], y + COND_Y, "lm")
         self._add(label.box)
         return label
 
@@ -937,9 +944,10 @@ class _Placer:
             return py + FRAME_AFTER
         return py + REF_H + REF_AFTER
 
-    def _label_x(self, k: int, w: float, mid: float) -> float:
-        """글자 가운데 x. 사이 생명선(아직 만들어지지 않은 것은 빼고)으로 나눈 칸 가운데 글자가 들어가는 칸에, 없으면 막대가
-        지나는 사이 생명선으로만 나눈 칸에(지나는 점선은 흰 바탕으로 지운다) 선 가운데에 가장 가깝게 놓는다."""
+    def _label_x(self, k: int, lines: list[str], mid: float) -> float:
+        """글자 가운데 x. 사이 생명선(아직 만들어지지 않은 것은 빼고)으로 나눈 칸 가운데 글자 상자가 들어가는 칸에, 없으면
+        막대가 지나는 사이 생명선으로만 나눈 칸에(지나는 점선은 흰 바탕으로 지운다) 선 가운데에 가장 가깝게 놓는다."""
+        left_off, right_off = _extent(lines)
         m = self.d.messages[k]
         s, t = self.index[m.source], self.index[m.target]
         lo, hi = sorted((s, t))
@@ -951,8 +959,8 @@ class _Placer:
             for p, q in zip(bounds, bounds[1:]):
                 left = c.x[p] + _margin(m, s, t, p, True, c.width, c.left_ext, c.right_ext, c.actor)
                 right = c.x[q] - _margin(m, s, t, q, False, c.width, c.left_ext, c.right_ext, c.actor)
-                if right - left >= w - EPS:
-                    x = min(max(mid, left + w / 2), right - w / 2)
+                if right - left >= right_off - left_off - EPS:
+                    x = min(max(mid, left - left_off), right - right_off)
                     if best is None or abs(x - mid) < abs(best - mid):
                         best = x
             if best is not None:
@@ -980,8 +988,7 @@ class _Placer:
                                            False)]
         labels_rel = []
         if lines:
-            w = max(T.text_width(s_) for s_ in lines)
-            x = self._label_x(k, w, (c.x[s] + x2) / 2 if m.kind == "create" else (c.x[s] + c.x[t]) / 2)
+            x = self._label_x(k, lines, (c.x[s] + x2) / 2 if m.kind == "create" else (c.x[s] + c.x[t]) / 2)
             dys = ([LABEL_DY] if len(lines) == 1 else [LABEL_DY, CREATE_DY]) if below else \
                 ([-LABEL_DY] if len(lines) == 1 else [-CREATE_DY, -LABEL_DY])
             for text, dy in zip(lines, dys):
@@ -1063,15 +1070,16 @@ class _Placer:
         for part in self.frames.values():
             for cond in part.conditions:
                 right = max(right, cond.box[2] + COND_GAP)
-        ref_tag = _tag_width("ref")
+        name_left = LEFT + _tag_width("ref") + COND_GAP  # ref 이름 상자가 꼬리표에서 떨어지는 곳
         for r, _ in self.refs:
-            right = max(right, LEFT + ref_tag + COND_GAP + T.text_width(r.name) + COND_GAP)
+            left_off, right_off = _extent([r.name])
+            right = max(right, name_left + right_off - left_off + COND_GAP)
         frames = tuple(PlacedFrame(f, f"frames[{f.index}]", LEFT, p.top, right, p.bottom, tuple(p.dividers), tuple(p.conditions))
                        for f in d.fragments for p in (self.frames[f.index],))
         refs = []
         for r, top in self.refs:
-            w = T.text_width(r.name)
-            x = max((LEFT + right) / 2, LEFT + ref_tag + COND_GAP + w / 2)
+            left_off, _ = _extent([r.name])
+            x = max((LEFT + right) / 2, name_left - left_off)
             refs.append(PlacedRef(r, f"frames[{r.index}]", LEFT, top, right, top + REF_H, Label(r.name, x, top + REF_H / 2)))
         notes = tuple(PlacedNote(s, f"notes[{j}]", LEFT, life_end + NOTE_GAP + NOTE_STEP * j,
                                  max(NOTE_MIN_W, math.ceil(T.text_width(s) + NOTE_PAD)), NOTE_H)
