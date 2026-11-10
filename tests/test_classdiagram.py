@@ -173,11 +173,21 @@ def test_member_text_from_objects_and_strings():
         "Shop", "+id: Long", "count", "#tag: String = \"a\"", "+find(id: Long, all: bool): Item", "~reset()"]
 
 
+def test_default_value_may_be_a_json_number_or_boolean():
+    d = C.render({"classes": [{"name": "Cfg", "left": 0, "top": 0, "attributes": [
+        {"name": "count", "type": "int", "default": 0}, {"name": "rate", "default": 0.5},
+        {"name": "on", "type": "bool", "default": True}, {"name": "label", "default": "\"x\""}]}]})
+    assert [t.text for t in owned(d, "Cfg", Text)][1:] == [
+        "-count: int = 0", "-rate = 0.5", "-on: bool = true", "-label = \"x\""]
+
+
 @pytest.mark.parametrize("box, keyword", [
     ({"kind": "interface", "stereotype": "interface"}, "«interface»"),
     ({"kind": "enum", "stereotype": "enumeration"}, "«enumeration»"),
     ({"kind": "enum", "stereotype": "enum"}, "«enumeration»"),
     ({"stereotype": "interface"}, "«interface»"),
+    ({"kind": "interface", "stereotype": "Interface"}, "«interface»"),
+    ({"kind": "enum", "stereotype": "Enumeration"}, "«enumeration»"),
     ({"kind": "enum", "stereotype": "flags"}, "«enumeration, flags»"),
 ])
 def test_stereotype_that_repeats_the_kind_is_written_once(box, keyword):
@@ -303,15 +313,30 @@ def test_labels_keep_off_end_shapes_of_other_relations():
     assert spots.pick("1", [first, (0, 0)]) == (0, 0)
 
 
-def test_two_relations_on_the_same_straight_line_are_refused():
-    for second in ({"kind": "dependency", "from": "A", "to": "B"}, {"kind": "dependency", "from": "B", "to": "A"}):
-        data = two_boxes(kind="association")
-        data["relations"].append(second)
-        with pytest.raises(C.InputError, match=r"^relations\[1\]: relations\[0\]와 같은 자리에 겹쳐 그려진다"):
-            C.render(data)
-    data = two_boxes(kind="association")
+@pytest.mark.parametrize("first, second", [
+    ({}, {"kind": "dependency"}),
+    ({}, {"kind": "dependency", "from": "B", "to": "A"}),
+    ({}, {"kind": "dependency", "via": [[200, 24]]}),  # 한 직선 위에 꺾는 점 하나를 더한 같은 선
+    ({"via": [[45, -100], [345, -100]]}, {"kind": "dependency", "via": [[45, -100], [200, -100], [345, -100]]}),
+    ({"via": [[45, -100], [345, -100]]}, {"kind": "dependency", "via": [[45, -60], [45, -150], [345, -150]]}),
+])
+def test_relations_drawn_over_each_other_are_refused(first, second):
+    data = two_boxes(kind="association", **first)
+    data["relations"].append({"from": "A", "to": "B", **second})
+    with pytest.raises(C.InputError, match=r"^relations\[1\]: relations\[0\]와 \(.*\) 구간이 겹쳐 그려진다"):
+        C.render(data)
+
+
+def test_line_that_doubles_back_on_itself_is_refused():
+    with pytest.raises(C.InputError, match=r"^relations\[0\]: 선이 \(150\.0, 24\.0\)~\(200\.0, 24\.0\) 구간을 되짚어"):
+        C.render(two_boxes(kind="association", via=[[200, 24], [150, 24]]))
+
+
+def test_lines_that_only_meet_or_run_straight_through_a_bend_are_fine():
+    data = two_boxes(kind="association", via=[[200, 24]])
     data["relations"].append({"kind": "dependency", "from": "A", "to": "B", "via": [[195, 120]]})
-    assert len(C.render(data).layout.relations) == 2
+    data["relations"].append({"kind": "dependency", "from": "B", "to": "A", "via": [[195, -80]]})
+    assert len(C.render(data).layout.relations) == 3
 
 
 def test_names_that_point_to_boxes_ignore_surrounding_spaces():
@@ -380,6 +405,10 @@ def cls0(**fields):
     (cls0(attributes="-a"), "classes[0].attributes: 목록이어야 한다"),
     (cls0(attributes=[{"type": "int"}]), "classes[0].attributes[0]: 'name' 필드가 빠졌다"),
     (cls0(attributes=[{"name": "a", "params": []}]), "classes[0].attributes[0].params: 모르는 필드다"),
+    (cls0(attributes=[{"name": "a", "default": None}]), "classes[0].attributes[0].default: 문자열이나 수, true·false여야"),
+    (cls0(attributes=[{"name": "a", "default": float("nan")}]), "classes[0].attributes[0].default: 유한한 수여야"),
+    (cls0(attributes=[{"name": "a", "default": ""}]), "classes[0].attributes[0].default: 비어 있다"),
+    (cls0(attributes=[{"name": "a", "type": 3}]), "classes[0].attributes[0].type: 문자열이어야 한다"),
     (cls0(operations=[{"name": "go", "static": "yes"}]), "classes[0].operations[0].static: true나 false여야 한다"),
     (cls0(operations=[{"name": "go", "visibility": "public"}]), "classes[0].operations[0].visibility: '+' · '-'"),
     (cls0(operations=[{"name": "go", "params": "a, b"}]), "classes[0].operations[0].params: 목록이어야 한다"),
