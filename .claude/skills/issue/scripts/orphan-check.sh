@@ -16,7 +16,9 @@
 #                OTHER_FILES 로 사람이 본다
 #   OTHER_FILES  그 밖의 것이 있다 — 미커밋 작업일 수 있다. other <상대경로> 줄(최대 20줄)
 # 둘째 줄: container in|out — <레포 루트>/.claude/worktrees/ 아래인지
-# OTHER_FILES 뒤에 other-more 20+ 줄이 붙으면 other 목록이 전부가 아니다 — 21개째에서 세기를 멈췄다
+# OTHER_FILES 뒤에 other-more 20+ 줄이 붙으면 other 목록이 전부가 아니다 — 21개째에서 세기를 멈췄다. 20개를 보여 준
+# 뒤 파일이 늘면 새 파일이 21번째 뒤로 가 other 줄은 그대로이고 이 줄만 붙을 수 있다(실측) — 앞선 출력과 견줄 때는
+# 이 줄까지 본다
 #
 # IDE 가 되살린 흔적은 지워도 되는 것으로 치지 않는다 — JetBrains IDE(PyCharm 등)가 열고 있던 워크트리를 지우면
 # .idea/ 를 되살릴 수 있지만, 무엇이 되살아나는지 재 보지 않았으니 흔적으로 치지 않고 OTHER_FILES 로 사람이 본다.
