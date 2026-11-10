@@ -239,11 +239,23 @@ def test_caller_of_an_actor_lasts_as_long_as_the_actors_bar():
     assert a.bottom >= v.bottom
 
 
-def test_called_actor_answers_from_its_bar():
+def test_called_actor_answers_from_its_lifeline_below_its_short_bar():
     lay = lay_of(life("A", "V", actor=("V",)), [call("A", "V", "ask()"), reply("V", "A", "ans")])
     (v,) = bars_of(lay, "V")
     m = lay.messages[1]
-    assert m.start == v.rect[0] and v.bottom == m.y
+    assert v.bottom == v.top + S.ACT_H and m.start == lay.participants[1].x and m.y >= v.bottom + S.CLEAR
+
+
+@pytest.mark.parametrize("frame", [
+    {"kind": "loop", "first": 1, "last": 2},
+    {"kind": "alt", "branches": [{"condition": "a", "first": 1, "last": 1}, {"condition": "b", "first": 2, "last": 2}]},
+])
+def test_actor_bar_opened_before_a_frame_ends_before_it(frame):
+    lay = lay_of(life("X", "Y", "V", actor=("V",)), [call("X", "V", "ask()"), reply("Y", "V", "a"), reply("Y", "V", "b")],
+                 frames=[frame])
+    (v,), f = bars_of(lay, "V"), lay.frames[0]
+    assert v.bottom <= f.top - S.EDGE_CLEAR
+    assert rule_breaks(lay) == []
 
 
 def test_frame_first_keeps_the_first_message_at_its_usual_height():
