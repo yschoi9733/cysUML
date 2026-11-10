@@ -176,6 +176,8 @@ def test_member_text_from_objects_and_strings():
 @pytest.mark.parametrize("box, keyword", [
     ({"kind": "interface", "stereotype": "interface"}, "«interface»"),
     ({"kind": "enum", "stereotype": "enumeration"}, "«enumeration»"),
+    ({"kind": "enum", "stereotype": "enum"}, "«enumeration»"),
+    ({"stereotype": "interface"}, "«interface»"),
     ({"kind": "enum", "stereotype": "flags"}, "«enumeration, flags»"),
 ])
 def test_stereotype_that_repeats_the_kind_is_written_once(box, keyword):
@@ -212,8 +214,11 @@ def test_interface_and_enum_hide_empty_sections_but_class_keeps_them():
 
 
 def touches_a_line(drawing, box):
+    """글자의 흰 바탕이 관계선이나 선 끝 모양(그린 기록 그대로)에 닿는지."""
+    owners = {r.owner for r in drawing.layout.relations}
+    drawn = [r for r in drawing.canvas.records if r.owner in owners and isinstance(r, (Line, Polygon))]
     wide = C._grow(box, C.LABEL_CLEAR)
-    return any(C._hits(p, q, wide) for r in drawing.layout.relations for p, q in zip(r.points, r.points[1:]))
+    return any(C._hits(p, q, wide) for p, q in C._outline_segments(drawn))
 
 
 def test_association_name_sits_above_the_middle_of_a_rightward_line():
@@ -277,9 +282,42 @@ def test_multiplicities_keep_off_lines_and_each_other():
     labels = [t for t in d.canvas.records if isinstance(t, Text) and t.bg]
     assert len(labels) == 5
     for i, t in enumerate(labels):
+        wide = C._grow(t.box, C.LABEL_CLEAR)
         assert not touches_a_line(d, t.box), t.text
-        assert all(C._gap(t.box, p.rect) >= 0 for p in d.layout.boxes), t.text
-        assert all(C._gap(C._grow(t.box, C.LABEL_CLEAR), u.box) >= 0 for u in labels[:i]), t.text
+        assert all(C._gap(wide, p.rect) >= 0 for p in d.layout.boxes), t.text
+        assert all(C._gap(wide, u.box) >= 0 for u in labels[:i]), t.text
+
+
+def test_labels_keep_off_end_shapes_of_other_relations():
+    d = C.render({"classes": [{"name": "A", "left": 0, "top": 0, "width": 100, "height": 60},
+                              {"name": "B", "left": 0, "top": 200, "width": 100, "height": 60},
+                              {"name": "C", "left": 150, "top": 130, "width": 100, "height": 40}],
+                  "relations": [{"kind": "generalization", "from": "C", "to": "B"},
+                                {"kind": "association", "from": "A", "to": "B", "to_multiplicity": "1..*"}]})
+    (label,) = [t for t in d.canvas.records if isinstance(t, Text) and t.bg]
+    assert not touches_a_line(d, label.box)
+
+    triangle = Polygon(((60, 40), (80, 30), (80, 50)))
+    spots = C._Spots([(-500, -500, -400, -400)], C._outline_segments([triangle]))
+    first = (70, 40)  # 삼각형 위 — 선분만 보면 닿는 데가 없다
+    assert spots.pick("1", [first, (0, 0)]) == (0, 0)
+
+
+def test_two_relations_on_the_same_straight_line_are_refused():
+    for second in ({"kind": "dependency", "from": "A", "to": "B"}, {"kind": "dependency", "from": "B", "to": "A"}):
+        data = two_boxes(kind="association")
+        data["relations"].append(second)
+        with pytest.raises(C.InputError, match=r"^relations\[1\]: relations\[0\]와 같은 자리에 겹쳐 그려진다"):
+            C.render(data)
+    data = two_boxes(kind="association")
+    data["relations"].append({"kind": "dependency", "from": "A", "to": "B", "via": [[195, 120]]})
+    assert len(C.render(data).layout.relations) == 2
+
+
+def test_names_that_point_to_boxes_ignore_surrounding_spaces():
+    d = C.render({"classes": [{"name": " A ", "left": 0, "top": 0}, {"name": "B", "left": 300, "top": 0}],
+                  "relations": [{"kind": "association", "from": "A", "to": "B  "}]})
+    assert [p.box.name for p in d.layout.boxes] == ["A", "B"] and d.layout.relations[0].owner == "A->B"
 
 
 def test_relation_owners_are_unique():
@@ -394,6 +432,13 @@ def test_all_problems_are_reported_at_once():
     assert isinstance(e.value, ValueError) and str(e.value) == "\n".join(e.value.problems)
 
 
+def test_missing_box_is_reported_even_when_the_relation_has_other_problems():
+    data = mutate(rel(kind="bogus", **{"from": "X"}, navigable="sideways"))
+    with pytest.raises(C.InputError) as e:
+        C.parse(data)
+    assert [p.split(":")[0] for p in e.value.problems] == ["relations[0].kind", "relations[0].from"]
+
+
 @pytest.mark.parametrize("change, expected", [
     (rel(via=[[10, 10]]), "relations[0].via[0]: 꺾는 점 (10.0, 10.0)이 from 상자 'A'(0, 0, 90×48) 안이나 변 위에 있다"),
     (rel(via=[[150, 100], [300, 24]]), "relations[0].via[1]: 꺾는 점 (300.0, 24.0)이 to 상자 'B'"),
@@ -409,6 +454,9 @@ def test_all_problems_are_reported_at_once():
      "relations[0]: to 쪽 끝 구간 길이 12.0가 끝 모양 길이(18)보다 짧다 — 마지막 꺾는 점을"),
     (lambda d: d["classes"][0].update(left=-999_000) or rel(kind="dependency")(d), "relations[0]: 선 길이 999210가 200000을 넘는다"),
     (rel(to="A", via=[[200, 24], [300, 24]]), "relations[0]: 선의 두 끝이 같은 점 (90.0, 24.0)이다"),
+    (rel(via=[[-50, 24]]), "relations[0]: 선이 from 상자 'A'(0, 0, 90×48) 안을 지난다"),
+    (rel(via=[[320, 24], [345, -60]]), "relations[0]: 선이 to 상자 'B'(300, 0, 90×48) 안을 지난다"),
+    (rel(to="A", via=[[120, 24], [-30, 24]]), "relations[0]: 선이 from 상자 'A'"),
 ])
 def test_layout_refuses_lines_it_cannot_draw(change, expected):
     diagram = C.parse(mutate(change))
