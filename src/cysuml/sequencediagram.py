@@ -506,6 +506,7 @@ class _Bar:
     top: int
     terms: set = field(default_factory=set)
     protected: bool = False
+    top_off: float = 0.0  # 윗변 = top번째 일의 높이 + top_off(alt 칸 나눔선 아래에서 이어지는 막대만 0이 아니다)
     depth: int = 0
     last: int = 0  # terms 가운데 가장 늦은 일의 차례(다 놓인 뒤에야 밑변이 정해진다)
 
@@ -528,7 +529,8 @@ class _Activations:
     - 보내는 생명선에 열린 막대가 있으면 그 위에 쌓인 막대(그가 부른 쪽)를 닫는다. 액터가 보내거나, 열린 막대가 없는
       생명선이 보내면 열린 막대를 모두 닫는다(열린 막대가 없는 생명선은 그 자리에서 막대를 연다). 반환은 막대 없이 보내도
       다른 막대를 닫지 않는다 — 받는 쪽이 기다리던 막대가 끊기지 않게.
-    - 반환은 보내는 막대를 그 높이에서 닫는다. 받는 생명선에 열린 막대가 있으면 그 위를 닫고 잇고, 없으면 연다.
+    - 반환은 보내는 막대를 그 높이에서 닫는다. 받는 생명선에 열린 막대가 있으면 그 위를 닫고 잇고, 없으면 그 자리에서
+      연다(다른 막대는 닫지 않는다).
     - 액터가 받는 호출은 높이 ACT_H로 그린다. 만드는 메시지는 막대를 만들지 않는다.
     닫는 막대의 밑변은 "윗변 + ACT_H"와 그 막대가 마지막으로 주고받은 높이 가운데 아래쪽이고, 그 위에 쌓였던 막대보다는
     아래다. 위 막대가 메시지 높이에서 끝났으면 아래 막대는 그보다 CLEAR만큼 더 잇는다 — 그 메시지 선이 아래 막대 생명선을
@@ -537,28 +539,15 @@ class _Activations:
     프레임 규칙: 프레임 첫 메시지가 닫을 막대는 프레임 앞에서 닫는다. 그때 남아 열려 있던 막대는 부른 쪽이 메시지를 보내도
     프레임 안에서 닫지 않고(protected) 프레임 밑변 아래까지 잇는다 — 그런 막대의 밑변은 막대 높이로만 정해져 프레임 윗변
     바로 밑에서 끝날 수 있어서다. 다만 그 생명선이 반환하면 그 높이에서 끝난다(프레임 윗변에서 FRAME_HEAD 넘게 아래다).
-    프레임 안에서 연 막대는 칸이 끝날 때 닫는다. alt의 칸은 서로 대신하는 갈래라, 앞 칸에서 반환한 그런 막대는 다음 칸에서
-    그 생명선이 메시지를 주고받으면 되살려 잇는다. ref는 그때 열린 막대를 ref 아래까지 잇는다.
+    프레임 안에서 연 막대는 칸이 끝날 때 닫는다. alt의 칸은 서로 대신하는 갈래라 칸마다 프레임이 열릴 때의 막대에서 시작한다
+    — 앞 칸에서 반환한 그런 막대는 거기서 끝나고, 다음 칸에서는 칸 나눔선 EDGE_CLEAR 아래에서 이어지는 막대를 새로 연다.
+    ref는 그때 열린 막대를 ref 아래까지 잇는다.
     """
 
     def __init__(self):
         self.stack: list[_Bar] = []
         self.bars: list[_Bar] = []
-        self.kept: list[_Bar] = []       # 지금 프레임이 열릴 때 열려 있던 막대(쌓인 차례대로)
-        self.returned: list[_Bar] = []   # 그 가운데 앞 칸에서 반환해 닫힌 막대
-
-    def _resume(self, life: int) -> None:
-        """앞 칸에서 반환한 막대를, 그 생명선에 열린 막대가 없으면 프레임이 열릴 때의 쌓인 자리로 되살린다."""
-        b = next((x for x in self.returned if x.life == life), None)
-        if b is None or self.find(life) is not None:
-            return
-        self.returned.remove(b)
-        rank = self.kept.index(b)
-        at = 0
-        for i, x in enumerate(self.stack):
-            if x in self.kept and self.kept.index(x) < rank:
-                at = i + 1
-        self.stack.insert(at, b)
+        self.kept: list[_Bar] = []  # 지금 프레임이 열릴 때 열려 있던 막대(쌓인 차례대로, alt는 지금 칸에서 잇는 막대)
 
     def open(self, life: int, e: int, fixed: bool = False) -> _Bar:
         """막대를 연다. fixed(액터가 받는 호출)면 높이 ACT_H로 끝나 쌓지 않는다."""
@@ -591,8 +580,6 @@ class _Activations:
     def message(self, src: int, dst: int, kind: str, e: int, src_actor: bool, dst_actor: bool
                 ) -> tuple[Optional[_Bar], Optional[_Bar]]:
         """메시지 하나를 넣고 (선이 시작하는 막대, 화살촉이 닿는 막대)를 돌려준다. 막대가 없는 끝은 None이다."""
-        self._resume(src)
-        self._resume(dst)
         s = self.send_from(src, kind, src_actor)
         if s is None and not src_actor and kind != "reply":
             s = self.open(src, e)
@@ -607,7 +594,6 @@ class _Activations:
                     self.close_above(d)
                     d.terms.add((e, 0))
                 else:
-                    self.close_all()
                     d = self.open(dst, e)
         else:
             if s is not None:
@@ -631,12 +617,17 @@ class _Activations:
         self.send_from(src, kind, src_actor)
         for b in self.stack:
             b.protected = True
-        self.kept, self.returned = list(self.stack), []
+        self.kept = list(self.stack)
 
-    def branch(self) -> None:
-        """alt 칸 나눔: 앞 칸에서 연 막대를 닫고, 앞 칸에서 반환한 지킨 막대를 다음 칸에서 되살릴 수 있게 적어 둔다."""
-        self.close_all()
-        self.returned += [b for b in self.kept if b not in self.stack and b not in self.returned]
+    def branch(self, e: int) -> None:
+        """alt 칸 나눔: 앞 칸에서 연 막대를 닫고, 프레임이 열릴 때의 막대로 돌아간다. 앞 칸에서 반환해 끝난 막대는 이 칸에서
+        이어 가는 막대를 새로 연다."""
+        self.close_all()  # 남는 것은 지킨 막대뿐이고, 쌓인 차례는 kept와 같다
+        for i, b in enumerate(self.kept):
+            if b not in self.stack:
+                self.kept[i] = _Bar(b.life, e, {(e, EDGE_CLEAR)}, protected=True, top_off=EDGE_CLEAR)
+                self.bars.append(self.kept[i])
+        self.stack = list(self.kept)
 
     def frame_end(self, e: int) -> None:
         self.close_all()
@@ -644,7 +635,7 @@ class _Activations:
             b.protected = False
             if b in self.stack:  # 프레임 안에서 반환한 막대는 이미 끝났다
                 b.terms.add((e, EDGE_CLEAR))
-        self.kept, self.returned = [], []
+        self.kept = []
 
     def ref(self, e: int) -> None:
         for b in self.stack:
@@ -663,6 +654,8 @@ class _Event:
 
 @dataclass
 class _Plan:
+    index: dict[str, int]                                  # 참여자 이름 → 자리(왼쪽부터)
+    actor: tuple[bool, ...]
     events: list[_Event]
     bars: list[_Bar]
     attach: list[tuple[Optional[_Bar], Optional[_Bar]]]  # 메시지마다 (선이 시작하는 막대, 화살촉이 닿는 막대)
@@ -695,7 +688,7 @@ def _events(d: Diagram) -> list[_Event]:
 
 def _plan(d: Diagram) -> _Plan:
     index = {p.name: i for i, p in enumerate(d.participants)}
-    actor = [p.kind == "actor" for p in d.participants]
+    actor = tuple(p.kind == "actor" for p in d.participants)
     events = _events(d)
     acts = _Activations()
     attach: list = [(None, None)] * len(d.messages)
@@ -711,22 +704,25 @@ def _plan(d: Diagram) -> _Plan:
             s = index[m.source]
             acts.frame_start(s, m.kind, actor[s])
         elif ev.kind == "branch":
-            acts.branch()
+            acts.branch(e)
         elif ev.kind == "end":
             acts.frame_end(e)
         else:
             acts.ref(e)
     acts.close_all()
     bars = acts.bars
+    # 감싸는 막대는 먼저 시작한 막대다. 같은 칸 나눔에서 함께 이어 가는 막대는 높이가 같아, 먼저 연(아래에 쌓인) 막대를 앞으로 친다
+    order = {id(b): i for i, b in enumerate(bars)}
     for b in bars:
         b.last = max(j for j, _ in b.terms)
-        b.depth = sum(1 for o in bars if o is not b and o.life == b.life and o.top < b.top and _ends_after(o, b.top))
+        b.depth = sum(1 for o in bars if o.life == b.life and (o.top, order[id(o)]) < (b.top, order[id(b)])
+                      and _ends_after(o, b.top))
     created = {index[m.target]: k for k, m in enumerate(d.messages) if m.kind == "create"}
     spanning = []
     for k, m in enumerate(d.messages):
         lo, hi = sorted((index[m.source], index[m.target]))
         spanning.append(tuple(sorted({b.life for b in bars if lo < b.life < hi and b.top < at[k] and _ends_after(b, at[k])})))
-    return _Plan(events, bars, attach, at, created, spanning)
+    return _Plan(index, actor, events, bars, attach, at, created, spanning)
 
 
 # ---------------------------------------------------------------- 2. 가로
@@ -734,9 +730,10 @@ def _plan(d: Diagram) -> _Plan:
 
 @dataclass(frozen=True)
 class _Columns:
+    """생명선 열. 막대 왼쪽 끝은 늘 가운데에서 ACT_W / 2이고, 오른쪽 끝은 겹친 막대만큼 더 나간다."""
+
     x: tuple[float, ...]          # 생명선 가운데
     width: tuple[float, ...]      # 머리 폭(액터는 자리 폭)
-    left_ext: tuple[float, ...]   # 생명선 가운데에서 막대 왼쪽 끝까지
     right_ext: tuple[float, ...]  # 생명선 가운데에서 가장 깊이 겹친 막대 오른쪽 끝까지
     actor: tuple[bool, ...]
 
@@ -756,16 +753,16 @@ def _label_below(m: Message, rightward: bool) -> bool:
     return m.kind == "reply" or not rightward
 
 
-def _margin(m: Message, s: int, t: int, z: int, toward_right: bool, width, left_ext, right_ext, actor) -> float:
+def _margin(m: Message, s: int, t: int, z: int, toward_right: bool, cols: _Columns) -> float:
     """메시지 글자가 칸 경계 생명선 z에서 떨어져야 하는 거리(z 가운데부터). toward_right면 칸이 z의 오른쪽에 있다."""
     if z == t and m.kind == "create":
-        base = width[z] / 2
+        base = cols.width[z] / 2
     else:
-        base = right_ext[z] if toward_right else left_ext[z]
+        base = cols.right_ext[z] if toward_right else ACT_W / 2
     out = base + LABEL_GAP
     if z == t:
         out += TIP_ROOM
-    if z in (s, t) and actor[z]:
+    if z in (s, t) and cols.actor[z]:
         out += ACTOR_ROOM
     return out
 
@@ -774,16 +771,14 @@ def _columns(d: Diagram, plan: _Plan) -> _Columns:
     """이웃 생명선 간격 = 머리가 닿지 않고, 막대가 이웃 머리에 닿지 않고, 그 사이를 지나는 메시지마다 글자가 들어가는 칸이
     하나는 있을 만큼. 칸은 그 메시지 높이를 막대가 지나는 사이 생명선으로 나눈다(막대가 없는 생명선은 글자가 건너고 그 밑
     점선은 지운다). 여러 칸을 건너는 메시지는 가장 덜 모자란 칸을 넓히고, 모자란 만큼 그 칸의 간격에 나눈다."""
-    ps = d.participants
-    index = {p.name: i for i, p in enumerate(ps)}
+    ps, index = d.participants, plan.index
     width = tuple(float(max(ACTOR_W, math.ceil(T.text_width(p.name, True) + ACTOR_PAD))) if p.kind == "actor"
                   else float(max(LIFE_W, math.ceil(T.text_width(p.name, True) + HEAD_PAD))) for p in ps)
-    actor = tuple(p.kind == "actor" for p in ps)
     depth = [0] * len(ps)
     for b in plan.bars:
         depth[b.life] = max(depth[b.life], b.depth)
-    left_ext = tuple(ACT_W / 2 for _ in ps)
     right_ext = tuple(ACT_W / 2 + NEST * dp for dp in depth)
+    shape = _Columns((), width, right_ext, plan.actor)  # 간격을 정하는 동안 쓰는 열(가운데 x는 아직 없다)
     gaps = [max(float(SLOT_GAP), right_ext[i] + LABEL_GAP - width[i] / 2) for i in range(len(ps) - 1)]
 
     def offsets() -> list[float]:
@@ -807,8 +802,7 @@ def _columns(d: Diagram, plan: _Plan) -> _Columns:
         xs = offsets()
         best = None
         for p, q in zip(bounds, bounds[1:]):
-            need = w + _margin(m, s, t, p, True, width, left_ext, right_ext, actor) + \
-                _margin(m, s, t, q, False, width, left_ext, right_ext, actor)
+            need = w + _margin(m, s, t, p, True, shape) + _margin(m, s, t, q, False, shape)
             lack = need - (xs[q] - xs[p])
             if best is None or lack < best[0]:
                 best = lack, p, q
@@ -818,10 +812,10 @@ def _columns(d: Diagram, plan: _Plan) -> _Columns:
                 gaps[g] += lack / (q - p)
     if d.fragments or d.refs:
         tag = max(_tag_width(op) for op in {f.kind for f in d.fragments} | ({"ref"} if d.refs else set()))
-        x0 = max(LEFT + FRAME_INSET + width[0] / 2, LEFT + tag + COND_GAP + left_ext[0])
+        x0 = max(LEFT + FRAME_INSET + width[0] / 2, LEFT + tag + COND_GAP + ACT_W / 2)
     else:
         x0 = LEFT + width[0] / 2
-    return _Columns(tuple(x0 + o for o in offsets()), width, left_ext, right_ext, actor)
+    return _Columns(tuple(x0 + o for o in offsets()), width, right_ext, plan.actor)
 
 
 # ---------------------------------------------------------------- 3. 세로
@@ -847,7 +841,7 @@ class _Placer:
 
     def __init__(self, d: Diagram, plan: _Plan, cols: _Columns):
         self.d, self.plan, self.cols = d, plan, cols
-        self.index = {p.name: i for i, p in enumerate(d.participants)}
+        self.index = plan.index
         self.ys: list[float] = []
         self.obstacles: list[Box] = []
         self.floor = 0.0
@@ -886,7 +880,7 @@ class _Placer:
         for b in self.plan.bars:
             if b.top < e:
                 x = self._bar_x(b)
-                out.append((b, (x - ACT_W / 2, self.ys[b.top], x + ACT_W / 2, self._bottom(b, e))))
+                out.append((b, (x - ACT_W / 2, self.ys[b.top] + b.top_off, x + ACT_W / 2, self._bottom(b, e))))
         return out
 
     def _closed_bottom(self, e: int) -> float:
@@ -894,7 +888,7 @@ class _Placer:
 
     def _free_x(self, e: int, start: float, w: float, row: tuple[float, float]) -> float:
         """row 높이를 지나는 막대를 LABEL_GAP 넘게 비켜, start에서 오른쪽으로 가장 가까운 폭 w 상자의 왼쪽 끝."""
-        blocks = sorted((bx[0] - LABEL_GAP, bx[2] + LABEL_GAP) for _, bx in self._bar_boxes(e)
+        blocks = sorted((bx[0] - LABEL_GAP, bx[2] + LABEL_GAP) for _, bx in self._bar_boxes(e + 1)  # 이 칸에서 막 연 막대까지
                         if bx[1] < row[1] and bx[3] > row[0])
         x = start
         for a, b in blocks:
@@ -981,8 +975,8 @@ class _Placer:
             bounds = [lo, *inner, hi]
             best = None
             for p, q in zip(bounds, bounds[1:]):
-                left = c.x[p] + _margin(m, s, t, p, True, c.width, c.left_ext, c.right_ext, c.actor)
-                right = c.x[q] - _margin(m, s, t, q, False, c.width, c.left_ext, c.right_ext, c.actor)
+                left = c.x[p] + _margin(m, s, t, p, True, c)
+                right = c.x[q] - _margin(m, s, t, q, False, c)
                 if right - left >= right_off - left_off - EPS:
                     x = min(max(mid, left - left_off), right - right_off)
                     if best is None or abs(x - mid) < abs(best - mid):
@@ -1081,7 +1075,8 @@ class _Placer:
         d, c, done = self.d, self.cols, len(self.plan.events)
         bars = []
         for b in self.plan.bars:
-            bars.append(PlacedBar(d.participants[b.life].name, self._bar_x(b), self.ys[b.top], self._bottom(b, done), b.depth))
+            bars.append(PlacedBar(d.participants[b.life].name, self._bar_x(b), self.ys[b.top] + b.top_off,
+                                  self._bottom(b, done), b.depth))
         life_end = max([self.floor] + [b.bottom for b in bars]) + LIFE_TAIL
         participants = []
         for i, p in enumerate(d.participants):

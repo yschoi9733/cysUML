@@ -265,15 +265,57 @@ def test_bar_open_when_a_frame_starts_ends_where_it_replies_inside():
     assert second.depth == 0 and second.top == lay.messages[2].y  # 다시 부른 것을 겹친 막대로 그리지 않는다
 
 
-def test_alt_branches_are_alternatives_for_bars_kept_from_before():
-    # B는 두 칸에서 각각 반환한다 — 앞 칸 반환에서 끊기지 않고 뒤 칸 반환까지 잇는다. C는 첫 칸에서만 반환해 거기서 끝난다
+def test_each_alt_branch_starts_from_the_bars_open_at_the_frame():
+    # B는 두 칸에서 각각 반환한다 — 첫 칸 반환에서 끝나고, 둘째 칸은 칸 나눔선 아래에서 이어 가는 막대에서 반환한다.
+    # C는 첫 칸에서만 반환한다 — 둘째 칸 갈래에서는 아직 일하므로 그 칸에서도 막대가 있다
     lay = lay_of(life("A", "B", "C"), [call("A", "B"), call("B", "C"), reply("C", "B", "ok"), reply("B", "A", "x"),
                                        reply("B", "A", "y")],
                  frames=[{"kind": "alt", "branches": [{"condition": "ok", "first": 2, "last": 3},
                                                       {"condition": "else", "first": 4, "last": 4}]}])
-    (b,), (c,) = bars_of(lay, "B"), bars_of(lay, "C")
-    assert b.bottom == lay.messages[4].y and lay.messages[4].start == b.rect[0]
-    assert c.bottom == lay.messages[2].y
+    (divider,) = lay.frames[0].dividers
+    b1, b2 = bars_of(lay, "B")
+    assert b1.bottom == lay.messages[3].y
+    assert b2.top == divider + S.EDGE_CLEAR and b2.bottom == lay.messages[4].y and lay.messages[4].start == b2.rect[0]
+    c1, c2 = bars_of(lay, "C")
+    assert c1.bottom == lay.messages[2].y and c2.top == divider + S.EDGE_CLEAR
+    assert rule_breaks(lay) == []
+
+
+def test_nested_bars_going_on_in_the_next_branch_stay_nested():
+    # A에 겹친 막대가 둘 열린 채 alt가 열리고 첫 칸에서 둘 다 반환한다 — 둘째 칸에서 이어 가는 두 막대도 겹친 채다
+    lay = lay_of(life("A", "B"), [call("A", "B"), call("B", "A", "cb()"), reply("A", "B"), reply("A", "B"), reply("A", "B")],
+                 frames=[{"kind": "alt", "branches": [{"condition": "x", "first": 2, "last": 3},
+                                                      {"condition": "else", "first": 4, "last": 4}]}])
+    (divider,) = lay.frames[0].dividers
+    going_on = [b for b in bars_of(lay, "A") if b.top == divider + S.EDGE_CLEAR]
+    assert sorted(b.depth for b in going_on) == [0, 1]
+    assert rule_breaks(lay) == []
+
+
+def test_reply_after_returning_in_a_branch_leaves_from_the_bare_lifeline():
+    lay = lay_of(life("A", "B", "C"), [call("A", "B"), reply("B", "A"), reply("B", "C"), call("B", "C")],
+                 frames=[{"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 2},
+                                                      {"condition": "else", "first": 3, "last": 3}]}])
+    m = lay.messages[2]
+    assert m.start == lay.participants[1].x
+    assert not any(b.owner == "B" and b.top <= m.y <= b.bottom for b in lay.bars)
+    assert rule_breaks(lay) == []
+
+
+def test_bar_kept_through_a_branch_that_does_not_use_it_goes_on_after_the_alt():
+    lay = lay_of(life("A", "B", "C"), [call("A", "B"), reply("B", "A", "ok"), call("A", "C", "log()"), reply("B", "A", "late")],
+                 frames=[{"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 1},
+                                                      {"condition": "else", "first": 2, "last": 2}]}])
+    late = lay.messages[3]
+    b = bars_of(lay, "B")[-1]
+    assert b.top <= late.y == b.bottom and late.start == b.rect[0]
+
+
+def test_reply_to_a_lifeline_without_a_bar_keeps_other_bars():
+    lay = lay_of(life("A", "B", "C", "D"), [call("A", "B"), call("B", "C"), reply("C", "D", "r"), reply("B", "A")])
+    (a,), (b,) = bars_of(lay, "A"), bars_of(lay, "B")
+    assert a.bottom >= lay.messages[3].y and b.bottom == lay.messages[3].y
+    assert len(bars_of(lay, "D")) == 1
 
 
 def test_bar_opened_in_a_frame_is_closed_before_the_frame_ends():
@@ -486,7 +528,8 @@ def rule_breaks(lay):
         for b in lay.bars:
             over_top, over_bottom = b.top < f.top < b.bottom, b.top < f.bottom < b.bottom
             returns = any(m.message.kind == "reply" and m.y == b.bottom and attached(m, b, m.start) for m in lay.messages)
-            if over_bottom and not over_top or over_top and not over_bottom and not returns:
+            goes_on = any(b.top == y + S.EDGE_CLEAR for y in getattr(f, "dividers", ()))  # 앞 칸에서 반환한 막대를 이어 간다
+            if over_bottom and not over_top and not goes_on or over_top and not over_bottom and not returns:
                 out.append(f"{f.owner}가 {b.owner} 막대를 자른다")
             if not (f.left < b.rect[0] and b.rect[2] < f.right):
                 out.append(f"{b.owner} 막대가 {f.owner} 옆 변 밖으로 나간다")
