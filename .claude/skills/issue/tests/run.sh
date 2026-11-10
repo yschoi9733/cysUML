@@ -943,10 +943,12 @@ for want in diagrams build dist; do
 done
 # 비밀 값 파일은 다른 곳에 없을 수 있다 — 사람이 본다.
 printf 'OPENAI_API_KEY=x\n' > "$IG/.env"
+printf 'OPENAI_API_KEY=y\n' > "$IG/.env.local"
 run "$R" "$S/ignored-check.sh" "$IG"
 check "ignored: 비밀 값 파일" KEEP
 has "ignored: .env 줄" "keep .env"
-rm -f "$IG/.env"
+has "ignored: .env.local 줄" "keep .env.local"
+rm -f "$IG/.env" "$IG/.env.local"
 mkdir -p "$IG/.vscode"
 printf '{}\n' > "$IG/.vscode/settings.json"
 run "$R" "$S/ignored-check.sh" "$IG"
