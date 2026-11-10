@@ -134,9 +134,20 @@ def test_all_problems_are_reported_together():
     assert len(found) >= 5
 
 
+def test_spacing_constants_keep_bar_ends_in_event_order():
+    # 막대 밑변을 "몇 번째 일 + 얼마"로 적고 차례만으로 견주는 셈(_after)이 기대는 순서 — 다음 메시지는 앞 일에서 생긴
+    # 밑변 후보보다 아래에 놓인다
+    assert S.DY >= S.ACT_H >= S.CLEAR
+    assert S.FRAME_GAP + S.FRAME_HEAD >= S.ACT_H
+    assert S.FRAME_AFTER >= S.EDGE_CLEAR and S.REF_AFTER >= S.EDGE_CLEAR
+
+
 def test_alt_with_more_branches_than_messages_is_one_problem():
     found = problems({"participants": life("A"), "frames": [{"kind": "alt", "branches": [1] * 1000}]})
     assert list(found) == ["frames[0].branches: 칸이 1000개인데 메시지는 0개다 — 칸마다 메시지가 하나 이상 있어야 한다"]
+    found = problems({"participants": life("A", "B"), "messages": [call("A", "B")],
+                      "frames": [{"kind": "alt", "branches": [{"condition": "a", "first": 0, "last": 0}] * 2}]})
+    assert list(found) == ["frames[0].branches: 칸이 2개인데 메시지는 1개다 — 칸마다 메시지가 하나 이상 있어야 한다"]
 
 
 def test_a_broken_message_does_not_count_as_using_a_participant():
@@ -244,6 +255,25 @@ def test_bar_open_when_a_frame_starts_wraps_the_whole_frame():
     assert b.top < f.top and b.bottom > f.bottom
     first_c = bars_of(lay, "C")[0]
     assert f.top < first_c.top and first_c.bottom < f.bottom  # 프레임 안에서 연 막대는 안에서 닫는다
+
+
+def test_bar_open_when_a_frame_starts_ends_where_it_replies_inside():
+    lay = lay_of(life("A", "B"), [call("A", "B", "get()"), reply("B", "A"), call("A", "B", "get()"), reply("B", "A")],
+                 frames=[{"kind": "loop", "first": 1, "last": 3}])
+    first, second = bars_of(lay, "B")
+    assert first.bottom == lay.messages[1].y
+    assert second.depth == 0 and second.top == lay.messages[2].y  # 다시 부른 것을 겹친 막대로 그리지 않는다
+
+
+def test_alt_branches_are_alternatives_for_bars_kept_from_before():
+    # B는 두 칸에서 각각 반환한다 — 앞 칸 반환에서 끊기지 않고 뒤 칸 반환까지 잇는다. C는 첫 칸에서만 반환해 거기서 끝난다
+    lay = lay_of(life("A", "B", "C"), [call("A", "B"), call("B", "C"), reply("C", "B", "ok"), reply("B", "A", "x"),
+                                       reply("B", "A", "y")],
+                 frames=[{"kind": "alt", "branches": [{"condition": "ok", "first": 2, "last": 3},
+                                                      {"condition": "else", "first": 4, "last": 4}]}])
+    (b,), (c,) = bars_of(lay, "B"), bars_of(lay, "C")
+    assert b.bottom == lay.messages[4].y and lay.messages[4].start == b.rect[0]
+    assert c.bottom == lay.messages[2].y
 
 
 def test_bar_opened_in_a_frame_is_closed_before_the_frame_ends():
@@ -454,7 +484,9 @@ def rule_breaks(lay):
             out += [f"{o} 가로 선이 {b.owner} 막대 끝에 붙었다" for end in (b.top, b.bottom) if abs(y - end) < S.EDGE_CLEAR - 1e-6]
     for f in [*lay.frames, *lay.refs]:
         for b in lay.bars:
-            if (b.top < f.top < b.bottom) != (b.top < f.bottom < b.bottom):
+            over_top, over_bottom = b.top < f.top < b.bottom, b.top < f.bottom < b.bottom
+            returns = any(m.message.kind == "reply" and m.y == b.bottom and attached(m, b, m.start) for m in lay.messages)
+            if over_bottom and not over_top or over_top and not over_bottom and not returns:
                 out.append(f"{f.owner}가 {b.owner} 막대를 자른다")
             if not (f.left < b.rect[0] and b.rect[2] < f.right):
                 out.append(f"{b.owner} 막대가 {f.owner} 옆 변 밖으로 나간다")

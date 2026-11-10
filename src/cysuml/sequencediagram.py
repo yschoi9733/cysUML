@@ -388,7 +388,7 @@ class _SeqReader(_Reader):
             raw = self.items(o["branches"], _at(path, "branches")) if "branches" in o else []
             if "branches" in o and isinstance(o["branches"], (list, tuple)) and len(raw) < 2:
                 self.fail(_at(path, "branches"), "alt는 칸이 둘 이상이어야 한다 — 칸이 하나면 opt를 쓴다")
-            elif len(raw) > max(n, 2):
+            elif len(raw) > n:
                 self.fail(_at(path, "branches"), f"칸이 {len(raw)}개인데 메시지는 {n}개다 — 칸마다 메시지가 하나 이상 있어야 한다")
                 return None
             branches = []
@@ -511,8 +511,8 @@ class _Bar:
 
 
 def _after(term: tuple[int, float], e: int) -> bool:
-    """밑변 후보가 e번째 일의 높이보다 아래인지. 일 사이 간격은 그 일에서 생기는 후보의 더할 길이 이상이라(DY ≥ ACT_H,
-    프레임·ref 뒤 간격 ≥ EDGE_CLEAR) 차례만으로 가려진다."""
+    """밑변 후보가 e번째 일의 높이보다 아래인지. 다음 메시지는 앞 일에서 생기는 후보보다 아래에 놓이므로(DY ≥ ACT_H,
+    프레임·ref 뒤 간격 ≥ EDGE_CLEAR — 테스트가 상수 순서를 확인한다) 차례만으로 가려진다."""
     j, off = term
     return j > e or (j == e and off > 0)
 
@@ -534,13 +534,31 @@ class _Activations:
     아래다. 위 막대가 메시지 높이에서 끝났으면 아래 막대는 그보다 CLEAR만큼 더 잇는다 — 그 메시지 선이 아래 막대 생명선을
     지날 때 선이 막대 밑변을 따라가지 않게(그 밑변은 메시지 높이와 같이 움직여 메시지를 내려서는 못 비킨다).
 
-    프레임 규칙: 프레임이 열릴 때 열려 있던 막대는 프레임 안에서 닫지 않고(protected) 프레임 밑변 아래까지 잇는다. 프레임
-    안에서 연 막대는 칸이 끝날 때 닫는다. ref는 그때 열린 막대를 ref 아래까지 잇는다.
+    프레임 규칙: 프레임 첫 메시지가 닫을 막대는 프레임 앞에서 닫는다. 그때 남아 열려 있던 막대는 부른 쪽이 메시지를 보내도
+    프레임 안에서 닫지 않고(protected) 프레임 밑변 아래까지 잇는다 — 그런 막대의 밑변은 막대 높이로만 정해져 프레임 윗변
+    바로 밑에서 끝날 수 있어서다. 다만 그 생명선이 반환하면 그 높이에서 끝난다(프레임 윗변에서 FRAME_HEAD 넘게 아래다).
+    프레임 안에서 연 막대는 칸이 끝날 때 닫는다. alt의 칸은 서로 대신하는 갈래라, 앞 칸에서 반환한 그런 막대는 다음 칸에서
+    그 생명선이 메시지를 주고받으면 되살려 잇는다. ref는 그때 열린 막대를 ref 아래까지 잇는다.
     """
 
     def __init__(self):
         self.stack: list[_Bar] = []
         self.bars: list[_Bar] = []
+        self.kept: list[_Bar] = []       # 지금 프레임이 열릴 때 열려 있던 막대(쌓인 차례대로)
+        self.returned: list[_Bar] = []   # 그 가운데 앞 칸에서 반환해 닫힌 막대
+
+    def _resume(self, life: int) -> None:
+        """앞 칸에서 반환한 막대를, 그 생명선에 열린 막대가 없으면 프레임이 열릴 때의 쌓인 자리로 되살린다."""
+        b = next((x for x in self.returned if x.life == life), None)
+        if b is None or self.find(life) is not None:
+            return
+        self.returned.remove(b)
+        rank = self.kept.index(b)
+        at = 0
+        for i, x in enumerate(self.stack):
+            if x in self.kept and self.kept.index(x) < rank:
+                at = i + 1
+        self.stack.insert(at, b)
 
     def open(self, life: int, e: int, fixed: bool = False) -> _Bar:
         """막대를 연다. fixed(액터가 받는 호출)면 높이 ACT_H로 끝나 쌓지 않는다."""
@@ -573,14 +591,15 @@ class _Activations:
     def message(self, src: int, dst: int, kind: str, e: int, src_actor: bool, dst_actor: bool
                 ) -> tuple[Optional[_Bar], Optional[_Bar]]:
         """메시지 하나를 넣고 (선이 시작하는 막대, 화살촉이 닿는 막대)를 돌려준다. 막대가 없는 끝은 None이다."""
+        self._resume(src)
+        self._resume(dst)
         s = self.send_from(src, kind, src_actor)
         if s is None and not src_actor and kind != "reply":
             s = self.open(src, e)
         d = None
         if kind == "reply":
             if s is not None:
-                if not s.protected:
-                    self._close(s)  # 반환 높이는 부모에게 넘기지 않는다 — 건너뛰는 반환이 사이 막대 끝을 선 위에 두지 않게
+                self._close(s)  # 반환 높이는 부모에게 넘기지 않는다 — 건너뛰는 반환이 사이 막대 끝을 선 위에 두지 않게
                 s.terms.add((e, 0))
             if not dst_actor:
                 d = self.find(dst)
@@ -607,18 +626,25 @@ class _Activations:
             self.close_all()
         return s
 
-    def frame_start(self, src: int, kind: str, src_actor: bool) -> list[_Bar]:
+    def frame_start(self, src: int, kind: str, src_actor: bool) -> None:
         """프레임 첫 메시지가 닫을 막대는 프레임 앞에서 닫고, 남은 막대를 프레임 끝까지 지킨다."""
         self.send_from(src, kind, src_actor)
         for b in self.stack:
             b.protected = True
-        return list(self.stack)
+        self.kept, self.returned = list(self.stack), []
 
-    def frame_end(self, protected: list[_Bar], e: int) -> None:
+    def branch(self) -> None:
+        """alt 칸 나눔: 앞 칸에서 연 막대를 닫고, 앞 칸에서 반환한 지킨 막대를 다음 칸에서 되살릴 수 있게 적어 둔다."""
         self.close_all()
-        for b in protected:
+        self.returned += [b for b in self.kept if b not in self.stack and b not in self.returned]
+
+    def frame_end(self, e: int) -> None:
+        self.close_all()
+        for b in self.kept:
             b.protected = False
-            b.terms.add((e, EDGE_CLEAR))
+            if b in self.stack:  # 프레임 안에서 반환한 막대는 이미 끝났다
+                b.terms.add((e, EDGE_CLEAR))
+        self.kept, self.returned = [], []
 
     def ref(self, e: int) -> None:
         for b in self.stack:
@@ -674,7 +700,6 @@ def _plan(d: Diagram) -> _Plan:
     acts = _Activations()
     attach: list = [(None, None)] * len(d.messages)
     at = [0] * len(d.messages)
-    protected: list[_Bar] = []
     for e, ev in enumerate(events):
         if ev.kind == "message":
             m = d.messages[ev.item]
@@ -684,12 +709,11 @@ def _plan(d: Diagram) -> _Plan:
         elif ev.kind == "start":
             m = d.messages[d.fragments[ev.item].first]
             s = index[m.source]
-            protected = acts.frame_start(s, m.kind, actor[s])
+            acts.frame_start(s, m.kind, actor[s])
         elif ev.kind == "branch":
-            acts.close_all()
+            acts.branch()
         elif ev.kind == "end":
-            acts.frame_end(protected, e)
-            protected = []
+            acts.frame_end(e)
         else:
             acts.ref(e)
     acts.close_all()
@@ -1025,9 +1049,7 @@ class _Placer:
         self._add((LEFT, y, INF, y))
         part = self.frames[f.index]
         part.dividers.append(y)
-        cond = f.branches[j].condition
-        if cond:
-            part.conditions.append(self._condition(e, y, LEFT + COND_LEFT, cond))
+        part.conditions.append(self._condition(e, y, LEFT + COND_LEFT, f.branches[j].condition))  # alt 칸은 조건이 늘 있다
 
     def end(self, e: int, f: Fragment) -> None:
         y = max(self._edge(e), self.ys[self.plan.at[f.last]] + FRAME_FOOT)
