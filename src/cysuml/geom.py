@@ -42,19 +42,23 @@ def between(a: Box, b: Box) -> Box:
     return x0, y0, x1, y1
 
 
+def _narrow(lo: float, hi: float, c: float, k: float, low: float, high: float) -> Optional[tuple[float, float]]:
+    """선분 위 자리 t의 구간 [lo, hi]를, t에 따라 c + k·t로 바뀌는 값이 [low, high] 안인 곳으로 좁힌다. 남는 곳이 없으면 None."""
+    if k == 0:
+        return (lo, hi) if low <= c <= high else None
+    t1, t2 = sorted(((low - c) / k, (high - c) / k))
+    lo, hi = max(lo, t1), min(hi, t2)
+    return (lo, hi) if lo <= hi else None
+
+
 def clip(p: Point, q: Point, rect: Box) -> Optional[tuple[Point, Point]]:
     """선분 pq 가운데 상자 rect 안(변 포함)에 든 부분. 닿지 않으면 None."""
-    lo, hi = 0.0, 1.0
+    span_t: Optional[tuple[float, float]] = (0.0, 1.0)
     for a, d, low, high in ((p[0], q[0] - p[0], rect[0], rect[2]), (p[1], q[1] - p[1], rect[1], rect[3])):
-        if d == 0:
-            if not low <= a <= high:
-                return None
-            continue
-        t1, t2 = sorted(((low - a) / d, (high - a) / d))
-        lo, hi = max(lo, t1), min(hi, t2)
-        if lo > hi:
+        span_t = _narrow(*span_t, a, d, low, high)
+        if span_t is None:
             return None
-    return lerp(p, q, lo), lerp(p, q, hi)
+    return lerp(p, q, span_t[0]), lerp(p, q, span_t[1])
 
 
 def hits(p: Point, q: Point, rect: Box) -> bool:
@@ -294,17 +298,14 @@ def alongside(s: tuple[Point, Point], t: tuple[Point, Point], width: float, leas
     def off(v: Point) -> float:
         return ux * (v[1] - p[1]) - uy * (v[0] - p[0])
 
-    lo, hi = 0.0, 1.0  # t 위의 자리(r에서 0, w에서 1)
+    span_t: Optional[tuple[float, float]] = (0.0, 1.0)  # t 위의 자리(r에서 0, w에서 1)
     for c, k, low, high in ((along(r), along(w) - along(r), 0.0, ls), (off(r), off(w) - off(r), -width, width)):
-        if k == 0:
-            if not low <= c <= high:
-                return None
-            continue
-        t1, t2 = sorted(((low - c) / k, (high - c) / k))
-        lo, hi = max(lo, t1), min(hi, t2)
-    if (hi - lo) * lt <= least:
+        span_t = _narrow(*span_t, c, k, low, high)
+        if span_t is None:
+            return None
+    if (span_t[1] - span_t[0]) * lt <= least:
         return None
-    return lerp(r, w, lo), lerp(r, w, hi)
+    return lerp(r, w, span_t[0]), lerp(r, w, span_t[1])
 
 
 def lerp(p: Point, q: Point, t: float) -> Point:

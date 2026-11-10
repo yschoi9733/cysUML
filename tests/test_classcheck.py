@@ -394,6 +394,20 @@ def test_orthogonal_bend_right_at_the_triangle_base_passes():
     assert r.passed
 
 
+@pytest.mark.parametrize("via_x", [140, 136])
+def test_line_coming_up_into_its_own_triangle_base_passes(via_x):
+    # 선이 아래에서 올라와 삼각형 밑변(y=66, x 136~154)의 가운데에서 5px 옆이나 모서리에 닿은 뒤, 밑변을 따라 줄기(x=145)로 간다
+    r = report([box("A", 95, 200), box("P", 100, 0)],
+               [rel("generalization", "A", "P", via=[[via_x, 66], [145, 66]])])
+    assert r.passed
+
+
+def test_places_within_the_tolerance_are_one_place():
+    assert K._same((("A", True), (1.0, 2.0)), (("A", True), (1.0 + K.PLACE_EPS / 2, 2.0)))
+    assert not K._same((1.0, 2.0), (1.0 + K.PLACE_EPS * 2, 2.0))
+    assert not K._same(("A", 1.0), ("B", 1.0))
+
+
 def test_shared_trunk_through_a_box_is_one_finding():
     # 두 자식의 공유 줄기(x=195, y 48~120)와 그 위 삼각형이 상자 Q(190, 60)를 지난다
     r = report([box("P", 150, 0), box("C1", 0, 200), box("C2", 300, 200), box("Q", 190, 60)],

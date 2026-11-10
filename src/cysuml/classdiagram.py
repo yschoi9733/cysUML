@@ -18,7 +18,7 @@ from typing import Any, Optional, Union
 
 from . import text as T
 from .canvas import BG_MARGIN, SCALE, Canvas, Line, Point, Polygon, Text
-from .geom import gap, grow, hits, meets, outline
+from .geom import gap, grow, hits, meets, outline, span
 
 CLASS_KINDS = ("class", "abstract", "interface", "enum")
 RELATION_KINDS = ("association", "aggregation", "composition", "generalization", "realization", "dependency")
@@ -517,8 +517,7 @@ class _Spots:
 
     def __init__(self, boxes: list[T.Box], segments: list[tuple[Point, Point]]):
         self.boxes = boxes
-        self.segments = [(p, q, (min(p[0], q[0]), min(p[1], q[1]), max(p[0], q[0]), max(p[1], q[1])))
-                         for p, q in segments]
+        self.segments = [(p, q, span((p, q))) for p, q in segments]
         self.labels: list[T.Box] = []
 
     def pick(self, text: str, candidates: list[Point]) -> Point:

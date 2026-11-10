@@ -262,6 +262,15 @@ def test_drawing_calls_return_what_they_record():
     assert label is c.records[-1] and label.bg and type(c.records[-2]).__name__ == "Mask"
 
 
+def test_measure_gives_the_framed_size_and_the_png_size():
+    c = Canvas(1.6)
+    c.rect(0.3, 0.7, 333.33, 50.07)
+    (w, h), png = c.measure()
+    assert (w, h) == pytest.approx((333.33 + 2 * PAD, 50.07 + 2 * PAD))
+    assert png == c.png_size() == c.to_image().size
+    assert Canvas().measure() is None
+
+
 def test_nothing_drawn_cannot_be_rendered():
     c = Canvas()
     with pytest.raises(ValueError, match="그린 것이 없다"):
