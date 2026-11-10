@@ -934,10 +934,13 @@ run "$R" "$S/ignored-check.sh" "$IG"
 check "ignored: 그림 출력 폴더" KEEP
 has "ignored: 그림 출력 폴더 줄" "keep diagrams/"
 rm -rf "$IG/diagrams"
-# 그림 출력 폴더는 최상위만 무시한다 — 같은 이름의 소스 하위 패키지(src/cysuml/diagrams/)가 조용히 커밋에서 빠지면 안 된다.
-if git -C "$IG" -c core.excludesFile=/dev/null check-ignore -q --no-index -- src/cysuml/diagrams/class_diagram.py; then
-  bad "ignored: 깊은 diagrams 는 무시하지 않는다" "src/cysuml/diagrams/ 가 무시된다 — .gitignore 의 diagrams 줄을 /diagrams/ 로 둔다"
-else ok; fi
+# 그림 출력 폴더·빌드 산출물 폴더는 최상위만 무시한다 — 같은 이름의 소스 하위 패키지(src/cysuml/diagrams/ 등)가 조용히
+# 커밋에서 빠지면 안 된다.
+for want in diagrams build dist; do
+  if git -C "$IG" -c core.excludesFile=/dev/null check-ignore -q --no-index -- "src/cysuml/$want/x.py"; then
+    bad "ignored: 깊은 $want 는 무시하지 않는다" "src/cysuml/$want/ 가 무시된다 — .gitignore 의 $want 줄을 /$want/ 로 둔다"
+  else ok; fi
+done
 mkdir -p "$IG/.vscode"
 printf '{}\n' > "$IG/.vscode/settings.json"
 run "$R" "$S/ignored-check.sh" "$IG"
