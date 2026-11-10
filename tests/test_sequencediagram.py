@@ -112,8 +112,11 @@ def test_frames_are_read_by_kind():
      "frames[0].before: 0~1 사이여야 한다"),
     ({"participants": life("A"), "notes": ["ok", 3]}, "notes[1]: 문자열이어야 한다"),
     ({"participants": life("A"), "notes": ["한 줄\n두 줄"]}, "notes[0]: 제어·서식 문자나 줄 나눔"),
-    ({"participants": life(*[f"P{i}" for i in range(S.MAX_PARTICIPANTS + 1)])}, "그림을 나눈다"),
-    ({"participants": life("A", "B"), "messages": [call("A", "B")] * (S.MAX_MESSAGES + 1)}, "그림을 나눈다"),
+    ({"participants": life(*[f"P{i}" for i in range(S.MAX_PARTICIPANTS + 1)])}, "participants: 참여자가 41개다"),
+    ({"participants": life("A", "B"), "messages": [call("A", "B")] * (S.MAX_MESSAGES + 1)}, "messages: 메시지가 301개다"),
+    ({"participants": life("A"), "frames": [{"kind": "ref", "name": "R", "before": 0}] * (S.MAX_FRAMES + 1)},
+     "frames: 프레임이 101개다 — 100개까지 그린다. 그림을 나눈다"),
+    ({"participants": life("A"), "notes": ["n"] * (S.MAX_NOTES + 1)}, "notes: 노트가 51개다"),
 ])
 def test_input_problems_point_at_the_field(data, expected):
     assert any(expected in p for p in problems(data)), problems(data)
@@ -129,6 +132,18 @@ def test_all_problems_are_reported_together():
                       "messages": [call("A", "A"), call("A", "Z"), {"from": "A", "to": "B"}],
                       "frames": [{"kind": "ref", "before": 9}], "notes": [""]})
     assert len(found) >= 5
+
+
+def test_overlapping_frames_are_reported_once_each():
+    found = problems({"participants": life("A", "B"), "messages": [call("A", "B")],
+                      "frames": [{"kind": "loop", "first": 0, "last": 0}] * 5})
+    assert list(found) == [f"frames[{i}]: frames[0]와 덮는 메시지가 겹친다 — 프레임 안에 프레임을 넣지 않는다" for i in range(1, 5)]
+
+
+def test_too_big_drawing_is_an_input_error_before_drawing():
+    with pytest.raises(S.InputError) as e:
+        S.render({"participants": life("A", "B"), "messages": [call("A", "B", "x" * 40_000), reply("B", "A", "y")]})
+    assert "그림이 너무 크다" in str(e.value)
 
 
 def test_parse_does_not_change_input():
@@ -170,6 +185,20 @@ def test_call_back_into_a_busy_lifeline_nests_a_bar_to_the_right():
     assert outer.top < inner.top and inner.bottom <= outer.bottom
     m = lay.messages[1]
     assert m.end == inner.x + S.ACT_W / 2  # 왼쪽으로 가는 호출은 안쪽 막대의 오른쪽 변에 닿는다
+
+
+def test_reply_from_a_lifeline_without_a_bar_keeps_the_receivers_bar():
+    lay = lay_of(life("A", "B", "C"), [call("A", "B"), reply("C", "A", "r")])
+    (a,) = bars_of(lay, "A")
+    assert a.top == lay.messages[0].y and a.bottom >= lay.messages[1].y
+    assert lay.messages[1].end == a.rect[2]  # 왼쪽으로 가는 반환이 기다리던 막대의 오른쪽 변에 닿는다
+
+
+def test_deeply_nested_bars_stay_inside_the_frame():
+    messages = [m for _ in range(12) for m in (call("A", "B", "f"), call("B", "A", "g"))]
+    lay = lay_of(life("A", "B"), messages, frames=[{"kind": "loop", "first": 0, "last": len(messages) - 1}])
+    f = lay.frames[0]
+    assert max(b.rect[2] for b in lay.bars) < f.right
 
 
 def test_actor_gets_a_short_bar_only_when_called():
@@ -403,6 +432,8 @@ def rule_breaks(lay):
         for b in lay.bars:
             if (b.top < f.top < b.bottom) != (b.top < f.bottom < b.bottom):
                 out.append(f"{f.owner}가 {b.owner} 막대를 자른다")
+            if not (f.left < b.rect[0] and b.rect[2] < f.right):
+                out.append(f"{b.owner} 막대가 {f.owner} 옆 변 밖으로 나간다")
         tag = S._tag_width(f.fragment.kind if isinstance(f, S.PlacedFrame) else "ref")
         out += [f"{f.owner} 꼬리표 밑으로 {p.participant.name} 생명선이 지난다"
                 for p in lay.participants if f.left <= p.x <= f.left + tag]
