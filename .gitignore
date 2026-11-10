@@ -1,0 +1,30 @@
+### Python ###
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+/build/
+/dist/
+
+### 편집기 ###
+.idea/
+*.iml
+.vscode/
+
+### 비밀 값 (공개 레포 — 커밋 금지) ###
+.env
+.env.*
+!.env.example
+
+### macOS ###
+.DS_Store
+
+### cysUML 기본 출력 폴더(최상위만 — 같은 이름의 소스 하위 패키지는 무시하지 않는다) ###
+/diagrams/
+
+### Claude Code: /issue 스킬의 워크트리·개인 설정·임시 파일(scratchpad) (.claude/ 통째로 무시하면 .claude/skills 커밋까지 막혀서 경로별로 나눈다) ###
+.claude/worktrees/
+.claude/settings.local.json
+/scratchpad/
