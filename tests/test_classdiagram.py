@@ -188,6 +188,8 @@ def test_default_value_may_be_a_json_number_or_boolean():
     ({"stereotype": "interface"}, "«interface»"),
     ({"kind": "interface", "stereotype": "Interface"}, "«interface»"),
     ({"kind": "enum", "stereotype": "Enumeration"}, "«enumeration»"),
+    ({"kind": "abstract", "stereotype": "abstract"}, None),
+    ({"kind": "abstract", "stereotype": "entity"}, "«entity»"),
     ({"kind": "enum", "stereotype": "flags"}, "«enumeration, flags»"),
 ])
 def test_stereotype_that_repeats_the_kind_is_written_once(box, keyword):
@@ -313,23 +315,22 @@ def test_labels_keep_off_end_shapes_of_other_relations():
     assert spots.pick("1", [first, (0, 0)]) == (0, 0)
 
 
-@pytest.mark.parametrize("first, second", [
-    ({}, {"kind": "dependency"}),
-    ({}, {"kind": "dependency", "from": "B", "to": "A"}),
-    ({}, {"kind": "dependency", "via": [[200, 24]]}),  # 한 직선 위에 꺾는 점 하나를 더한 같은 선
-    ({"via": [[45, -100], [345, -100]]}, {"kind": "dependency", "via": [[45, -100], [200, -100], [345, -100]]}),
-    ({"via": [[45, -100], [345, -100]]}, {"kind": "dependency", "via": [[45, -60], [45, -150], [345, -150]]}),
-])
-def test_relations_drawn_over_each_other_are_refused(first, second):
-    data = two_boxes(kind="association", **first)
-    data["relations"].append({"from": "A", "to": "B", **second})
-    with pytest.raises(C.InputError, match=r"^relations\[1\]: relations\[0\]와 \(.*\) 구간이 겹쳐 그려진다"):
-        C.render(data)
+def test_generalization_tree_may_share_one_trunk():
+    d = C.render({"classes": [{"name": "P", "left": 200, "top": 0}, {"name": "X", "left": 100, "top": 200},
+                              {"name": "Y", "left": 300, "top": 200}],
+                  "relations": [{"kind": "generalization", "from": "X", "to": "P", "via": [[145, 150], [245, 150]]},
+                                {"kind": "generalization", "from": "Y", "to": "P", "via": [[345, 150], [245, 150]]}]})
+    assert [r.points[-2:] for r in d.layout.relations] == [((245, 150), (245, 48))] * 2
 
 
-def test_line_that_doubles_back_on_itself_is_refused():
-    with pytest.raises(C.InputError, match=r"^relations\[0\]: 선이 \(150\.0, 24\.0\)~\(200\.0, 24\.0\) 구간을 되짚어"):
-        C.render(two_boxes(kind="association", via=[[200, 24], [150, 24]]))
+def test_lines_drawn_over_each_other_are_left_to_the_check():
+    """포개진 선(같은 두 상자를 꺾는 점 없이 잇는 두 관계, 왔던 길을 되짚는 선)은 그릴 수는 있으므로 입력 오류로 막지
+    않는다. 상속 트리의 공유 줄기처럼 정상인 포개짐과 가르는 것은 그림 검사의 몫이다."""
+    data = two_boxes(kind="association")
+    data["relations"].append({"kind": "dependency", "from": "B", "to": "A"})
+    assert len(C.render(data).layout.relations) == 2
+    assert C.render(two_boxes(kind="association", via=[[200, 24], [150, 24]])).layout.relations[0].points == (
+        (90, 24), (200, 24), (150, 24), (300, 24))
 
 
 def test_lines_that_only_meet_or_run_straight_through_a_bend_are_fine():
@@ -426,6 +427,8 @@ def cls0(**fields):
     (rel(to="A", via=[[200, 24]]), "relations[0]: 자기 자신으로 가는 관계는 꺾는 점(via)이 둘 이상 있어야"),
     (cls0(left=10 ** 400), "classes[0].left: -1e+06~1e+06 사이여야 한다(받은 값 1000"),
     (cls0(left=float("inf")), "classes[0].left: -1e+06~1e+06 사이여야 한다(받은 값 inf)"),
+    (cls0(left=10 ** 5000), "classes[0].left: -1e+06~1e+06 사이여야 한다(받은 값 (아주 큰 정수))"),
+    (cls0(attributes=[{"name": "a", "default": 10 ** 5000}]), "classes[0].attributes[0].default: 수가 너무 크다"),
     (rel(via=[[1]]), "relations[0].via[0]: [x, y]여야 한다"),
     (rel(via=[[1, "2"]]), "relations[0].via[0][1]: 수여야 한다"),
     (rel(via=[[150, 100], [150, 100]]), "relations[0].via[1]: 앞 꺾는 점과 같다 (150.0, 100.0)"),

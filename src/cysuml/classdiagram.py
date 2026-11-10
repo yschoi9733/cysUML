@@ -50,8 +50,6 @@ DIAMOND = 18        # 집합·합성 마름모 길이(그림판 기본값)
 ARROW = 10          # 열린 화살촉 길이(그림판 기본값)
 MAX_LINE = 200_000  # 관계선 하나의 길이 상한 — 그림판 점선 칸 수 상한(MAX_DASHES × 무늬)보다 넉넉히 작게
 EDGE_SLACK = 0.5    # 선이 끝 상자 안을 지나는지 볼 때 변에서 이만큼 안쪽부터 "안"으로 친다(변을 따라 가는 선은 괜찮다)
-LINE_SLACK = 0.5    # 두 선분이 한 직선 위에 있다고 보는 거리
-OVERLAP_MIN = 1.0   # 한 직선 위 두 선분이 이보다 길게 포개지면 겹쳐 그려진 것으로 본다(꺾는 점에서 맞닿는 것은 괜찮다)
 
 NAME_GAP = 8        # 이름 글자 상자와 선 사이
 LABEL_CLEAR = BG_MARGIN + 1  # 선 글자의 흰 바탕이 선에 닿지 않게 글자 상자를 이만큼 넓혀 선과 견준다
@@ -92,8 +90,8 @@ class ClassBox:
     @property
     def keyword(self) -> Optional[str]:
         words = {"interface": ["interface"], "enum": ["enumeration"]}.get(self.kind, [])
-        if self.stereotype and self.stereotype.casefold() not in {"interface": ("interface",),
-                                                                  "enum": ("enumeration", "enum")}.get(self.kind, ()):
+        repeats = {"interface": ("interface",), "enum": ("enumeration", "enum"), "abstract": ("abstract",)}
+        if self.stereotype and self.stereotype.casefold() not in repeats.get(self.kind, ()):
             words.append(self.stereotype)
         return f"«{', '.join(words)}»" if words else None
 
@@ -178,7 +176,10 @@ class Drawing:
 
 
 def _show(v: Any) -> str:
-    s = repr(v)
+    try:
+        s = repr(v)
+    except ValueError:  # 파이썬이 글자로 바꾸지 않는 아주 큰 정수(4300자리 넘게)
+        return "(아주 큰 정수)"
     return s if len(s) <= 40 else s[:37] + "..."
 
 
@@ -298,7 +299,11 @@ class _Reader:
             if isinstance(v, float) and not math.isfinite(v):
                 self.fail(path, f"유한한 수여야 한다(받은 값 {_show(v)})")
                 return None
-            return json.dumps(v)
+            try:
+                return json.dumps(v)
+            except ValueError:
+                self.fail(path, f"수가 너무 크다(받은 값 {_show(v)})")
+                return None
         if not isinstance(v, str):
             self.fail(path, f"문자열이나 수, true·false여야 한다(받은 값 {_show(v)})")
             return None
@@ -614,41 +619,6 @@ def _route(r: Relation, a: T.Box, b: T.Box, path: str) -> tuple[Optional[tuple[P
     return (None if problems else points), problems
 
 
-def _shared_run(p: Point, q: Point, r: Point, s: Point) -> Optional[tuple[Point, Point]]:
-    """선분 pq와 rs가 한 직선 위에서 OVERLAP_MIN보다 길게 포개지면 그 구간."""
-    ln = math.dist(p, q)
-    ux, uy = (q[0] - p[0]) / ln, (q[1] - p[1]) / ln
-    if any(abs((z[0] - p[0]) * uy - (z[1] - p[1]) * ux) > LINE_SLACK for z in (r, s)):
-        return None
-    tr, ts = ((z[0] - p[0]) * ux + (z[1] - p[1]) * uy for z in (r, s))
-    lo, hi = max(0.0, min(tr, ts)), min(ln, max(tr, ts))
-    if hi - lo <= OVERLAP_MIN:
-        return None
-    return (p[0] + ux * lo, p[1] + uy * lo), (p[0] + ux * hi, p[1] + uy * hi)
-
-
-def _overlaps(routes: list[tuple[Point, ...]]) -> list[str]:
-    """한 직선 위에서 포개져 하나로 보이는 선분들. 다른 관계끼리도, 한 관계가 왔던 길을 되짚는 것도 찾는다."""
-    segs = [(i, k, p, q, _grow((min(p[0], q[0]), min(p[1], q[1]), max(p[0], q[0]), max(p[1], q[1])), LINE_SLACK))
-            for i, pts in enumerate(routes) for k, (p, q) in enumerate(zip(pts, pts[1:]))]
-    found: dict[tuple[int, int], tuple[Point, Point]] = {}
-    for n, (i, k, p, q, bb) in enumerate(segs):
-        for j, m, r, s, bb2 in segs[n + 1:]:
-            if (i, j) not in found and _meets(bb, bb2):
-                run = _shared_run(p, q, r, s)
-                if run is not None:
-                    found[i, j] = run
-    out = []
-    for (i, j), (a, b) in sorted(found.items(), key=lambda x: (x[0][1], x[0][0])):
-        where = f"({a[0]:.1f}, {a[1]:.1f})~({b[0]:.1f}, {b[1]:.1f})"
-        if i == j:
-            out.append(f"relations[{i}]: 선이 {where} 구간을 되짚어 겹쳐 그려진다 — 꺾는 점을 고친다")
-        else:
-            out.append(f"relations[{j}]: relations[{i}]와 {where} 구간이 겹쳐 그려진다 — 한쪽에 꺾는 점(via)을 주어 "
-                       "떼어 놓는다")
-    return out
-
-
 def layout(diagram: Diagram) -> Layout:
     """상자 크기, 선의 점들, 선 글자 자리를 잡는다. 선을 그을 수 없는 배치면(꺾는 점이 상자 안이다, 두 상자가 겹치거나
     맞닿았다, 끝 구간이 끝 모양보다 짧다 등) 모두 모아 InputError. 선 글자는 관계 순서대로 이름 → from 다중도 → to 다중도
@@ -661,7 +631,6 @@ def layout(diagram: Diagram) -> Layout:
         points, found = _route(r, by_name[r.source].rect, by_name[r.target].rect, _at("relations", i))
         problems += found
         routes.append(points)
-    problems += _overlaps([pts or () for pts in routes])
     if problems:
         raise InputError(problems)
     used = set(by_name)
