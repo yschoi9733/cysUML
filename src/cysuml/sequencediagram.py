@@ -1,0 +1,1156 @@
+"""교류도: JSON을 참여자·메시지·프레임 모델로 읽고(parse), 자리를 잡아(layout) 그림판에 그린다(draw).
+
+교류도는 도구가 배치한다. 입력은 참여자 순서, 메시지 순서, 프레임이 덮는 메시지 범위만 주고 좌표는 주지 않는다.
+자리 잡기는 세 단계다.
+
+1. 활성 막대(_Activations): 메시지를 차례대로 넣어 막대를 잇는다. 막대는 그 생명선이 반환하거나, 부른 쪽이 다음 메시지를
+   보낼 때까지 이어진다. 밑변은 "몇 번째 일의 높이 + 얼마"들 가운데 가장 낮은 곳으로 적어 두어, 높이를 정하기 전에도 어느
+   막대가 어느 메시지 옆을 지나는지 안다. 프레임이 열릴 때 열려 있던 막대는 프레임을 위아래로 감싸고, 프레임(alt는 칸) 안에서
+   연 막대는 그 안에서 닫는다 — 프레임 선이 막대를 자르지 않게.
+2. 가로(_columns): 이웃 생명선 사이를 그 사이를 지나는 메시지 글자가 들어갈 만큼 띄운다.
+3. 세로(_Placer): 메시지·프레임·ref를 차례대로 놓되, 앞서 놓은 글자·선·머리·막대에 걸리면 걸리지 않는 곳까지 내린다.
+
+틀린 입력은 그리기 전에 클래스도와 같은 InputError로 돌려준다. 문제마다 "messages[2].to: …"처럼 입력 안의 자리를 붙이고,
+한 번에 모두 모아 알린다.
+"""
+from __future__ import annotations
+
+import math
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+from . import text as T
+from .canvas import SCALE, Canvas
+from .classdiagram import InputError, _at, _Reader, _show
+
+__all__ = ["InputError", "parse", "layout", "draw", "render"]
+
+PARTICIPANT_KINDS = ("lifeline", "actor")
+MESSAGE_KINDS = ("call", "reply", "create")
+FRAME_KINDS = ("loop", "opt", "alt", "ref")
+
+DIAGRAM_FIELDS = ("participants", "messages", "frames", "notes")
+PARTICIPANT_FIELDS = ("name", "kind")
+MESSAGE_FIELDS = ("from", "to", "name", "kind")
+FRAME_FIELDS = {
+    "loop": ("kind", "first", "last", "condition"),
+    "opt": ("kind", "first", "last", "condition"),
+    "alt": ("kind", "branches"),
+    "ref": ("kind", "name", "before"),
+}
+FRAME_REQUIRED = {"loop": ("first", "last"), "opt": ("first", "last"), "alt": ("branches",), "ref": ("name", "before")}
+ALL_FRAME_FIELDS = tuple(dict.fromkeys(k for fields in FRAME_FIELDS.values() for k in fields))
+BRANCH_FIELDS = ("condition", "first", "last")
+
+MAX_PARTICIPANTS = 40
+MAX_MESSAGES = 300
+
+# 머리
+LEFT = 20
+SLOT_GAP = 20      # 이웃 머리 사이 최소 간격
+LIFE_W = 80        # 생명선 머리 최소 폭
+HEAD_PAD = 24      # 생명선 머리 글자의 좌우 여백 합
+HEAD_H = 40
+HEAD_NAME = 13     # 머리 윗변에서 이름 가운데까지
+ACTOR_W = 90       # 액터 자리 최소 폭
+ACTOR_PAD = 10
+ACTOR_NAME = 51    # 액터 그림 윗끝에서 이름 가운데까지
+ACTOR_H = 63       # 액터 그림 윗끝에서 점선 시작까지
+LIFE_DASH = (3, 3)
+LIFE_TAIL = 20     # 가장 아래 그린 것 밑으로 점선을 더 긋는 길이
+
+# 활성 막대
+ACT_W = 14
+ACT_H = 28         # 막대 최소 높이
+NEST = 7           # 같은 생명선에 겹친 막대를 오른쪽으로 비키는 길이
+
+# 메시지
+FIRST = 80         # 첫 메시지 높이(머리 윗변 0 기준)
+DY = 28            # 메시지 사이 최소 간격 — ACT_H 이상이어야 한다(막대 밑변 셈이 이것에 기댄다)
+DY_FACING = 40     # 앞 글자가 선 아래, 이번 글자가 선 위에 있어 마주 볼 때
+LABEL_DY = 10      # 선에서 글자 가운데까지
+CREATE_DY = 25     # 만드는 메시지의 두 줄 가운데 선에서 먼 줄(두 줄 상자가 겹치지 않게 LABEL_DY에서 15)
+LABEL_GAP = 4      # 글자와 막대(생명선) 사이
+TIP_ROOM = 12      # 화살촉 쪽은 화살촉 길이만큼 더 띄운다
+ACTOR_ROOM = 10    # 액터 쪽 끝은 더 띄운다
+ARROW = 10
+ARROW_HALF = 5
+REPLY_DASH = (4, 3)
+CREATE_LABEL = "«create»"
+
+# 간격 규칙
+PAD = 3            # 새로 놓는 것과 앞서 놓은 글자·선·머리 사이(흰 바탕 BG_MARGIN보다 넓게)
+CLEAR = 4          # 메시지 선과, 그 선이 건너는 막대의 윗변·밑변 사이
+BAR_GAP = 4        # 한 생명선의 앞 막대 밑변과 다음 막대 윗변 사이
+EDGE_CLEAR = 6     # 프레임·ref의 가로 선과 막대 끝 사이
+EPS = 1e-6
+MAX_PUSH = 10_000
+
+# 프레임
+FRAME_INSET = 10   # 프레임 왼쪽 변에서 첫 머리까지
+FRAME_RIGHT = 15   # 마지막 머리에서 프레임 오른쪽 변까지
+FRAME_GAP = 6      # 앞서 그린 것과 프레임·칸·ref 가로 선 사이
+FRAME_HEAD = 32    # 프레임·칸 윗변에서 첫 메시지까지 최소
+FRAME_FOOT = 34    # 마지막 메시지에서 프레임 밑변까지 최소
+FRAME_AFTER = 18   # 프레임 밑변에서 다음 메시지까지 최소
+TAG_H = 23
+TAG_MIN_W = 46
+TAG_PAD = 25
+TAG_CUT = 10       # 꼬리표 오른쪽 아래 모서리를 깎는 길이
+TAG_SIDE = 13
+TAG_TEXT = (5, 11)
+COND_GAP = 6       # 꼬리표와 조건 글자 사이, 조건 글자와 프레임 오른쪽 변 사이
+COND_LEFT = 8      # 칸 나눔 선 아래 조건 글자의 왼쪽 여백
+COND_Y = 11
+DIVIDER_DASH = (5, 4)
+REF_H = 34
+REF_AFTER = 18
+
+# 노트
+NOTE_GAP = 10
+NOTE_H = 26
+NOTE_STEP = 30
+NOTE_MIN_W = 200
+NOTE_PAD = 48
+NOTE_TEXT_X = 5
+NOTE_FOLD = 10
+
+INF = math.inf
+Box = T.Box
+
+
+@dataclass(frozen=True)
+class Participant:
+    name: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class Message:
+    source: str
+    target: str
+    name: Optional[str]
+    kind: str
+
+
+@dataclass(frozen=True)
+class Branch:
+    """프레임의 칸. first·last는 messages 안의 자리(0부터)다."""
+
+    condition: Optional[str]
+    first: int
+    last: int
+
+
+@dataclass(frozen=True)
+class Fragment:
+    """loop·opt·alt 프레임. loop·opt는 칸이 하나다. index는 입력 frames 안의 자리다."""
+
+    kind: str
+    branches: tuple[Branch, ...]
+    index: int
+
+    @property
+    def first(self) -> int:
+        return self.branches[0].first
+
+    @property
+    def last(self) -> int:
+        return self.branches[-1].last
+
+
+@dataclass(frozen=True)
+class Ref:
+    """messages[before] 바로 앞에 놓는 ref(before가 메시지 수면 맨 뒤). index는 입력 frames 안의 자리다."""
+
+    name: str
+    before: int
+    index: int
+
+
+@dataclass(frozen=True)
+class Diagram:
+    participants: tuple[Participant, ...]
+    messages: tuple[Message, ...]
+    fragments: tuple[Fragment, ...]
+    refs: tuple[Ref, ...]
+    notes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Label:
+    """한 줄 글자. anchor "mm"이면 (x, y)가 가운데, "lm"이면 x가 왼쪽 끝이다."""
+
+    text: str
+    x: float
+    y: float
+    anchor: str = "mm"
+
+    @property
+    def box(self) -> Box:
+        return T.place(self.x, self.y, self.text, False, self.anchor).box
+
+
+@dataclass(frozen=True)
+class PlacedParticipant:
+    """top은 머리 윗변(만들어지는 생명선은 만드는 메시지 높이로 내려온다), dash_top·bottom은 점선의 위아래 끝이다."""
+
+    participant: Participant
+    x: float
+    width: float
+    top: float
+    dash_top: float
+    bottom: float
+
+    @property
+    def head(self) -> Box:
+        """머리가 차지하는 상자(액터는 그림과 이름)."""
+        p = self.participant
+        if p.kind == "actor":
+            half = max(9, T.text_width(p.name, True) / 2)
+            name = T.place(self.x, self.top + ACTOR_NAME, p.name, True, "mm").box
+            return self.x - half, self.top, self.x + half, name[3]
+        return self.x - self.width / 2, self.top, self.x + self.width / 2, self.top + HEAD_H
+
+
+@dataclass(frozen=True)
+class PlacedBar:
+    """활성 막대. x는 가운데이고, depth는 같은 생명선에서 이 막대를 감싼 막대 수다(그만큼 오른쪽으로 비킨다)."""
+
+    owner: str
+    x: float
+    top: float
+    bottom: float
+    depth: int
+
+    @property
+    def rect(self) -> Box:
+        return self.x - ACT_W / 2, self.top, self.x + ACT_W / 2, self.bottom
+
+
+@dataclass(frozen=True)
+class PlacedMessage:
+    """start는 선이 시작하는 x, end는 화살촉 끝 x다. 막대가 있으면 막대 변, 만드는 메시지는 만들어지는 머리의 변이다."""
+
+    message: Message
+    owner: str
+    y: float
+    start: float
+    end: float
+    labels: tuple[Label, ...]
+
+
+@dataclass(frozen=True)
+class PlacedFrame:
+    """loop·opt·alt 프레임. dividers는 alt 칸을 나누는 점선 높이, conditions는 칸마다의 조건 글자다(조건이 없는 칸은 없다)."""
+
+    fragment: Fragment
+    owner: str
+    left: float
+    top: float
+    right: float
+    bottom: float
+    dividers: tuple[float, ...]
+    conditions: tuple[Label, ...]
+
+
+@dataclass(frozen=True)
+class PlacedRef:
+    ref: Ref
+    owner: str
+    left: float
+    top: float
+    right: float
+    bottom: float
+    name: Label
+
+
+@dataclass(frozen=True)
+class PlacedNote:
+    text: str
+    owner: str
+    left: float
+    top: float
+    width: float
+    height: float
+
+
+@dataclass(frozen=True)
+class Layout:
+    participants: tuple[PlacedParticipant, ...]
+    bars: tuple[PlacedBar, ...]
+    messages: tuple[PlacedMessage, ...]
+    frames: tuple[PlacedFrame, ...]
+    refs: tuple[PlacedRef, ...]
+    notes: tuple[PlacedNote, ...]
+
+
+@dataclass(frozen=True)
+class Drawing:
+    canvas: Canvas
+    layout: Layout
+
+
+# ---------------------------------------------------------------- 입력 읽기
+
+
+class _SeqReader(_Reader):
+    def position(self, v, path: str, upper: int) -> Optional[int]:
+        """messages 안의 자리(0~upper의 정수)."""
+        if not isinstance(v, int) or isinstance(v, bool):
+            self.fail(path, f"messages 안의 자리(0부터 센 정수)여야 한다(받은 값 {_show(v)})")
+            return None
+        if upper < 0:
+            self.fail(path, "messages가 비어 있어 가리킬 메시지가 없다")
+            return None
+        if not 0 <= v <= upper:
+            self.fail(path, f"0~{upper} 사이여야 한다(받은 값 {_show(v)})")
+            return None
+        return v
+
+    def condition(self, v, path: str) -> Optional[str]:
+        s = self.text(v, path)
+        if s is not None and s[:1] == "[" and s[-1:] == "]":
+            self.fail(path, f"대괄호 없이 조건만 쓴다(받은 값 {_show(s)})")
+            return None
+        return s
+
+    def participant(self, v, path: str) -> tuple[Optional[str], Optional[Participant]]:
+        before = len(self.problems)
+        o = self.obj(v, path, PARTICIPANT_FIELDS, ("name",))
+        if o is None:
+            return None, None
+        name = self.text(o["name"], _at(path, "name"), bold=True, name=True) if "name" in o else None
+        kind = self.choice(o["kind"], _at(path, "kind"), PARTICIPANT_KINDS) if "kind" in o else "lifeline"
+        if len(self.problems) > before:
+            return name, None
+        return name, Participant(name, kind)
+
+    def message(self, v, path: str) -> tuple[Optional[str], Optional[str], Optional[Message]]:
+        """(읽은 from, 읽은 to, 메시지). 다른 필드가 틀려도 from·to가 없는 참여자를 가리키는지 함께 알리려고 따로 돌려준다."""
+        before = len(self.problems)
+        o = self.obj(v, path, MESSAGE_FIELDS, ("from", "to"))
+        if o is None:
+            return None, None, None
+        kind = self.choice(o["kind"], _at(path, "kind"), MESSAGE_KINDS) if "kind" in o else "call"
+        source = self.text(o["from"], _at(path, "from"), bold=True, name=True) if "from" in o else None
+        target = self.text(o["to"], _at(path, "to"), bold=True, name=True) if "to" in o else None
+        name = self.text(o["name"], _at(path, "name")) if "name" in o else None
+        if kind == "call" and "name" not in o:
+            self.fail(path, "호출 메시지는 'name'(부르는 연산)이 있어야 한다")
+        if source is not None and source == target:
+            self.fail(path, f"자기 자신({_show(source)})에게 보내는 메시지는 그리지 않는다 — 그 일은 'notes'에 노트로 적는다")
+        if len(self.problems) > before:
+            return source, target, None
+        return source, target, Message(source, target, name, kind)
+
+    def span(self, o: dict, path: str, n: int, condition: Optional[str]) -> Optional[Branch]:
+        first = self.position(o["first"], _at(path, "first"), n - 1) if "first" in o else None
+        last = self.position(o["last"], _at(path, "last"), n - 1) if "last" in o else None
+        if first is not None and last is not None and last < first:
+            self.fail(_at(path, "last"), f"first({first})보다 앞이다")
+            return None
+        return None if first is None or last is None else Branch(condition, first, last)
+
+    def frame(self, v, path: str, n: int, index: int):
+        before = len(self.problems)
+        o = self.obj(v, path, ALL_FRAME_FIELDS, ("kind",))
+        if o is None or "kind" not in o:
+            return None
+        kind = self.choice(o["kind"], _at(path, "kind"), FRAME_KINDS)
+        if kind is None:
+            return None
+        allowed = FRAME_FIELDS[kind]
+        for k in o:
+            if k in ALL_FRAME_FIELDS and k not in allowed:
+                self.fail(_at(path, k), f"{kind} 프레임에는 쓰지 않는 필드다. 쓸 수 있는 필드: {', '.join(allowed)}")
+        for k in FRAME_REQUIRED[kind]:
+            if k not in o:
+                self.fail(path, f"'{k}' 필드가 빠졌다")
+        if kind == "ref":
+            name = self.text(o["name"], _at(path, "name")) if "name" in o else None
+            at = self.position(o["before"], _at(path, "before"), n) if "before" in o else None
+            if len(self.problems) > before:
+                return None
+            return Ref(name, at, index)
+        if kind == "alt":
+            raw = self.items(o["branches"], _at(path, "branches")) if "branches" in o else []
+            if "branches" in o and isinstance(o["branches"], (list, tuple)) and len(raw) < 2:
+                self.fail(_at(path, "branches"), "alt는 칸이 둘 이상이어야 한다 — 칸이 하나면 opt를 쓴다")
+            branches = []
+            for j, b in enumerate(raw):
+                bp = _at(_at(path, "branches"), j)
+                bo = self.obj(b, bp, BRANCH_FIELDS, BRANCH_FIELDS)
+                if bo is None:
+                    branches.append(None)
+                    continue
+                cond = self.condition(bo["condition"], _at(bp, "condition")) if "condition" in bo else None
+                branches.append(self.span(bo, bp, n, cond))
+            for j in range(1, len(branches)):
+                a, b = branches[j - 1], branches[j]
+                if a is not None and b is not None and b.first != a.last + 1:
+                    self.fail(_at(_at(_at(path, "branches"), j), "first"),
+                              f"앞 칸이 messages[{a.last}]에서 끝나므로 {a.last + 1}이어야 한다 — 칸은 빈틈없이 이어 붙인다")
+        else:
+            cond = self.condition(o["condition"], _at(path, "condition")) if "condition" in o else None
+            branches = [self.span(o, path, n, cond)]
+        if len(self.problems) > before:
+            return None
+        return Fragment(kind, tuple(branches), index)
+
+    def diagram(self, data) -> Optional[Diagram]:
+        o = self.obj(data, "", DIAGRAM_FIELDS, ("participants",))
+        if o is None:
+            return None
+        raw_p = self.items(o["participants"], "participants") if "participants" in o else []
+        if "participants" in o and isinstance(o["participants"], (list, tuple)):
+            if not raw_p:
+                self.fail("participants", "참여자가 하나 이상 있어야 한다")
+            elif len(raw_p) > MAX_PARTICIPANTS:
+                self.fail("participants", f"참여자가 {len(raw_p)}개다 — {MAX_PARTICIPANTS}개까지 그린다. 그림을 나눈다")
+        read = [self.participant(v, _at("participants", i)) for i, v in enumerate(raw_p)]
+        seen: dict[str, int] = {}
+        kinds: dict[str, str] = {}
+        for i, (name, p) in enumerate(read):
+            if name is None:
+                continue
+            if name in seen:
+                self.fail(_at(_at("participants", i), "name"),
+                          f"participants[{seen[name]}]와 이름이 같다 — 메시지가 이름으로 참여자를 가리키므로 이름은 달라야 한다")
+                continue
+            seen[name] = i
+            if p is not None:
+                kinds[name] = p.kind
+        known = ", ".join(_show(n) for n in list(seen)[:20]) + (" …" if len(seen) > 20 else "")
+
+        raw_m = self.items(o["messages"], "messages") if "messages" in o else []
+        n = len(raw_m)
+        if n > MAX_MESSAGES:
+            self.fail("messages", f"메시지가 {n}개다 — {MAX_MESSAGES}개까지 그린다. 그림을 나눈다")
+            raw_m = []
+        messages = []
+        created: dict[str, int] = {}
+        used: dict[str, int] = {}
+        for i, v in enumerate(raw_m):
+            path = _at("messages", i)
+            source, target, m = self.message(v, path)
+            missing = [(key, who) for key, who in (("from", source), ("to", target)) if who is not None and who not in seen]
+            for key, who in missing:
+                self.fail(_at(path, key), f"이름이 {_show(who)}인 참여자가 없다(있는 참여자: {known or '없음'})")
+            if m is not None and not missing:
+                if m.kind == "create":
+                    if kinds.get(target) == "actor":
+                        self.fail(_at(path, "to"), "액터는 만들 수 없다 — 만드는 메시지는 생명선(kind 'lifeline')에 보낸다")
+                    elif target in created:
+                        self.fail(_at(path, "to"), f"{_show(target)}는 messages[{created[target]}]에서 이미 만들었다")
+                    elif target in used:
+                        self.fail(_at(path, "to"), f"{_show(target)}는 messages[{used[target]}]에서 이미 메시지를 주고받았다 — "
+                                                   "만드는 메시지를 그보다 앞에 둔다")
+                    else:
+                        created[target] = i
+                messages.append(m)
+            for who in (source, target):
+                if who is not None:
+                    used.setdefault(who, i)
+
+        frames = [self.frame(v, _at("frames", i), n, i)
+                  for i, v in enumerate(self.items(o["frames"], "frames") if "frames" in o else [])]
+        fragments = [f for f in frames if isinstance(f, Fragment)]
+        refs = [f for f in frames if isinstance(f, Ref)]
+        for i, a in enumerate(fragments):
+            for b in fragments[i + 1:]:
+                if a.first <= b.last and b.first <= a.last:
+                    self.fail(_at("frames", b.index), f"frames[{a.index}]와 덮는 메시지가 겹친다 — 프레임 안에 프레임을 넣지 않는다")
+        for r in refs:
+            for f in fragments:
+                if f.first < r.before <= f.last:
+                    self.fail(_at(_at("frames", r.index), "before"),
+                              f"frames[{f.index}](messages[{f.first}]~[{f.last}]) 안이다 — 프레임 안에 ref를 넣지 않는다")
+        notes = [self.text(v, _at("notes", i))
+                 for i, v in enumerate(self.items(o["notes"], "notes") if "notes" in o else [])]
+        return Diagram(tuple(p for _, p in read if p is not None), tuple(messages),
+                       tuple(sorted(fragments, key=lambda f: f.first)), tuple(refs), tuple(s for s in notes if s is not None))
+
+
+def parse(data: Any) -> Diagram:
+    """JSON(을 읽은 파이썬 값)을 교류도 모델로 읽는다. 틀린 곳이 있으면 모두 모아 InputError."""
+    reader = _SeqReader()
+    diagram = reader.diagram(data)
+    if reader.problems:
+        raise InputError(reader.problems)
+    assert diagram is not None
+    return diagram
+
+
+# ---------------------------------------------------------------- 1. 활성 막대
+
+
+@dataclass(eq=False)
+class _Bar:
+    """terms는 밑변의 후보 (일의 차례, 그 높이에 더할 길이)이고, 밑변은 그 가운데 가장 낮은 곳이다."""
+
+    life: int
+    top: int
+    terms: set = field(default_factory=set)
+    fixed: bool = False
+    protected: bool = False
+    depth: int = 0
+    last: int = 0  # terms 가운데 가장 늦은 일의 차례(다 놓인 뒤에야 밑변이 정해진다)
+
+
+def _after(term: tuple[int, float], e: int) -> bool:
+    """밑변 후보가 e번째 일의 높이보다 아래인지. 일 사이 간격은 그 일에서 생기는 후보의 더할 길이 이상이라(DY ≥ ACT_H,
+    프레임·ref 뒤 간격 ≥ EDGE_CLEAR) 차례만으로 가려진다."""
+    j, off = term
+    return j > e or (j == e and off > 0)
+
+
+def _ends_after(bar: _Bar, e: int) -> bool:
+    return any(_after(t, e) for t in bar.terms)
+
+
+class _Activations:
+    """막대를 잇는 규칙(기존 코드와 같다).
+
+    - 액터가 아닌 생명선을 부르면 그 생명선에 막대를 연다. 열린 막대는 부른 순서대로 쌓인다.
+    - 보내는 생명선에 열린 막대가 있으면 그 위에 쌓인 막대(그가 부른 쪽)를 닫는다. 액터가 보내거나, 열린 막대가 없는
+      생명선이 보내면 열린 막대를 모두 닫는다(열린 막대가 없는 생명선은 그 자리에서 막대를 연다).
+    - 반환은 보내는 막대를 그 높이에서 닫는다. 받는 생명선에 열린 막대가 있으면 그 위를 닫고 잇고, 없으면 연다.
+    - 액터가 받는 호출은 높이 ACT_H로 그린다. 만드는 메시지는 막대를 만들지 않는다.
+    닫는 막대의 밑변은 "윗변 + ACT_H"와 그 막대(와 그 위에 쌓였던 막대)가 마지막으로 주고받은 높이 가운데 아래쪽이다.
+
+    프레임 규칙: 프레임이 열릴 때 열려 있던 막대는 프레임 안에서 닫지 않고(protected) 프레임 밑변 아래까지 잇는다. 프레임
+    안에서 연 막대는 칸이 끝날 때 닫는다. ref는 그때 열린 막대를 ref 아래까지 잇는다.
+    """
+
+    def __init__(self):
+        self.stack: list[_Bar] = []
+        self.bars: list[_Bar] = []
+
+    def open(self, life: int, e: int, fixed: bool = False) -> _Bar:
+        b = _Bar(life, e, {(e, ACT_H)}, fixed)
+        self.bars.append(b)
+        if not fixed:
+            self.stack.append(b)
+        return b
+
+    def find(self, life: int) -> Optional[_Bar]:
+        return next((b for b in reversed(self.stack) if b.life == life), None)
+
+    def _close(self, b: _Bar) -> None:
+        i = next(k for k, x in enumerate(self.stack) if x is b)
+        del self.stack[i]
+        if i:
+            self.stack[i - 1].terms |= b.terms
+
+    def close_above(self, b: _Bar) -> None:
+        i = next(k for k, x in enumerate(self.stack) if x is b)
+        for x in reversed(self.stack[i + 1:]):
+            if not x.protected:
+                self._close(x)
+
+    def close_all(self) -> None:
+        for x in reversed(list(self.stack)):
+            if not x.protected:
+                self._close(x)
+
+    def message(self, src: int, dst: int, kind: str, e: int, src_actor: bool, dst_actor: bool
+                ) -> tuple[Optional[_Bar], Optional[_Bar]]:
+        """메시지 하나를 넣고 (선이 시작하는 막대, 화살촉이 닿는 막대)를 돌려준다. 막대가 없는 끝은 None이다."""
+        s = None if src_actor else self.find(src)
+        if s is None:
+            self.close_all()
+            if not src_actor and kind != "reply":
+                s = self.open(src, e)
+        else:
+            self.close_above(s)
+        d = None
+        if kind == "reply":
+            if s is not None:
+                if not s.protected:
+                    self._close(s)  # 반환 높이는 부모에게 넘기지 않는다 — 건너뛰는 반환이 사이 막대 끝을 선 위에 두지 않게
+                s.terms.add((e, 0))
+            if not dst_actor:
+                d = self.find(dst)
+                if d is not None:
+                    self.close_above(d)
+                    d.terms.add((e, 0))
+                else:
+                    self.close_all()
+                    d = self.open(dst, e)
+        else:
+            if s is not None:
+                s.terms.add((e, 0))
+            if kind == "call":
+                d = self.open(dst, e, fixed=dst_actor)
+        return s, d
+
+    def frame_start(self, src: int, src_actor: bool) -> list[_Bar]:
+        """프레임 첫 메시지가 닫을 막대는 프레임 앞에서 닫고, 남은 막대를 프레임 끝까지 지킨다."""
+        s = None if src_actor else self.find(src)
+        if s is None:
+            self.close_all()
+        else:
+            self.close_above(s)
+        for b in self.stack:
+            b.protected = True
+        return list(self.stack)
+
+    def frame_end(self, protected: list[_Bar], e: int) -> None:
+        self.close_all()
+        for b in protected:
+            b.protected = False
+            b.terms.add((e, EDGE_CLEAR))
+
+    def ref(self, e: int) -> None:
+        for b in self.stack:
+            b.terms.add((e, REF_H + EDGE_CLEAR))
+
+
+@dataclass(frozen=True)
+class _Event:
+    """그림 위에서 아래로 놓는 일. kind는 message·ref·start(프레임 윗변)·branch(alt 칸 나눔)·end(프레임 밑변)이고, item은
+    message면 메시지 자리, ref면 refs 안의 자리, 나머지는 fragments 안의 자리다."""
+
+    kind: str
+    item: int
+    branch: int = 0
+
+
+@dataclass
+class _Plan:
+    events: list[_Event]
+    bars: list[_Bar]
+    attach: list[tuple[Optional[_Bar], Optional[_Bar]]]  # 메시지마다 (선이 시작하는 막대, 화살촉이 닿는 막대)
+    at: list[int]                                          # 메시지마다 그 일의 차례
+    created: dict[int, int]                                # 만들어지는 참여자 → 만드는 메시지 자리
+    spanning: list[tuple[int, ...]]                        # 메시지마다, 사이 생명선 가운데 막대가 그 높이를 지나는 것
+
+
+def _events(d: Diagram) -> list[_Event]:
+    starts = {f.first: i for i, f in enumerate(d.fragments)}
+    ends = {f.last: i for i, f in enumerate(d.fragments)}
+    branches = {b.first: (i, j) for i, f in enumerate(d.fragments) for j, b in enumerate(f.branches) if j}
+    refs_at = defaultdict(list)
+    for i, r in enumerate(d.refs):
+        refs_at[r.before].append(i)
+    out = []
+    for k in range(len(d.messages) + 1):
+        out += [_Event("ref", i) for i in refs_at[k]]
+        if k == len(d.messages):
+            break
+        if k in starts:
+            out.append(_Event("start", starts[k]))
+        if k in branches:
+            out.append(_Event("branch", *branches[k]))
+        out.append(_Event("message", k))
+        if k in ends:
+            out.append(_Event("end", ends[k]))
+    return out
+
+
+def _plan(d: Diagram) -> _Plan:
+    index = {p.name: i for i, p in enumerate(d.participants)}
+    actor = [p.kind == "actor" for p in d.participants]
+    events = _events(d)
+    acts = _Activations()
+    attach: list = [(None, None)] * len(d.messages)
+    at = [0] * len(d.messages)
+    protected: list[_Bar] = []
+    for e, ev in enumerate(events):
+        if ev.kind == "message":
+            m = d.messages[ev.item]
+            s, t = index[m.source], index[m.target]
+            attach[ev.item] = acts.message(s, t, m.kind, e, actor[s], actor[t])
+            at[ev.item] = e
+        elif ev.kind == "start":
+            s = index[d.messages[d.fragments[ev.item].first].source]
+            protected = acts.frame_start(s, actor[s])
+        elif ev.kind == "branch":
+            acts.close_all()
+        elif ev.kind == "end":
+            acts.frame_end(protected, e)
+            protected = []
+        else:
+            acts.ref(e)
+    acts.close_all()
+    bars = acts.bars
+    # 메시지 높이에서 정확히 끝나는 막대(그 높이를 위 막대에서 물려받았다)를 그 메시지 선이 지나면 선이 막대 밑변을 따라
+    # 간다. 밑변이 메시지 높이와 같이 움직여 내려서는 못 푸니, 그런 막대는 선 아래로 CLEAR만큼 더 잇는다.
+    for k, m in enumerate(d.messages):
+        e = at[k]
+        lo, hi = sorted((index[m.source], index[m.target]))
+        for b in bars:
+            if lo <= b.life <= hi and all(b is not x for x in attach[k]) and (e, 0) in b.terms and not _ends_after(b, e):
+                b.terms.add((e, CLEAR))
+    for b in bars:
+        b.last = max(j for j, _ in b.terms)
+        b.depth = sum(1 for o in bars if o is not b and o.life == b.life and o.top < b.top and _ends_after(o, b.top))
+    created = {index[m.target]: k for k, m in enumerate(d.messages) if m.kind == "create"}
+    spanning = []
+    for k, m in enumerate(d.messages):
+        lo, hi = sorted((index[m.source], index[m.target]))
+        spanning.append(tuple(sorted({b.life for b in bars if lo < b.life < hi and b.top < at[k] and _ends_after(b, at[k])})))
+    return _Plan(events, bars, attach, at, created, spanning)
+
+
+# ---------------------------------------------------------------- 2. 가로
+
+
+@dataclass(frozen=True)
+class _Columns:
+    x: tuple[float, ...]          # 생명선 가운데
+    width: tuple[float, ...]      # 머리 폭(액터는 자리 폭)
+    left_ext: tuple[float, ...]   # 생명선 가운데에서 막대 왼쪽 끝까지
+    right_ext: tuple[float, ...]  # 생명선 가운데에서 가장 깊이 겹친 막대 오른쪽 끝까지
+    actor: tuple[bool, ...]
+
+
+def _tag_width(op: str) -> float:
+    return max(TAG_MIN_W, T.text_width(op, True) + TAG_PAD)
+
+
+def _label_lines(m: Message) -> list[str]:
+    if m.kind == "create":
+        return [CREATE_LABEL] + ([m.name] if m.name else [])
+    return [m.name] if m.name else []
+
+
+def _rightward(cols_x, s: int, t: int) -> bool:
+    return cols_x[t] > cols_x[s]
+
+
+def _label_below(m: Message, rightward: bool) -> bool:
+    """오른쪽으로 가는 호출·만드는 메시지는 글자를 선 위에, 왼쪽으로 가는 메시지와 반환은 선 아래에 쓴다(기존 코드와 같다)."""
+    return m.kind == "reply" or not rightward
+
+
+def _margin(m: Message, s: int, t: int, z: int, toward_right: bool, width, left_ext, right_ext, actor) -> float:
+    """메시지 글자가 칸 경계 생명선 z에서 떨어져야 하는 거리(z 가운데부터). toward_right면 칸이 z의 오른쪽에 있다."""
+    if z == t and m.kind == "create":
+        base = width[z] / 2
+    else:
+        base = right_ext[z] if toward_right else left_ext[z]
+    out = base + LABEL_GAP
+    if z == t:
+        out += TIP_ROOM
+    if z in (s, t) and actor[z]:
+        out += ACTOR_ROOM
+    return out
+
+
+def _columns(d: Diagram, plan: _Plan) -> _Columns:
+    """이웃 생명선 간격 = 머리가 닿지 않고, 막대가 이웃 머리에 닿지 않고, 그 사이를 지나는 메시지마다 글자가 들어가는 칸이
+    하나는 있을 만큼. 칸은 그 메시지 높이를 막대가 지나는 사이 생명선으로 나눈다(막대가 없는 생명선은 글자가 건너고 그 밑
+    점선은 지운다). 여러 칸을 건너는 메시지는 가장 덜 모자란 칸을 넓히고, 모자란 만큼 그 칸의 간격에 나눈다."""
+    ps = d.participants
+    index = {p.name: i for i, p in enumerate(ps)}
+    width = tuple(float(max(ACTOR_W, math.ceil(T.text_width(p.name, True) + ACTOR_PAD))) if p.kind == "actor"
+                  else float(max(LIFE_W, math.ceil(T.text_width(p.name, True) + HEAD_PAD))) for p in ps)
+    actor = tuple(p.kind == "actor" for p in ps)
+    depth = [0] * len(ps)
+    for b in plan.bars:
+        depth[b.life] = max(depth[b.life], b.depth)
+    left_ext = tuple(ACT_W / 2 for _ in ps)
+    right_ext = tuple(ACT_W / 2 + NEST * dp for dp in depth)
+    gaps = [max(float(SLOT_GAP), right_ext[i] + LABEL_GAP - width[i] / 2) for i in range(len(ps) - 1)]
+
+    def offsets() -> list[float]:
+        out = [0.0]
+        for i, g in enumerate(gaps):
+            out.append(out[-1] + width[i] / 2 + g + width[i + 1] / 2)
+        return out
+
+    order = sorted(range(len(d.messages)),
+                   key=lambda k: (abs(index[d.messages[k].source] - index[d.messages[k].target]), k))
+    for k in order:
+        m = d.messages[k]
+        lines = _label_lines(m)
+        if not lines:
+            continue
+        w = max(T.text_width(s) for s in lines)
+        s, t = index[m.source], index[m.target]
+        lo, hi = sorted((s, t))
+        bounds = [lo, *plan.spanning[k], hi]
+        xs = offsets()
+        best = None
+        for p, q in zip(bounds, bounds[1:]):
+            need = w + _margin(m, s, t, p, True, width, left_ext, right_ext, actor) + \
+                _margin(m, s, t, q, False, width, left_ext, right_ext, actor)
+            lack = need - (xs[q] - xs[p])
+            if best is None or lack < best[0]:
+                best = lack, p, q
+        lack, p, q = best
+        if lack > 0:
+            for g in range(p, q):
+                gaps[g] += lack / (q - p)
+    if d.fragments or d.refs:
+        tag = max(_tag_width(op) for op in {f.kind for f in d.fragments} | ({"ref"} if d.refs else set()))
+        x0 = max(LEFT + FRAME_INSET + width[0] / 2, LEFT + tag + COND_GAP + left_ext[0])
+    else:
+        x0 = LEFT + width[0] / 2
+    return _Columns(tuple(x0 + o for o in offsets()), width, left_ext, right_ext, actor)
+
+
+# ---------------------------------------------------------------- 3. 세로
+
+
+def _overlap(a: Box, b: Box, pad: float) -> bool:
+    return a[0] - pad < b[2] and b[0] < a[2] + pad and a[1] - pad < b[3] and b[1] < a[3] + pad
+
+
+class _Placer:
+    """일을 위에서 아래로 차례대로 놓는다. obstacles는 앞서 놓은 글자·선·머리·화살촉·꼬리표·ref 상자이고, 막대는 계획(_Plan)
+    에서 그때그때 상자를 얻는다(밑변이 아직 안 정해진 막대는 끝없이 이어지는 것으로 본다)."""
+
+    def __init__(self, d: Diagram, plan: _Plan, cols: _Columns):
+        self.d, self.plan, self.cols = d, plan, cols
+        self.index = {p.name: i for i, p in enumerate(d.participants)}
+        self.ys: list[float] = []
+        self.obstacles: list[Box] = []
+        self.floor = 0.0
+        self.bottoms: dict[int, float] = {}
+        self.heads: dict[int, float] = {}   # 만들어진 참여자 → 머리 윗변
+        self.messages: list[PlacedMessage] = []
+        self.frames: dict[int, dict] = {}
+        self.refs: list[tuple[Ref, float]] = []
+        for i in range(len(d.participants)):
+            if i not in plan.created:
+                self._add(self._head_box(i, 0.0))
+
+    # -------- 도우미
+
+    def _add(self, box: Box) -> None:
+        self.obstacles.append(box)
+        self.floor = max(self.floor, box[3])
+
+    def _head_box(self, i: int, top: float) -> Box:
+        x, w, p = self.cols.x[i], self.cols.width[i], self.d.participants[i]
+        return PlacedParticipant(p, x, w, top, 0, 0).head
+
+    def _bar_x(self, b: _Bar) -> float:
+        return self.cols.x[b.life] + NEST * b.depth
+
+    def _bottom(self, b: _Bar, e: int) -> float:
+        """e번째 일을 놓을 때 막대 밑변. 아직 안 놓인 일에 달렸으면 INF."""
+        if b.last >= e:
+            return INF
+        key = id(b)
+        if key not in self.bottoms:
+            self.bottoms[key] = max(self.ys[j] + off for j, off in b.terms)
+        return self.bottoms[key]
+
+    def _bar_boxes(self, e: int) -> list[tuple[_Bar, Box]]:
+        out = []
+        for b in self.plan.bars:
+            if b.top < e:
+                x = self._bar_x(b)
+                out.append((b, (x - ACT_W / 2, self.ys[b.top], x + ACT_W / 2, self._bottom(b, e))))
+        return out
+
+    def _closed_bottom(self, e: int) -> float:
+        return max((self._bottom(b, e) for b in self.plan.bars if b.top < e and b.last < e), default=-INF)
+
+    def _free_x(self, e: int, start: float, w: float, row: tuple[float, float]) -> float:
+        """row 높이를 지나는 막대를 LABEL_GAP 넘게 비켜, start에서 오른쪽으로 가장 가까운 글자 왼쪽 끝."""
+        blocks = sorted((bx[0] - LABEL_GAP, bx[2] + LABEL_GAP) for _, bx in self._bar_boxes(e)
+                        if bx[1] < row[1] and bx[3] > row[0])
+        x = start
+        for a, b in blocks:
+            if x + w > a and x < b:
+                x = b
+        return x
+
+    def _condition(self, e: int, y: float, start: float, text: str) -> Label:
+        s = f"[{text}]"
+        rel = T.place(0, y + COND_Y, s, False, "lm").box
+        x = self._free_x(e, start, rel[2] - rel[0], (rel[1] - PAD, rel[3] + PAD))
+        label = Label(s, x, y + COND_Y, "lm")
+        self._add(label.box)
+        return label
+
+    def _settle(self, e: int, base: float, pieces: list[tuple[Box, bool]], new_bars: list[_Bar],
+                span: tuple[float, float], attached: tuple) -> float:
+        """pieces(높이 0 기준 상자, 막대를 피해야 하는지)와 새 막대가 앞서 놓은 것에 걸리지 않고, 선(높이 0, 가로 span)이
+        건너는 막대의 끝에서 CLEAR 넘게 떨어지는 가장 위 높이(base 이상)."""
+        reach = min(p[0][1] for p in pieces) - 60
+        self.obstacles = [o for o in self.obstacles if o[3] >= base + reach]
+        bars = [(b, bx) for b, bx in self._bar_boxes(e) if bx[3] >= base + reach]
+        y = base
+        for _ in range(MAX_PUSH):
+            need = -INF
+            for (x0, dy0, x1, dy1), avoid_bars in pieces:
+                box = (x0, y + dy0, x1, y + dy1)
+                for o in self.obstacles:
+                    if _overlap(box, o, PAD):
+                        need = max(need, o[3] + PAD - dy0 + EPS)
+                if avoid_bars:
+                    for b, bx in bars:
+                        if b not in attached and _overlap(box, bx, PAD):
+                            if bx[3] == INF:
+                                raise RuntimeError(f"배치 버그: 끝나지 않은 막대에 걸려 내릴 수 없다({box} / {bx})")
+                            need = max(need, bx[3] + PAD - dy0 + EPS)
+            for b, bx in bars:
+                if b in attached or not (bx[0] < span[1] and span[0] < bx[2]):
+                    continue
+                for end in (bx[1], bx[3]):
+                    if end != INF and abs(y - end) < CLEAR:
+                        need = max(need, end + CLEAR + EPS)
+            for nb in new_bars:
+                x = self._bar_x(nb)
+                box = (x - ACT_W / 2, y, x + ACT_W / 2, y + ACT_H)
+                for o in self.obstacles:
+                    if _overlap(box, o, PAD):
+                        need = max(need, o[3] + PAD + EPS)
+                for b, bx in bars:
+                    if b.life == nb.life and b.depth == nb.depth and bx[3] != INF and bx[3] > y - BAR_GAP:
+                        need = max(need, bx[3] + BAR_GAP + EPS)
+            if need == -INF:
+                return y
+            y = max(need, y + EPS)
+        raise RuntimeError("배치 버그: 걸리지 않는 높이를 찾지 못했다")
+
+    # -------- 일 놓기
+
+    def _base(self, e: int, below: Optional[bool]) -> float:
+        if not e:
+            return FIRST
+        prev, py = self.plan.events[e - 1], self.ys[e - 1]
+        if prev.kind == "message":
+            pm = self.d.messages[prev.item]
+            ps, pt = self.index[pm.source], self.index[pm.target]
+            prev_below = _label_below(pm, _rightward(self.cols.x, ps, pt)) if _label_lines(pm) else None
+            return max(FIRST, py + (DY_FACING if prev_below is True and below is False else DY))
+        if prev.kind in ("start", "branch"):
+            return py + FRAME_HEAD
+        if prev.kind == "end":
+            return py + FRAME_AFTER
+        return py + REF_H + REF_AFTER
+
+    def _label_x(self, k: int, w: float, mid: float) -> float:
+        """글자 가운데 x. 사이 생명선(아직 만들어지지 않은 것은 빼고)으로 나눈 칸 가운데 글자가 들어가는 칸에, 없으면 막대가
+        지나는 사이 생명선으로만 나눈 칸에(지나는 점선은 흰 바탕으로 지운다) 선 가운데에 가장 가깝게 놓는다."""
+        m = self.d.messages[k]
+        s, t = self.index[m.source], self.index[m.target]
+        lo, hi = sorted((s, t))
+        c = self.cols
+        existing = [z for z in range(lo + 1, hi) if self.plan.created.get(z, -1) < k]
+        for inner in (existing, list(self.plan.spanning[k])):
+            bounds = [lo, *inner, hi]
+            best = None
+            for p, q in zip(bounds, bounds[1:]):
+                left = c.x[p] + _margin(m, s, t, p, True, c.width, c.left_ext, c.right_ext, c.actor)
+                right = c.x[q] - _margin(m, s, t, q, False, c.width, c.left_ext, c.right_ext, c.actor)
+                if right - left >= w - EPS:
+                    x = min(max(mid, left + w / 2), right - w / 2)
+                    if best is None or abs(x - mid) < abs(best - mid):
+                        best = x
+            if best is not None:
+                return best
+        raise RuntimeError(f"배치 버그: messages[{k}] 글자가 들어갈 칸이 없다")
+
+    def message(self, e: int, k: int) -> None:
+        m = self.d.messages[k]
+        s, t = self.index[m.source], self.index[m.target]
+        sb, db = self.plan.attach[k]
+        c = self.cols
+        right = _rightward(c.x, s, t)
+        sign = 1 if right else -1
+        x1 = self._bar_x(sb) + sign * ACT_W / 2 if sb is not None else c.x[s]
+        if m.kind == "create":
+            x2 = c.x[t] - sign * c.width[t] / 2
+        elif db is not None:
+            x2 = self._bar_x(db) - sign * ACT_W / 2
+        else:
+            x2 = c.x[t]
+        lines = _label_lines(m)
+        below = _label_below(m, right) if lines else None
+        pieces: list[tuple[Box, bool]] = [((min(x1, x2), 0.0, max(x1, x2), 0.0), False),
+                                          ((min(x2, x2 - sign * ARROW), -ARROW_HALF, max(x2, x2 - sign * ARROW), ARROW_HALF),
+                                           False)]
+        labels_rel = []
+        if lines:
+            w = max(T.text_width(s_) for s_ in lines)
+            x = self._label_x(k, w, (c.x[s] + x2) / 2 if m.kind == "create" else (c.x[s] + c.x[t]) / 2)
+            dys = ([LABEL_DY] if len(lines) == 1 else [LABEL_DY, CREATE_DY]) if below else \
+                ([-LABEL_DY] if len(lines) == 1 else [-CREATE_DY, -LABEL_DY])
+            for text, dy in zip(lines, dys):
+                labels_rel.append((text, x, dy))
+                pieces.append((T.place(x, dy, text, False, "mm").box, True))
+        if m.kind == "create":
+            head = self._head_box(t, -HEAD_H / 2)
+            pieces.append((head, True))
+        new_bars = [b for b in (sb, db) if b is not None and b.top == e]
+        y = self._settle(e, self._base(e, below), pieces, new_bars, (min(x1, x2), max(x1, x2)), (sb, db))
+        self.ys.append(y)
+        for (x0, dy0, x1_, dy1), _ in pieces:
+            self._add((x0, y + dy0, x1_, y + dy1))
+        if m.kind == "create":
+            self.heads[t] = y - HEAD_H / 2
+        self.messages.append(PlacedMessage(m, f"messages[{k}]", y, x1, x2,
+                                           tuple(Label(text, x, y + dy) for text, x, dy in labels_rel)))
+
+    def _edge(self, e: int) -> float:
+        return max(self.floor + FRAME_GAP, self._closed_bottom(e) + EDGE_CLEAR)
+
+    def start(self, e: int, f: Fragment) -> None:
+        y = self._edge(e)
+        self.ys.append(y)
+        self._add((LEFT, y, INF, y))
+        tag = _tag_width(f.kind)
+        self._add((LEFT, y, LEFT + tag, y + TAG_H))
+        cond = f.branches[0].condition
+        self.frames[f.index] = {"top": y, "dividers": [],
+                                "conditions": [self._condition(e, y, LEFT + tag + COND_GAP, cond)] if cond else []}
+
+    def branch(self, e: int, f: Fragment, j: int) -> None:
+        y = self._edge(e)
+        self.ys.append(y)
+        self._add((LEFT, y, INF, y))
+        part = self.frames[f.index]
+        part["dividers"].append(y)
+        cond = f.branches[j].condition
+        if cond:
+            part["conditions"].append(self._condition(e, y, LEFT + COND_LEFT, cond))
+
+    def end(self, e: int, f: Fragment) -> None:
+        y = max(self._edge(e), self.ys[self.plan.at[f.last]] + FRAME_FOOT)
+        self.ys.append(y)
+        self._add((LEFT, y, INF, y))
+        self.frames[f.index]["bottom"] = y
+
+    def ref(self, e: int, r: Ref) -> None:
+        y = self._edge(e)
+        self.ys.append(y)
+        self._add((LEFT, y, INF, y + REF_H))
+        self.refs.append((r, y))
+
+    def run(self) -> Layout:
+        for e, ev in enumerate(self.plan.events):
+            if ev.kind == "message":
+                self.message(e, ev.item)
+            elif ev.kind == "start":
+                self.start(e, self.d.fragments[ev.item])
+            elif ev.kind == "branch":
+                self.branch(e, self.d.fragments[ev.item], ev.branch)
+            elif ev.kind == "end":
+                self.end(e, self.d.fragments[ev.item])
+            else:
+                self.ref(e, self.d.refs[ev.item])
+        return self._finish()
+
+    def _finish(self) -> Layout:
+        d, c, done = self.d, self.cols, len(self.plan.events)
+        bars = []
+        for b in self.plan.bars:
+            bars.append(PlacedBar(d.participants[b.life].name, self._bar_x(b), self.ys[b.top], self._bottom(b, done), b.depth))
+        life_end = max([self.floor] + [b.bottom for b in bars]) + LIFE_TAIL
+        participants = []
+        for i, p in enumerate(d.participants):
+            top = self.heads.get(i, 0.0)
+            dash_top = top + (ACTOR_H if p.kind == "actor" else HEAD_H)
+            participants.append(PlacedParticipant(p, c.x[i], c.width[i], top, dash_top, life_end))
+        right = max(c.x[i] + c.width[i] / 2 for i in range(len(c.x))) + FRAME_RIGHT
+        for part in self.frames.values():
+            for cond in part["conditions"]:
+                right = max(right, cond.box[2] + COND_GAP)
+        ref_tag = _tag_width("ref")
+        for r, _ in self.refs:
+            right = max(right, LEFT + ref_tag + COND_GAP + T.text_width(r.name) + COND_GAP)
+        frames = tuple(PlacedFrame(f, f"frames[{f.index}]", LEFT, self.frames[f.index]["top"], right,
+                                   self.frames[f.index]["bottom"], tuple(self.frames[f.index]["dividers"]),
+                                   tuple(self.frames[f.index]["conditions"])) for f in d.fragments)
+        refs = []
+        for r, top in self.refs:
+            w = T.text_width(r.name)
+            x = max((LEFT + right) / 2, LEFT + ref_tag + COND_GAP + w / 2)
+            refs.append(PlacedRef(r, f"frames[{r.index}]", LEFT, top, right, top + REF_H, Label(r.name, x, top + REF_H / 2)))
+        notes = tuple(PlacedNote(s, f"notes[{j}]", LEFT, life_end + NOTE_GAP + NOTE_STEP * j,
+                                 max(NOTE_MIN_W, math.ceil(T.text_width(s) + NOTE_PAD)), NOTE_H)
+                      for j, s in enumerate(d.notes))
+        return Layout(tuple(participants), tuple(bars), tuple(self.messages), frames, tuple(refs), notes)
+
+
+def layout(diagram: Diagram) -> Layout:
+    """막대를 잇고, 생명선 간격과 메시지·프레임 높이를 정한다. 프레임은 모두 같은 폭(그림 전체 폭)이다."""
+    plan = _plan(diagram)
+    return _Placer(diagram, plan, _columns(diagram, plan)).run()
+
+
+# ---------------------------------------------------------------- 그리기
+
+
+def _draw_tag(c: Canvas, left: float, top: float, op: str, owner: str) -> None:
+    w = _tag_width(op)
+    c.poly([(left, top), (left + w, top), (left + w, top + TAG_SIDE), (left + w - TAG_CUT, top + TAG_H), (left, top + TAG_H)],
+           owner=owner)
+    c.text(left + TAG_TEXT[0], top + TAG_TEXT[1], op, bold=True, owner=owner)
+
+
+def _draw_participant(c: Canvas, p: PlacedParticipant) -> None:
+    x, top, name, o = p.x, p.top, p.participant.name, p.participant.name
+    if p.participant.kind == "actor":
+        c.ellipse(x - 6, top, 12, 12, owner=o)
+        c.line([(x, top + 12), (x, top + 24)], owner=o)
+        c.line([(x - 9, top + 16), (x + 9, top + 16)], owner=o)
+        c.line([(x, top + 24), (x - 9, top + 37)], owner=o)
+        c.line([(x, top + 24), (x + 9, top + 37)], owner=o)
+        c.text(x, top + ACTOR_NAME, name, bold=True, anchor="mm", owner=o)
+    else:
+        c.rect(x - p.width / 2, top, p.width, HEAD_H, owner=o)
+        c.text(x, top + HEAD_NAME, name, bold=True, anchor="mm", owner=o)
+    c.line([(x, p.dash_top), (x, p.bottom)], dash=LIFE_DASH, owner=o)
+
+
+def _draw_message(c: Canvas, m: PlacedMessage) -> None:
+    y, o = m.y, m.owner
+    if m.message.kind == "call":
+        c.line([(m.start, y), (m.end, y)], owner=o)
+        c.closed_arrow((m.end, y), (m.start, y), owner=o)
+    else:
+        c.line([(m.start, y), (m.end, y)], dash=REPLY_DASH, owner=o)
+        c.open_arrow((m.end, y), (m.start, y), size=ARROW, owner=o)
+    for lab in m.labels:
+        c.text(lab.x, lab.y, lab.text, anchor="mm", bg=True, owner=o)
+
+
+def _draw_note(c: Canvas, n: PlacedNote) -> None:
+    l, t, w, h, f = n.left, n.top, n.width, n.height, NOTE_FOLD
+    c.poly([(l, t), (l + w - f, t), (l + w, t + f), (l + w, t + h), (l, t + h)], owner=n.owner)
+    c.line([(l + w - f, t), (l + w - f, t + f), (l + w, t + f)], owner=n.owner)
+    c.text(l + NOTE_TEXT_X, t + h / 2, n.text, owner=n.owner)
+
+
+def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
+    """프레임 테두리 → 생명선 → 막대 → ref 상자 → 프레임 꼬리표·조건 → 메시지 → 노트 순서로 그린다. ref 상자는 흰 바탕이라
+    그 안을 지나는 점선·막대를 덮는다. 메시지 글자와 조건 글자는 흰 바탕을 깔아, 건너는 생명선 점선을 지운다."""
+    lay = layout(diagram)
+    c = Canvas(scale)
+    for f in lay.frames:
+        c.rect(f.left, f.top, f.right - f.left, f.bottom - f.top, fill=None, owner=f.owner)
+        for y in f.dividers:
+            c.line([(f.left, y), (f.right, y)], dash=DIVIDER_DASH, owner=f.owner)
+    for p in lay.participants:
+        _draw_participant(c, p)
+    for b in sorted(lay.bars, key=lambda b: (b.depth, b.top)):
+        c.rect(b.x - ACT_W / 2, b.top, ACT_W, b.bottom - b.top, owner=b.owner)
+    for r in lay.refs:
+        c.rect(r.left, r.top, r.right - r.left, r.bottom - r.top, owner=r.owner)
+        _draw_tag(c, r.left, r.top, "ref", r.owner)
+        c.text(r.name.x, r.name.y, r.name.text, anchor="mm", owner=r.owner)
+    for f in lay.frames:
+        _draw_tag(c, f.left, f.top, f.fragment.kind, f.owner)
+        for lab in f.conditions:
+            c.text(lab.x, lab.y, lab.text, anchor="lm", bg=True, owner=f.owner)
+    for m in lay.messages:
+        _draw_message(c, m)
+    for n in lay.notes:
+        _draw_note(c, n)
+    return Drawing(c, lay)
+
+
+def render(data: Any, scale: float = SCALE) -> Drawing:
+    """JSON을 읽어 그린다. PNG는 Drawing.canvas.save(경로)나 to_image()로 얻는다 — 그 배율로 그리기에 그림이 너무 크면
+    그 둘이 ValueError를 낸다(canvas.MAX_PIXELS)."""
+    return draw(parse(data), scale)
