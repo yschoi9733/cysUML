@@ -206,13 +206,16 @@ class PlacedParticipant:
 
     @property
     def head(self) -> Box:
-        """머리가 차지하는 상자(액터는 그림과 이름)."""
-        p = self.participant
-        if p.kind == "actor":
-            half = max(9, T.text_width(p.name, True) / 2)
-            name = T.place(self.x, self.top + ACTOR_NAME, p.name, True, "mm").box
-            return self.x - half, self.top, self.x + half, name[3]
-        return self.x - self.width / 2, self.top, self.x + self.width / 2, self.top + HEAD_H
+        return _head_box(self.participant, self.x, self.width, self.top)
+
+
+def _head_box(p: Participant, x: float, width: float, top: float) -> Box:
+    """머리가 차지하는 상자(액터는 그림과 이름)."""
+    if p.kind == "actor":
+        half = max(9, T.text_width(p.name, True) / 2)
+        name = T.place(x, top + ACTOR_NAME, p.name, True, "mm").box
+        return x - half, top, x + half, name[3]
+    return x - width / 2, top, x + width / 2, top + HEAD_H
 
 
 @dataclass(frozen=True)
@@ -379,6 +382,9 @@ class _SeqReader(_Reader):
             raw = self.items(o["branches"], _at(path, "branches")) if "branches" in o else []
             if "branches" in o and isinstance(o["branches"], (list, tuple)) and len(raw) < 2:
                 self.fail(_at(path, "branches"), "alt는 칸이 둘 이상이어야 한다 — 칸이 하나면 opt를 쓴다")
+            elif len(raw) > max(n, 2):
+                self.fail(_at(path, "branches"), f"칸이 {len(raw)}개인데 메시지는 {n}개다 — 칸마다 메시지가 하나 이상 있어야 한다")
+                return None
             branches = []
             for j, b in enumerate(raw):
                 bp = _at(_at(path, "branches"), j)
@@ -451,9 +457,8 @@ class _SeqReader(_Reader):
                     else:
                         created[target] = i
                 messages.append(m)
-            for who in (source, target):
-                if who is not None:
-                    used.setdefault(who, i)
+                used.setdefault(source, i)
+                used.setdefault(target, i)
 
         frames = [self.frame(v, _at("frames", i), n, i) for i, v in enumerate(lists["frames"])]
         fragments = sorted((f for f in frames if isinstance(f, Fragment)), key=lambda f: (f.first, f.index))
@@ -562,14 +567,9 @@ class _Activations:
     def message(self, src: int, dst: int, kind: str, e: int, src_actor: bool, dst_actor: bool
                 ) -> tuple[Optional[_Bar], Optional[_Bar]]:
         """메시지 하나를 넣고 (선이 시작하는 막대, 화살촉이 닿는 막대)를 돌려준다. 막대가 없는 끝은 None이다."""
-        s = None if src_actor else self.find(src)
-        if s is None:
-            if kind != "reply":
-                self.close_all()
-                if not src_actor:
-                    s = self.open(src, e)
-        else:
-            self.close_above(s)
+        s = self.send_from(src, kind, src_actor)
+        if s is None and not src_actor and kind != "reply":
+            s = self.open(src, e)
         d = None
         if kind == "reply":
             if s is not None:
@@ -591,13 +591,19 @@ class _Activations:
                 d = self.open(dst, e, fixed=dst_actor)
         return s, d
 
-    def frame_start(self, src: int, src_actor: bool) -> list[_Bar]:
-        """프레임 첫 메시지가 닫을 막대는 프레임 앞에서 닫고, 남은 막대를 프레임 끝까지 지킨다."""
+    def send_from(self, src: int, kind: str, src_actor: bool) -> Optional[_Bar]:
+        """보내는 쪽 규칙: 보내는 생명선의 열린 막대를 찾아 그 위를 닫는다. 없으면(액터도) 반환이 아닌 한 열린 막대를 모두
+        닫는다. 찾은 막대를 돌려준다."""
         s = None if src_actor else self.find(src)
-        if s is None:
-            self.close_all()
-        else:
+        if s is not None:
             self.close_above(s)
+        elif kind != "reply":
+            self.close_all()
+        return s
+
+    def frame_start(self, src: int, kind: str, src_actor: bool) -> list[_Bar]:
+        """프레임 첫 메시지가 닫을 막대는 프레임 앞에서 닫고, 남은 막대를 프레임 끝까지 지킨다."""
+        self.send_from(src, kind, src_actor)
         for b in self.stack:
             b.protected = True
         return list(self.stack)
@@ -670,8 +676,9 @@ def _plan(d: Diagram) -> _Plan:
             attach[ev.item] = acts.message(s, t, m.kind, e, actor[s], actor[t])
             at[ev.item] = e
         elif ev.kind == "start":
-            s = index[d.messages[d.fragments[ev.item].first].source]
-            protected = acts.frame_start(s, actor[s])
+            m = d.messages[d.fragments[ev.item].first]
+            s = index[m.source]
+            protected = acts.frame_start(s, m.kind, actor[s])
         elif ev.kind == "branch":
             acts.close_all()
         elif ev.kind == "end":
@@ -829,8 +836,7 @@ class _Placer:
         self.floor = max(self.floor, box[3])
 
     def _head_box(self, i: int, top: float) -> Box:
-        x, w, p = self.cols.x[i], self.cols.width[i], self.d.participants[i]
-        return PlacedParticipant(p, x, w, top, 0, 0).head
+        return _head_box(self.d.participants[i], self.cols.x[i], self.cols.width[i], top)
 
     def _bar_x(self, b: _Bar) -> float:
         return self.cols.x[b.life] + NEST * b.depth
@@ -878,7 +884,7 @@ class _Placer:
         """pieces(높이 0 기준 상자, 막대를 피해야 하는지)와 새 막대가 앞서 놓은 것에 걸리지 않고, 선(높이 0, 가로 span)이
         건너는 막대의 끝에서 CLEAR 넘게 떨어지는 가장 위 높이(base 이상)."""
         # y는 base 아래로만 움직이므로, 가장 위로 뻗는 조각보다 PAD 넘게 위에서 끝난 것은 걸릴 수 없다
-        reach = base + min([0.0] + [p[0][1] for p in pieces]) - PAD
+        reach = base + min([0.0] + [p[0][1] for p in pieces]) - max(PAD, CLEAR, BAR_GAP)
         near = [o for o in self.obstacles if o[3] > reach]
         bars = [(b, bx) for b, bx in self._bar_boxes(e) if bx[3] > reach]
         y = base

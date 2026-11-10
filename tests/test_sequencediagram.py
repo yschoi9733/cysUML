@@ -134,6 +134,17 @@ def test_all_problems_are_reported_together():
     assert len(found) >= 5
 
 
+def test_alt_with_more_branches_than_messages_is_one_problem():
+    found = problems({"participants": life("A"), "frames": [{"kind": "alt", "branches": [1] * 1000}]})
+    assert list(found) == ["frames[0].branches: 칸이 1000개인데 메시지는 0개다 — 칸마다 메시지가 하나 이상 있어야 한다"]
+
+
+def test_a_broken_message_does_not_count_as_using_a_participant():
+    found = problems({"participants": life("A", "B"),
+                      "messages": [{"from": "A", "to": "B", "kind": "bogus"}, {"from": "A", "to": "B", "kind": "create"}]})
+    assert len(found) == 1 and found[0].startswith("messages[0].kind")
+
+
 def test_overlapping_frames_are_reported_once_each():
     found = problems({"participants": life("A", "B"), "messages": [call("A", "B")],
                       "frames": [{"kind": "loop", "first": 0, "last": 0}] * 5})
@@ -192,6 +203,13 @@ def test_reply_from_a_lifeline_without_a_bar_keeps_the_receivers_bar():
     (a,) = bars_of(lay, "A")
     assert a.top == lay.messages[0].y and a.bottom >= lay.messages[1].y
     assert lay.messages[1].end == a.rect[2]  # 왼쪽으로 가는 반환이 기다리던 막대의 오른쪽 변에 닿는다
+
+
+def test_frame_starting_with_a_reply_without_a_bar_does_not_cut_waiting_bars():
+    messages = [call("A", "B"), call("B", "C"), reply("D", "C", "r"), reply("C", "B"), reply("B", "A")]
+    plain = lay_of(life("A", "B", "C", "D"), messages)
+    framed = lay_of(life("A", "B", "C", "D"), messages, frames=[{"kind": "opt", "first": 2, "last": 2}])
+    assert [b.owner for b in framed.bars] == [b.owner for b in plain.bars] == ["A", "B", "C"]
 
 
 def test_deeply_nested_bars_stay_inside_the_frame():
