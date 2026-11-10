@@ -6,6 +6,7 @@ Noto Sans KR로 글자마다 골라 그린다. 폭과 글자 자리는 큰 기�
 """
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -27,15 +28,23 @@ _REF = 64
 Box = tuple[float, float, float, float]
 
 
-@lru_cache(maxsize=1)
-def _latin_codepoints() -> frozenset[int]:
-    """Liberation Sans에 있는 글자. 보통과 굵게의 글자 목록은 같다(테스트가 확인한다)."""
-    return frozenset(TTFont(str(FONT_DIR / _FILES[False, False]), lazy=True).getBestCmap())
+@lru_cache(maxsize=2)
+def _codepoints(korean: bool) -> frozenset[int]:
+    """그 글꼴에 있는 글자. 보통과 굵게의 글자 목록은 같다(테스트가 확인한다)."""
+    return frozenset(TTFont(str(FONT_DIR / _FILES[korean, False]), lazy=True).getBestCmap())
 
 
 def is_korean(ch: str) -> bool:
     """Noto Sans KR로 그리는 글자인지 — Liberation Sans에 없는 글자다."""
-    return ord(ch) not in _latin_codepoints()
+    return ord(ch) not in _codepoints(False)
+
+
+def _check(s: str) -> None:
+    for ch in s:
+        if unicodedata.category(ch) in ("Cc", "Zl", "Zp"):
+            raise ValueError(f"제어 문자나 줄 나눔은 글자에 넣을 수 없다: U+{ord(ch):04X}")
+        if ord(ch) not in _codepoints(False) and ord(ch) not in _codepoints(True):
+            raise ValueError(f"함께 넣은 글꼴에 없는 글자다: {ch!r} (U+{ord(ch):04X})")
 
 
 def split_runs(s: str) -> list[tuple[str, bool]]:
@@ -74,14 +83,19 @@ class _Layout:
 
 @lru_cache(maxsize=4096)
 def _layout(s: str, bold: bool) -> _Layout:
-    """왼쪽 끝·기준선을 (0, 0)으로 둔 배치. 글자 자리는 커닝까지 든 '그 글자까지의 길이 − 그 글자 폭'이다."""
+    """왼쪽 끝·기준선을 (0, 0)으로 둔 배치. 두 글자 길이에서 뒤 글자 폭을 빼 다음 글자 자리를 잡아 커닝을 살린다.
+    글꼴에 없는 글자나 제어 문자가 있으면 ValueError."""
+    _check(s)
     pen = 0.0
     glyphs = []
     ink: Optional[Box] = None
     for part, korean in split_runs(s):
         f = _ref(korean, bold)
+        x = pen
         for i, ch in enumerate(part):
-            glyphs.append((pen + (f.getlength(part[:i + 1]) - f.getlength(ch)) / _REF, ch, korean))
+            if i:
+                x += (f.getlength(part[i - 1] + ch) - f.getlength(ch)) / _REF
+            glyphs.append((x, ch, korean))
         l, t, r, b = f.getbbox(part, anchor="ls")
         if r > l and b > t:
             run_ink = (pen + l / _REF, t / _REF, pen + r / _REF, b / _REF)
@@ -111,11 +125,9 @@ class Placement:
 
 
 def place(x: float, y: float, s: str, bold: bool = False, anchor: str = "lm") -> Placement:
-    """(x, y)에 s를 놓는다. anchor "lm"이면 x가 왼쪽 끝, "mm"이면 가운데이고, y는 줄 상자의 세로 가운데다."""
+    """(x, y)에 한 줄 글자 s를 놓는다. anchor "lm"이면 x가 왼쪽 끝, "mm"이면 가운데이고, y는 줄 상자의 세로 가운데다."""
     if anchor not in ("lm", "mm"):
         raise ValueError(f"anchor는 lm·mm만 받는다: {anchor!r}")
-    if "\n" in s:
-        raise ValueError("한 줄 글자만 놓는다")
     lay = _layout(s, bold)
     left = x - lay.width / 2 if anchor == "mm" else x
     baseline = y + (ASCENT - DESCENT) / 2

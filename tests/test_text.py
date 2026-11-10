@@ -123,8 +123,20 @@ def test_blank_text_has_no_ink():
     assert T.place(0, 0, "").ink is None
 
 
-def test_place_rejects_unknown_anchor_and_newline():
+def test_place_rejects_unknown_anchor():
     with pytest.raises(ValueError):
         T.place(0, 0, "x", anchor="ls")
-    with pytest.raises(ValueError):
-        T.place(0, 0, "a\nb")
+
+
+@pytest.mark.parametrize("s", ["a\nb", "a\tb", "a\rb", "a b", "\x00"])
+def test_control_characters_are_rejected(s):
+    with pytest.raises(ValueError, match="제어 문자"):
+        T.text_width(s)
+    with pytest.raises(ValueError, match="제어 문자"):
+        T.place(0, 0, s)
+
+
+@pytest.mark.parametrize("ch", ["😀", "\U0001F680", ""])
+def test_characters_in_neither_font_are_rejected(ch):
+    with pytest.raises(ValueError, match="글꼴에 없는 글자"):
+        T.text_width(f"a{ch}")
