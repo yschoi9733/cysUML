@@ -359,6 +359,8 @@ bi_add "$BC/docs+137-x" -b docs/137-x
 mkdir -p "$BC/docs+137-x/sub"
 bi_add "$T/bi-outside" -b fix/21-out
 bi_add "$BC/bi-test" -b test/26-x
+bi_add "$BC/bi-test-legacy" -b test+35-legacy
+bi_add "$BC/bi-test-legacy2" -b worktree-test+36-legacy
 bi_add "$BC/bi-legacy" -b fix+31-legacy
 bi_add "$BC/bi-legacy2" -b worktree-fix+32-legacy
 bi_add --detach "$BC/bi-detached"
@@ -392,8 +394,12 @@ has "branch-issue: 다를 때도 브랜치를 낸다" "branch docs/137-x"
 run "$T/bi-outside" "$S/branch-issue.sh" "$RB"
 check "branch-issue: .claude/worktrees 밖의 연결 워크트리도 친다" FOUND
 has "branch-issue: 그 번호" "issue 21"
-run "$BC/bi-test" "$S/branch-issue.sh" "$RB"
-check "branch-issue: test 타입(라벨 다섯 밖의 어휘)" FOUND
+# 타입은 이 레포 타입 라벨 다섯뿐이다 — residue.sh 가 옛 타입 폴더로 보지 않는 test 는 옛 이름 꼴이어도 받지 않는다.
+for d in bi-test bi-test-legacy bi-test-legacy2; do
+  run "$BC/$d" "$S/branch-issue.sh" "$RB"
+  check "branch-issue: test 타입은 규약 밖($d)" NONE
+  has "branch-issue: test 타입 까닭($d)" "reason not-convention"
+done
 # 7단계가 이슈 번호를 뽑는 옛 이름 꼴도 친다(merge-cleanup.md "대상 브랜치와 이슈 번호를 특정한다").
 run "$BC/bi-legacy" "$S/branch-issue.sh" "$RB" 31
 check "branch-issue: 옛 이름 꼴 <타입>+<번호>-…" SAME
