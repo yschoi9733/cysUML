@@ -21,7 +21,7 @@
 #     그렇다. 사람이 거기 둔 도우미 스크립트를 돌려도 생기는 바이트코드 캐시라 아래 scratchpad 규칙의 "사람이 남긴 것"이
 #     아니다). 바이트코드를 쓰다 끊긴 임시 파일 <이름>.pyc.<숫자> 도 *.pyc 와 같이 친다 — 파이썬 import 와 pytest 의
 #     단언 재작성은 임시 이름으로 다 쓴 뒤 *.pyc 로 옮기는데, 그 사이에 프로세스가 죽으면 그대로 남는다(SIGKILL 로
-#     끊어 실측 — CPython 3.10·3.14 는 <모듈>.cpython-310.pyc.4429462048 꼴, pytest 9.2.0 은
+#     끊어 실측 — CPython 3.10 은 <모듈>.cpython-310.pyc.4429462048 꼴, 3.14 는 같은 꼴에 cpython-314, pytest 9.2.0 은
 #     <모듈>.cpython-310-pytest-9.2.0.pyc.53332 꼴). 그 밖의 것이 하나라도 들었으면 사람이 본다
 #   - 최상위 .venv·.pytest_cache 디렉터리(uv sync·uv run pytest 가 만든다)
 #   - .claude/settings.local.json 파일(하네스가 그 워크트리에서 받은 허용 설정을 적는다 — 잃어도 다시 묻는다)

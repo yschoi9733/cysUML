@@ -976,24 +976,26 @@ has "ignored: 그 __pycache__ 줄" "keep src/cysuml/__pycache__/"
 rm -f "$IG/src/cysuml/__pycache__/notes.txt"
 # 바이트코드를 쓰다 끊긴 임시 파일(<이름>.pyc.<숫자>)은 다시 만들 수 있다 — import 와 pytest 를 SIGKILL 로 끊어 본 이름
 # 꼴 그대로다.
-: > "$IG/src/cysuml/__pycache__/draw.cpython-310.pyc.4429462048"
-: > "$IG/__pycache__/test_canvas.cpython-310-pytest-9.2.0.pyc.53332"
+: > "$IG/src/cysuml/__pycache__/draw.cpython-310.pyc.4429462048" || setup_fail "ignored 끊긴 import 임시 파일"
+: > "$IG/__pycache__/test_canvas.cpython-310-pytest-9.2.0.pyc.53332" || setup_fail "ignored 끊긴 pytest 임시 파일"
 run "$R" "$S/ignored-check.sh" "$IG"
 check "ignored: 끊긴 바이트코드 임시 파일" CLEAN
 rm -f "$IG/src/cysuml/__pycache__/draw.cpython-310.pyc.4429462048" "$IG/__pycache__/test_canvas.cpython-310-pytest-9.2.0.pyc.53332"
 # 꼴이 비슷해도 .pyc. 뒤가 숫자만이 아니거나 비었거나, .pyc. 앞이 비었으면 사람이 본다.
 for n in draw.cpython-310.pyc. draw.cpython-310.pyc.12a draw.cpython-310.pyc.tmp draw.cpython-310.pyc.1.2 .pyc.123 draw.pyc12; do
-  : > "$IG/src/cysuml/__pycache__/$n"
+  : > "$IG/src/cysuml/__pycache__/$n" || setup_fail "ignored 임시 파일 꼴이 아닌 이름 $n"
   run "$R" "$S/ignored-check.sh" "$IG"
   check "ignored: 임시 파일 꼴이 아닌 이름($n)" KEEP
   has "ignored: 그 __pycache__ 줄($n)" "keep src/cysuml/__pycache__/"
   rm -f "$IG/src/cysuml/__pycache__/$n"
 done
-# 임시 파일 이름이어도 링크·디렉터리면 사람이 본다.
-ln -s draw.cpython-312.pyc "$IG/src/cysuml/__pycache__/draw.cpython-312.pyc.123" || setup_fail "ignored 임시 파일 이름 링크"
-run "$R" "$S/ignored-check.sh" "$IG"
-check "ignored: 임시 파일 이름의 링크" KEEP
-rm -f "$IG/src/cysuml/__pycache__/draw.cpython-312.pyc.123"
+# *.pyc 이름이든 임시 파일 이름이든 링크·디렉터리면 사람이 본다.
+for n in draw.cpython-312.pyc.123 link.cpython-312.pyc; do
+  ln -s draw.cpython-312.pyc "$IG/src/cysuml/__pycache__/$n" || setup_fail "ignored 링크 $n"
+  run "$R" "$S/ignored-check.sh" "$IG"
+  check "ignored: __pycache__ 안의 링크($n)" KEEP
+  rm -f "$IG/src/cysuml/__pycache__/$n"
+done
 mkdir "$IG/src/cysuml/__pycache__/draw.cpython-312.pyc.124" || setup_fail "ignored 임시 파일 이름 디렉터리"
 run "$R" "$S/ignored-check.sh" "$IG"
 check "ignored: 임시 파일 이름의 디렉터리" KEEP
