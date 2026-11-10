@@ -2,8 +2,8 @@
 
 불합격은 문서에 못 넣는 그림이다. 관계선(화살촉·삼각형·마름모 포함)이 양 끝이 아닌 상자나 선 글자(관계 이름·다중도)를 지날 때,
 관계선이 다른 관계선과 포개지거나 다른 관계의 선 끝 모양에 닿을 때, 상자끼리 겹칠 때, 선 글자끼리 또는 선 글자와 상자가 겹칠
-때다. 선끼리 엇갈린 곳과 그림 크기는 알림으로만 준다. 상속·실체화에서 자식 여럿의 선이 한 줄기로 부모에게 모이는 것(공유
-줄기)은 포개짐으로도, 선 끝 모양에 닿는 것으로도 치지 않는다.
+때다. 선끼리 엇갈린 곳과 그림 크기는 알림으로만 준다. 상속·실체화에서 자식 여럿의 선이 한 줄기로 부모의 한 삼각형에 모이는
+것(공유 줄기)은 포개짐으로도, 선 끝 모양에 닿는 것으로도 치지 않는다.
 
 관계선은 상자 밑에 그리므로 끝 상자 안으로 들어간 부분은 가려 보이지 않고, 상자 안 글자에 닿는 선은 그 상자를 먼저 지난다. 그래서
 상자 안 글자를 지나는 선은 "선이 상자를 지난다" 한 항목으로 알린다.
@@ -14,7 +14,8 @@ import math
 from dataclasses import dataclass
 from typing import Iterable, Iterator, Optional
 
-from .canvas import PAD, Canvas, Line, Point, Polygon, Text
+from . import text as T
+from .canvas import PAD, Canvas, Line, Point, Polygon, Record, Text
 from .classdiagram import LABEL_CLEAR, Drawing, PlacedRelation
 from .geom import Box, alongside, between, clip, crossings, grow, hits, inside, meets, outline, span, touches
 
@@ -25,6 +26,7 @@ OVERLAP_GAP = 2  # 나란한 두 선의 가운데가 이만큼 안이면 한 선
 OVERLAP_MIN = 4  # 그렇게 붙어 가는 길이가 이보다 길면 포개진 것으로 본다
 PARALLEL_SIN = 0.05  # 두 선분 사이 각의 사인이 이 안이면(약 3°) 나란하다고 본다
 LINE_EPS = 1e-6  # 점이 선에서 이 안이면 선 위로 본다(엇갈림이 아니라 맞닿음)
+OWN_TRIM = 0.01  # 제 선 끝 모양이 얹힌 끝 구간과 이웃 구간이 만나는 꺾는 점에서, 이웃 구간을 이만큼 앞에서 끊고 본다
 
 TRUNK_KINDS = ("generalization", "realization")
 ROLES = {"name": "이름", "from_multiplicity": "from 쪽 다중도", "to_multiplicity": "to 쪽 다중도"}
@@ -114,18 +116,24 @@ class _Head:
     edges: tuple[Segment, ...]
 
     @classmethod
-    def of(cls, name: str, points: tuple[Point, ...], closed: bool) -> _Head:
-        edges = tuple(zip(points, points[1:] + (points[:1] if closed else ())))
-        return cls(name, points, closed, points[0] if closed else points[1], edges)
+    def of(cls, record: Record) -> _Head:
+        closed = isinstance(record, Polygon)
+        pts = record.points
+        name = ("삼각형" if len(pts) == 3 else "마름모") if closed else "화살촉"
+        return cls(name, pts, closed, pts[0] if closed else pts[1], tuple(outline([record])))
+
+    def same(self, other: _Head) -> bool:
+        return (len(self.points) == len(other.points)
+                and all(math.dist(p, q) <= LINE_EPS for p, q in zip(self.points, other.points)))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class _Relation:
     index: int
     placed: PlacedRelation
-    segments: tuple[Segment, ...]  # 선과 선 끝 모양의 테두리
     heads: tuple[_Head, ...]
     path: tuple[Segment, ...]  # 선만(선 끝 모양 빼고)
+    segments: tuple[Segment, ...]  # 선과 선 끝 모양의 테두리
 
     @property
     def owner(self) -> str:
@@ -135,11 +143,26 @@ class _Relation:
     def points(self) -> tuple[Point, ...]:
         return self.placed.points
 
-    def near(self, head: _Head) -> tuple[Segment, ...]:
-        """제 선 끝 모양 head가 얹힌 끝의 두 구간 — 그 모양은 이 구간 위에 그려지므로 닿는지 보지 않는다."""
+    def around(self, head: _Head) -> tuple[Segment, ...]:
+        """제 선 끝 모양 head에 닿는지 볼 구간들. 그 모양이 얹힌 끝 구간은 빼고, 바로 이웃 구간은 둘이 만나는 꺾는 점 OWN_TRIM
+        앞에서 끊는다 — 끝 구간이 모양 길이와 같으면 그 꺾는 점이 모양 끝에 닿는데, 그건 선이 이어진 것이지 모양을 지난 게 아니다."""
+        path = list(self.path)
         if math.dist(head.tip, self.points[0]) <= LINE_EPS:
-            return self.path[:2]
-        return self.path[-2:] if math.dist(head.tip, self.points[-1]) <= LINE_EPS else ()
+            path = path[1:]
+            if path:
+                q, w = path[0]
+                path[0] = (_toward(q, w, OWN_TRIM), w)
+        elif math.dist(head.tip, self.points[-1]) <= LINE_EPS:
+            path = path[:-1]
+            if path:
+                q, w = path[-1]
+                path[-1] = (q, _toward(w, q, OWN_TRIM))
+        return tuple(path)
+
+    @property
+    def end_shape(self) -> Optional[_Head]:
+        """to 쪽 끝의 삼각형·마름모."""
+        return next((h for h in self.heads if h.closed and math.dist(h.tip, self.points[-1]) <= LINE_EPS), None)
 
     @property
     def name(self) -> str:
@@ -166,7 +189,7 @@ def check(drawing: Drawing) -> Report:
     boxes, relations, labels = _read(drawing)
     retraces, overlaps = _line_overlaps(relations)
     failures = [*_box_overlaps(boxes), *_lines_through_boxes(relations, boxes), *retraces,
-                *_merged_overlaps(overlaps, relations), *_lines_through_heads(relations, overlaps),
+                *_merged_overlaps(overlaps), *_lines_through_heads(relations, overlaps),
                 *_lines_through_labels(relations, labels), *_labels_on_boxes(labels, boxes), *_label_overlaps(labels)]
     return Report(tuple(failures), tuple(_crossings(relations)), _size(drawing.canvas), drawing.canvas.png_size(),
                   drawing.canvas.scale)
@@ -182,12 +205,14 @@ def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:
     relations, labels = [], []
     for i, p in enumerate(drawing.layout.relations):
         mine = records.get(p.owner, [])
-        heads = [_Head.of("삼각형" if len(r.points) == 3 else "마름모", r.points, True) for r in mine if isinstance(r, Polygon)]
-        heads += [_Head.of("화살촉", r.points, False) for r in mine if isinstance(r, Line) and r.points != p.points]
-        rel = _Relation(i, p, tuple(outline(mine)), tuple(heads), tuple(zip(p.points, p.points[1:])))
+        heads = tuple(_Head.of(r) for r in mine if isinstance(r, Polygon) or (isinstance(r, Line) and r.points != p.points))
+        path = tuple(zip(p.points, p.points[1:]))
+        rel = _Relation(i, p, heads, path, path + tuple(e for h in heads for e in h.edges))
         relations.append(rel)
         texts = {(t.x, t.y, t.text): t for t in mine if isinstance(t, Text)}
-        labels += [_Label(rel, lab.role, lab.text, texts[lab.x, lab.y, lab.text].box) for lab in p.labels]
+        for lab in p.labels:
+            t = texts[lab.x, lab.y, T.normalize(lab.text)]
+            labels.append(_Label(rel, lab.role, t.text, t.box))
     return boxes, relations, labels
 
 
@@ -202,8 +227,9 @@ def _box_overlaps(boxes: list[_Box]) -> Iterator[Finding]:
                 continue
             dx = max(b.rect[0] - a.rect[2], a.rect[0] - b.rect[2])
             dy = max(b.rect[1] - a.rect[3], a.rect[1] - b.rect[3])
-            what = ("상자끼리 겹친다" if dx < 0 and dy < 0 else "상자끼리 맞닿았다" if max(dx, dy) == 0
-                    else f"상자끼리 {_n(max(dx, dy))}px밖에 떨어지지 않았다")
+            g = max(dx, dy)  # 음수면 가로·세로 모두 겹친다
+            what = ("상자끼리 겹친다" if g < -LINE_EPS else "상자끼리 맞닿았다" if g <= LINE_EPS
+                    else f"상자끼리 {_n(g)}px밖에 떨어지지 않았다")
             yield Finding("box_overlap", (a.name, b.name), between(a.rect, b.rect), f"{what}: {a.title}, {b.title}.",
                           f"한쪽을 옮겨 가로나 세로로 {BOX_CLEARANCE}px 넘게 띄운다. 상자 크기는 글자에 맞춰 늘어난 값이니 "
                           "위 크기를 보고 옮긴다.")
@@ -226,18 +252,22 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box]) -> Itera
 
 
 def _trunk(a: _Relation, b: _Relation) -> bool:
-    """상속·실체화 트리의 공유 줄기 — 서로 다른 자식이 같은 부모로 가는 같은 종류의 선. 어디서 포개져도 따라가면 같은 부모에
-    닿으므로 관계가 사라지지 않는다(자식 상자에 닿으면 "선이 상자를 지난다"가 따로 잡는다)."""
+    """상속·실체화 트리의 공유 줄기 — 서로 다른 자식이 같은 부모로 가는 같은 종류의 선이 한 삼각형을 함께 쓴다(끝 삼각형이 같다).
+    그 두 선은 어디서 포개져도 따라가면 같은 삼각형에 닿으므로 관계가 사라지지 않는다(자식 상자에 닿으면 "선이 상자를 지난다"가
+    따로 잡는다). 삼각형이 조금이라도 어긋나면 공유 줄기가 아니다 — 두 삼각형이 겹쳐 그려진다."""
     x, y = a.placed.relation, b.placed.relation
-    return x.kind == y.kind and x.kind in TRUNK_KINDS and x.target == y.target and x.source != y.source
+    if not (x.kind == y.kind and x.kind in TRUNK_KINDS and x.target == y.target and x.source != y.source):
+        return False
+    ha, hb = a.end_shape, b.end_shape
+    return ha is not None and hb is not None and ha.same(hb)
 
 
 def _alongside(s: Segment, t: Segment) -> Optional[Segment]:
     return alongside(s, t, OVERLAP_GAP, OVERLAP_MIN, PARALLEL_SIN)
 
 
-def _line_overlaps(relations: list[_Relation]) -> tuple[list[Finding], list[tuple[_Relation, _Relation, Box]]]:
-    """한 선이 왔던 길을 되짚는 항목과, 두 선이 포개진 짝마다 (앞 선, 뒤 선, 포개진 자리)."""
+def _line_overlaps(relations: list[_Relation]) -> tuple[list[Finding], list[tuple[_Relation, _Relation, list[Segment]]]]:
+    """한 선이 왔던 길을 되짚는 항목과, 두 선이 포개진 짝마다 (앞 선, 뒤 선, 포개진 조각들)."""
     retraces, pairs = [], []
     for i, r in enumerate(relations):
         path = r.path
@@ -252,7 +282,7 @@ def _line_overlaps(relations: list[_Relation]) -> tuple[list[Finding], list[tupl
                 continue
             parts = [c for s in path for t in o.path if (c := _alongside(s, t)) is not None]
             if parts:
-                pairs.append((r, o, span(pt for s in parts for pt in s)))
+                pairs.append((r, o, parts))
     return retraces, pairs
 
 
@@ -268,14 +298,15 @@ def _group(items: Iterable[tuple[tuple, Box, Iterable[_Relation]]]) -> list[tupl
     for key, where, rels in items:
         found = out.setdefault(key, (where, []))[1]
         for r in rels:
-            if r not in found:
+            if r not in found:  # _Relation은 같은 객체끼리만 같다
                 found.append(r)
     return [(key, where, rels) for key, (where, rels) in out.items()]
 
 
-def _merged_overlaps(pairs: list[tuple[_Relation, _Relation, Box]], relations: list[_Relation]) -> Iterator[Finding]:
-    for _, where, rels in _group((_key(w), w, (r, o)) for r, o, w in pairs):
-        rels.sort(key=relations.index)
+def _merged_overlaps(pairs: list[tuple[_Relation, _Relation, list[Segment]]]) -> Iterator[Finding]:
+    spans = [(r, o, span(pt for s in parts for pt in s)) for r, o, parts in pairs]
+    for _, where, rels in _group((_key(w), w, (r, o)) for r, o, w in spans):
+        rels.sort(key=_index)
         yield Finding("line_overlap", tuple(r.owner for r in rels), where,
                       f"선끼리 포개진다: {', '.join(r.title for r in rels)}, 자리 ({_area(where)}).",
                       "포개진 선은 한 선으로 보여 관계 하나가 사라진다 — 한 선에 꺾는 점(via)을 주거나 고쳐 두 선을 떼어 놓는다.")
@@ -288,12 +319,13 @@ def _meets_head(path: Iterable[Segment], head: _Head) -> bool:
     return head.closed and any(inside(v, head.points) for s in path for v in s)
 
 
-def _lines_through_heads(relations: list[_Relation], overlaps: list[tuple[_Relation, _Relation, Box]]) -> Iterator[Finding]:
+def _lines_through_heads(relations: list[_Relation],
+                         overlaps: list[tuple[_Relation, _Relation, list[Segment]]]) -> Iterator[Finding]:
     """삼각형·마름모는 칠한 다각형이라 밑을 지나는 선을 가리고, 화살촉에 다른 선이 닿으면 어느 선의 것인지 헷갈린다. 포개진 두
-    선은 포개진 자리 끝의 선 끝 모양에도 닿기 마련이라, 포개진 자리에 걸친 선 끝 모양은 다시 알리지 않는다."""
+    선은 포개진 조각 끝의 선 끝 모양에도 닿기 마련이라, 포개진 조각에 걸친 선 끝 모양은 다시 알리지 않는다."""
     near: dict[frozenset[str], list[Box]] = {}
-    for r, o, where in overlaps:
-        near.setdefault(frozenset((r.owner, o.owner)), []).append(grow(where, OVERLAP_GAP))
+    for r, o, parts in overlaps:
+        near.setdefault(frozenset((r.owner, o.owner)), []).extend(grow(span(s), OVERLAP_GAP) for s in parts)
     found = []
     for r in relations:
         for o in relations:
@@ -303,8 +335,7 @@ def _lines_through_heads(relations: list[_Relation], overlaps: list[tuple[_Relat
                 where = span(h.points)
                 if any(meets(w, where) for w in near.get(frozenset((r.owner, o.owner)), ())):
                     continue
-                skip = r.near(h) if o is r else ()
-                if _meets_head((s for s in r.path if s not in skip), h):
+                if _meets_head(r.around(h) if o is r else r.path, h):
                     found.append(((r.owner, o is r, h.name, *_key(where)), where, (r, o)))
     for (_, own, shape, *_), where, rels in _group(found):
         r, others = rels[0], rels[1:]
@@ -359,11 +390,22 @@ def _crossings(relations: list[_Relation]) -> Iterator[Finding]:
             for x, y in crossings(r.points, None if o is r else o.points, LINE_EPS):
                 found.append((_key((x, y)), (x, y, x, y), (r, o)))
     for _, where, rels in _group(found):
-        rels.sort(key=relations.index)
+        rels.sort(key=_index)
         x, y = where[0], where[1]
         who = (f"선이 제 선을 엇갈린다: {rels[0].title}" if len(rels) == 1
                else f"선끼리 엇갈린다: {', '.join(r.title for r in rels)}")
         yield Finding("crossing", tuple(r.owner for r in rels), where, f"{who}, 자리 ({_n(x)}, {_n(y)}).", CROSSING_HINT)
+
+
+def _index(r: _Relation) -> int:
+    return r.index
+
+
+def _toward(p: Point, q: Point, d: float) -> Point:
+    """p에서 q 쪽으로 d만큼(선분 길이의 절반을 넘지 않게) 옮긴 점."""
+    n = math.dist(p, q)
+    t = min(d, n / 2) / n
+    return p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t
 
 
 def _size(canvas: Canvas) -> tuple[float, float]:

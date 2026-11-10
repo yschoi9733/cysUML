@@ -1,4 +1,6 @@
+import dataclasses
 import json
+import unicodedata
 
 import pytest
 
@@ -110,6 +112,12 @@ def test_boxes_closer_than_the_clearance_fail(b_left, passed, phrase):
         assert phrase in r.failures[0].problem
 
 
+def test_boxes_touching_through_float_error_are_called_touching():
+    # A의 오른쪽 -89.9 + 90은 실수로 0.09999999999999432라 B의 왼쪽 0.1과 6e-15 떨어진다
+    (f,) = report([box("A", -89.9, 0), box("B", 0.1, 0)]).failures
+    assert "맞닿았다" in f.problem
+
+
 def test_diagonal_boxes_count_the_farther_axis():
     # 가로 3, 세로 10 떨어지면 세로로 4px 넘게 떨어진 것이라 합격
     assert report([box("A", 0, 0), box("B", 93, 58)]).passed
@@ -157,6 +165,14 @@ def test_line_through_its_own_label_names_one_element():
 def test_labels_placed_where_the_layout_found_room_pass():
     r = report([box("A", 0, 0), box("B", 400, 0)],
                [rel("association", "A", "B", name="has", from_multiplicity="1", to_multiplicity="0..*")])
+    assert r.passed
+
+
+def test_label_text_given_in_nfd_to_draw_is_matched_to_its_record():
+    # parse를 거치지 않고 draw에 바로 준 모델은 풀어 쓴 한글(NFD)일 수 있다 — 그린 기록의 글자는 NFC다
+    diagram = C.parse({"classes": [box("A", 0, 0), box("B", 300, 0)], "relations": [rel("association", "A", "B", name="가입")]})
+    relation = dataclasses.replace(diagram.relations[0], name=unicodedata.normalize("NFD", "가입"))
+    r = K.check(C.draw(dataclasses.replace(diagram, relations=(relation,))))
     assert r.passed
 
 
@@ -252,6 +268,14 @@ def test_shared_trunk_of_other_relations_fails(kind_a, kind_b):
     assert kinds(tree(kind_a, kind_b)) == ["line_overlap"]
 
 
+def test_siblings_with_slightly_shifted_triangles_are_not_a_trunk():
+    # C1→P는 (243.4, 48), C2→P는 (245, 48)에 닿아 두 삼각형이 1.6px 어긋나 겹치고, 서로의 선이 상대 삼각형을 지난다
+    r = report([box("P", 200, 0), box("C1", 105, 200), box("C2", 295, 250)],
+               [rel("generalization", "C1", "P", via=[[150, 100], [240, 100]]),
+                rel("generalization", "C2", "P", via=[[340, 150], [245, 150]])])
+    assert kinds(r) == ["line_through_head", "line_through_head"]
+
+
 def test_same_child_twice_is_not_a_trunk():
     r = report([box("P", 150, 0), box("C", 150, 200)], [rel("generalization", "C", "P"), rel("generalization", "C", "P")])
     assert kinds(r) == ["line_overlap"]
@@ -300,6 +324,13 @@ def test_line_under_its_own_diamond_fails():
     assert report([box("A", 0, 0), box("B", 400, 0)], [rel("association", "A", "B", navigable="none", via=via)]).passed
 
 
+def test_line_coming_back_over_its_own_triangle_fails():
+    # 끝 구간 (370, 24)→(400, 24) 바로 앞 구간이 B 앞 빈 삼각형(x 382~400) 위로 되돌아 지나간다
+    r = report([box("A", 0, 0), box("B", 400, 0)],
+               [rel("generalization", "A", "B", via=[[200, 100], [398, 30], [370, 24]])])
+    assert [(f.kind, f.elements) for f in r.failures] == [("line_through_head", ("A->B",))]
+
+
 def test_own_end_shape_on_its_own_end_segments_is_fine():
     assert report([box("A", 0, 0), box("B", 300, 0)],
                   [rel("composition", "A", "B", via=[[108, 24], [108, 100], [345, 100]])]).passed
@@ -310,6 +341,17 @@ def test_overlap_hides_only_the_end_shapes_it_reaches():
     r = report([box("A", 0, 0), box("B", 400, 0), box("C", 75, -200), box("D", 350, 100)],
                [rel("association", "A", "B"),
                 rel("association", "C", "D", via=[[120, 24], [250, 24], [250, -60], [395, -60]])])
+    assert kinds(r) == ["line_overlap", "line_through_head"]
+    assert r.failures[1].elements == ("C->D", "A->B")
+
+
+def test_overlaps_hide_end_shapes_only_near_each_overlapped_piece():
+    # C→D는 A→B에 두 군데(위 y=24 x 100~140, 아래 y=124 x 290~342) 포개지고, 두 조각을 함께 덮는 상자 안에 든 B 밑 화살촉
+    # (x 340~350, y 48~57)을 두 조각과 떨어진 y=54에서 지난다
+    r = report([box("A", 0, 0), box("B", 300, 0), box("C", 55, -200), box("D", 420, 30)],
+               [rel("association", "A", "B", via=[[150, 24], [150, 124], [345, 124]]),
+                rel("association", "C", "D", navigable="none",
+                    via=[[100, 24], [140, 24], [140, -40], [290, -40], [290, 124], [342, 124], [342, 54], [400, 54]])])
     assert kinds(r) == ["line_overlap", "line_through_head"]
     assert r.failures[1].elements == ("C->D", "A->B")
 
