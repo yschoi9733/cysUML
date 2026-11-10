@@ -123,20 +123,31 @@ def test_blank_text_has_no_ink():
     assert T.place(0, 0, "").ink is None
 
 
-def test_place_rejects_unknown_anchor():
+def test_place_rejects_unknown_anchor_and_non_text():
     with pytest.raises(ValueError):
         T.place(0, 0, "x", anchor="ls")
+    with pytest.raises(ValueError, match="문자열"):
+        T.place(0, 0, 123)
+    with pytest.raises(ValueError, match="문자열"):
+        T.text_width(["a"])
 
 
-@pytest.mark.parametrize("s", ["a\nb", "a\tb", "a\rb", "a b", "\x00"])
-def test_control_characters_are_rejected(s):
-    with pytest.raises(ValueError, match="제어 문자"):
+# 보이지 않는 글자는 편집 도구가 이스케이프를 풀어 날것으로 넣을 수 있어 코드포인트로 적는다.
+CONTROL_OR_FORMAT = [0x0A, 0x09, 0x0D, 0x00, 0x2028, 0x2029, 0xAD, 0x200B, 0x200E, 0x202E, 0xFEFF, 0xE000]
+
+
+@pytest.mark.parametrize("cp", CONTROL_OR_FORMAT, ids=hex)
+def test_control_and_format_characters_are_rejected(cp):
+    s = "a" + chr(cp) + "b"
+    with pytest.raises(ValueError, match="제어·서식 문자"):
         T.text_width(s)
-    with pytest.raises(ValueError, match="제어 문자"):
+    with pytest.raises(ValueError, match="제어·서식 문자"):
         T.place(0, 0, s)
 
 
-@pytest.mark.parametrize("ch", ["😀", "\U0001F680", ""])
-def test_characters_in_neither_font_are_rejected(ch):
+@pytest.mark.parametrize("cp", [0x1F600, 0x1F680, 0x0E01], ids=hex)
+def test_characters_in_neither_font_are_rejected(cp):
     with pytest.raises(ValueError, match="글꼴에 없는 글자"):
-        T.text_width(f"a{ch}")
+        T.text_width("a" + chr(cp))
+
+

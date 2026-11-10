@@ -8,6 +8,7 @@ ValueError로 막는다. 그릴 때는 그린 것의 범위에 PAD만큼 여백�
 from __future__ import annotations
 
 import math
+import numbers
 from dataclasses import dataclass
 from typing import Iterable, Optional, Union
 
@@ -92,34 +93,48 @@ class Mask:
 Record = Union[Line, Rect, Ellipse, Polygon, Text, Mask]
 
 
-def _finite(*values: float) -> None:
-    if not all(math.isfinite(v) for v in values):
-        raise ValueError(f"좌표·크기는 유한한 수여야 한다: {values}")
+def _nums(*values) -> tuple[float, ...]:
+    if not all(isinstance(v, numbers.Real) and not isinstance(v, bool) and math.isfinite(v) for v in values):
+        raise ValueError(f"좌표·크기는 유한한 수여야 한다: {values!r}")
+    return tuple(float(v) for v in values)
+
+
+def _point(p) -> Point:
+    try:
+        x, y = p
+    except (TypeError, ValueError):
+        raise ValueError(f"점은 (x, y)여야 한다: {p!r}") from None
+    return _nums(x, y)
 
 
 def _points(pts: Iterable[Point], least: int) -> tuple[Point, ...]:
-    out = tuple((float(x), float(y)) for x, y in pts)
+    try:
+        out = tuple(_point(p) for p in pts)
+    except TypeError:
+        raise ValueError(f"점 목록이 아니다: {pts!r}") from None
     if len(out) < least:
         raise ValueError(f"점이 {least}개 이상 있어야 한다: {out}")
-    _finite(*(v for p in out for v in p))
     return out
 
 
-def _box(left: float, top: float, width: float, height: float) -> None:
-    _finite(left, top, width, height)
-    if width < 0 or height < 0:
-        raise ValueError(f"크기가 음수다: {width}×{height}")
+def _box(left, top, width, height) -> tuple[float, float, float, float]:
+    out = _nums(left, top, width, height)
+    if out[2] < 0 or out[3] < 0:
+        raise ValueError(f"크기가 음수다: {out[2]}×{out[3]}")
+    return out
 
 
 def _fill(fill: Optional[str]) -> Optional[str]:
     if fill is not None:
+        if not isinstance(fill, str):
+            raise ValueError(f"색은 이름이나 #RRGGBB 문자열이어야 한다: {fill!r}")
         ImageColor.getcolor(fill, "L")
     return fill
 
 
 def _direction(tip: Point, frm: Point) -> tuple[float, float]:
     """tip에서 frm으로 가는 단위 벡터."""
-    _finite(*tip, *frm)
+    tip, frm = _point(tip), _point(frm)
     dx, dy = frm[0] - tip[0], frm[1] - tip[1]
     n = math.hypot(dx, dy)
     if n == 0:
@@ -129,30 +144,34 @@ def _direction(tip: Point, frm: Point) -> tuple[float, float]:
 
 class Canvas:
     def __init__(self, scale: float = SCALE):
-        if not (math.isfinite(scale) and scale > 0):
-            raise ValueError(f"배율이 잘못됐다: {scale}")
+        (scale,) = _nums(scale)
+        if scale <= 0:
+            raise ValueError(f"배율은 0보다 커야 한다: {scale}")
         self.scale = scale
         self.records: list[Record] = []
 
     def line(self, pts: Iterable[Point], dash: Optional[tuple[float, float]] = None, owner: Optional[str] = None) -> None:
         """dash=(칠할 길이, 비울 길이)이면 점선이다(둘 다 MIN_DASH 이상). 무늬는 꺾는 점마다 새로 시작한다."""
         pts = _points(pts, 2)
+        if all(a == b for a, b in zip(pts, pts[1:])):
+            raise ValueError(f"길이가 0인 선이다: {pts}")
         if dash is not None:
-            dash = (float(dash[0]), float(dash[1]))
-            _finite(*dash)
+            try:
+                on, off = dash
+            except (TypeError, ValueError):
+                raise ValueError(f"점선 무늬는 (칠할 길이, 비울 길이)여야 한다: {dash!r}") from None
+            dash = _nums(on, off)
             if min(dash) < MIN_DASH:
                 raise ValueError(f"점선 무늬가 너무 짧다(최소 {MIN_DASH}): {dash}")
         self.records.append(Line(pts, dash, owner))
 
     def rect(self, left: float, top: float, width: float, height: float, fill: Optional[str] = "white",
              owner: Optional[str] = None) -> None:
-        _box(left, top, width, height)
-        self.records.append(Rect(left, top, width, height, _fill(fill), owner))
+        self.records.append(Rect(*_box(left, top, width, height), _fill(fill), owner))
 
     def ellipse(self, left: float, top: float, width: float, height: float, fill: Optional[str] = "white",
                 owner: Optional[str] = None) -> None:
-        _box(left, top, width, height)
-        self.records.append(Ellipse(left, top, width, height, _fill(fill), owner))
+        self.records.append(Ellipse(*_box(left, top, width, height), _fill(fill), owner))
 
     def poly(self, pts: Iterable[Point], fill: Optional[str] = "white", owner: Optional[str] = None) -> None:
         pts = _points(pts, 3)
@@ -161,7 +180,8 @@ class Canvas:
     def text(self, x: float, y: float, s: str, bold: bool = False, anchor: str = "lm", bg: bool = False,
              owner: Optional[str] = None) -> None:
         """한 줄 글자. anchor와 y의 뜻은 text.place와 같다. bg면 글자가 칠해지는 곳보다 BG_MARGIN 넓게 흰 바탕을 깐다."""
-        _finite(x, y)
+        x, y = _nums(x, y)
+        bold = bool(bold)
         placed = T.place(x, y, s, bold, anchor)
         laid = bg and placed.ink is not None
         if laid:
@@ -170,6 +190,7 @@ class Canvas:
         self.records.append(Text(x, y, s, bold, anchor, placed.box, laid, owner))
 
     def erase(self, left: float, top: float, right: float, bottom: float, owner: Optional[str] = None) -> None:
+        left, top, right, bottom = _nums(left, top, right, bottom)
         _box(left, top, right - left, bottom - top)
         self.records.append(Mask(left, top, right, bottom, owner))
 
@@ -177,6 +198,8 @@ class Canvas:
                    owner: Optional[str] = None) -> None:
         """frm에서 tip으로 가는 선 끝의 열린 화살촉(두 갈래 선)."""
         c, s = _direction(tip, frm)
+        tip = _point(tip)
+        size, spread = _nums(size, spread)
         for turn in (-spread, spread):
             ct, st = math.cos(turn), math.sin(turn)
             self.line([tip, (tip[0] + size * (c * ct - s * st), tip[1] + size * (s * ct + c * st))], owner=owner)
@@ -185,6 +208,8 @@ class Canvas:
                      owner: Optional[str] = None) -> None:
         """닫힌 삼각형 화살촉. 채우면 호출 메시지, 비우면(크기 18·9) 상속·실체화다."""
         c, s = _direction(tip, frm)
+        tip = _point(tip)
+        size, half = _nums(size, half)
         base = (tip[0] + c * size, tip[1] + s * size)
         self.poly([tip, (base[0] - s * half, base[1] + c * half), (base[0] + s * half, base[1] - c * half)],
                   fill="black" if filled else "white", owner=owner)
@@ -193,6 +218,8 @@ class Canvas:
                 owner: Optional[str] = None) -> None:
         """선 끝의 마름모. 채우면 합성, 비우면 집합이다."""
         c, s = _direction(tip, frm)
+        tip = _point(tip)
+        size, half = _nums(size, half)
         mid = (tip[0] + c * size / 2, tip[1] + s * size / 2)
         far = (tip[0] + c * size, tip[1] + s * size)
         self.poly([tip, (mid[0] - s * half, mid[1] + c * half), far, (mid[0] + s * half, mid[1] - c * half)],
@@ -219,23 +246,27 @@ class Canvas:
                 ys.append(y)
         return (min(xs), min(ys), max(xs), max(ys)) if xs else None
 
-    def frame(self) -> Box:
-        """결과 PNG가 덮는 논리 좌표 범위: 그린 것의 범위에 PAD만큼 여백을 둔다. PNG의 픽셀 (px, py)는
-        논리 좌표 (frame[0] + px / scale, frame[1] + py / scale)다."""
+    def _frame_px(self) -> tuple[float, float, int, int]:
         b = self.bounds()
         if b is None:
             raise ValueError("그린 것이 없다")
-        return b[0] - PAD, b[1] - PAD, b[2] + PAD, b[3] + PAD
+        minx, miny = b[0] - PAD, b[1] - PAD
+        return (minx, miny, max(1, math.ceil((b[2] + PAD - minx) * self.scale)),
+                max(1, math.ceil((b[3] + PAD - miny) * self.scale)))
+
+    def frame(self) -> Box:
+        """결과 PNG가 덮는 논리 좌표 범위: 그린 것의 범위에 PAD만큼 여백을 두고, 오른쪽·아래를 출력 픽셀에 맞춰 늘린다.
+        PNG의 픽셀 (px, py)는 논리 좌표 (frame[0] + px / scale, frame[1] + py / scale)다."""
+        minx, miny, w, h = self._frame_px()
+        return minx, miny, minx + w / self.scale, miny + h / self.scale
 
     def to_image(self) -> Image.Image:
-        minx, miny, maxx, maxy = self.frame()
-        k = self.scale * SS
-        size = (math.ceil((maxx - minx) * k), math.ceil((maxy - miny) * k))
-        if size[0] * size[1] > MAX_PIXELS:
-            raise ValueError(f"그림이 너무 크다: 논리 {maxx - minx:g}×{maxy - miny:g}, 배율 {self.scale:g}")
-        img = Image.new("L", size, 255)
-        _Painter(img, minx, miny, k).paint(self.records)
-        return img.resize((max(1, round(size[0] / SS)), max(1, round(size[1] / SS))), Image.LANCZOS)
+        minx, miny, w, h = self._frame_px()
+        if w * SS * h * SS > MAX_PIXELS:
+            raise ValueError(f"그림이 너무 크다: 논리 {w / self.scale:g}×{h / self.scale:g}, 배율 {self.scale:g}")
+        img = Image.new("L", (w * SS, h * SS), 255)
+        _Painter(img, minx, miny, self.scale * SS).paint(self.records)
+        return img.resize((w, h), Image.LANCZOS)
 
     def save(self, path) -> tuple[int, int]:
         out = self.to_image()
@@ -271,7 +302,12 @@ class _Painter:
                 self.d.ellipse(self._outlined(r.left, r.top, r.width, r.height), outline="black", width=self.lw,
                                fill=r.fill)
             elif isinstance(r, Polygon):
-                self.d.polygon([self._p(p) for p in r.points], fill=r.fill, outline="black", width=self.lw)
+                # Pillow polygon은 테두리를 안쪽으로 칠하고, 그러려고 그림판 크기의 마스크를 새로 잡는다. 채우기만 맡기고
+                # 테두리는 닫힌 선으로 변 가운데에 칠한다(첫 변을 한 번 더 그어 첫 꼭짓점도 둥글게 잇는다).
+                pts = [self._p(p) for p in r.points]
+                if r.fill is not None:
+                    self.d.polygon(pts, fill=r.fill)
+                self.d.line(pts + pts[:2], fill="black", width=self.lw, joint="curve")
             elif isinstance(r, Text):
                 self.text(r)
             else:

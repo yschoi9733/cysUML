@@ -75,7 +75,9 @@ def test_frame_is_the_drawing_plus_padding():
     c = draw_sample()
     bottom = 150 + 10 * math.sin(math.radians(28))  # 열린 화살촉 끝
     assert c.bounds() == pytest.approx((20, 20, 252, bottom))
-    assert c.frame() == pytest.approx((20 - PAD, 20 - PAD, 252 + PAD, bottom + PAD))
+    fx, fy, fr, fb = c.frame()
+    assert (fx, fy) == (20 - PAD, 20 - PAD)
+    assert 252 + PAD <= fr < 252 + PAD + 1 / 1.6 and bottom + PAD <= fb < bottom + PAD + 1 / 1.6
 
 
 def pixel(c, img, x, y):
@@ -102,18 +104,23 @@ def test_dashed_line_has_gaps():
     assert pixel(c, img, 2, 10) < 60 and pixel(c, img, 7, 10) > 200 and pixel(c, img, 11, 10) < 60
 
 
-def test_box_border_is_centred_on_its_edge_like_lines():
+def test_borders_of_boxes_and_polygons_are_centred_on_their_edges_like_lines():
     c = Canvas(8)
     c.rect(10, 10, 40, 20)
     c.line([(50, 50), (50, 70)])
+    c.poly([(70, 50), (90, 50), (90, 70), (70, 70)])
+    c.diamond((110, 60), (200, 60), filled=False)
     img = c.to_image()
     fx, fy, _, _ = c.frame()
-    for y in (20, 60):
+    for x, y in ((50, 20), (50, 60), (70, 60), (110, 60)):
         row = int((y - fy) * c.scale)
-        dark = [px for px in range(int((48 - fx) * c.scale), int((52 - fx) * c.scale)) if img.getpixel((px, row)) < 128]
+        dark = [px for px in range(int((x - 2 - fx) * c.scale), int((x + 2 - fx) * c.scale)) if img.getpixel((px, row)) < 128]
         centre = fx + (dark[0] + dark[-1] + 1) / 2 / c.scale
-        assert centre == pytest.approx(50, abs=0.1)
-        assert (dark[-1] + 1 - dark[0]) / c.scale == pytest.approx(1, abs=0.2)
+        width = (dark[-1] + 1 - dark[0]) / c.scale
+        if x == 110:  # 마름모 꼭짓점: 둥근 이음이 반 획만큼 바깥으로 나온다
+            assert fx + dark[0] / c.scale == pytest.approx(110 - 0.5, abs=0.15)
+        else:
+            assert centre == pytest.approx(x, abs=0.1) and width == pytest.approx(1, abs=0.2)
 
 
 def test_bg_text_erases_the_line_under_it():
@@ -156,13 +163,24 @@ def test_korean_is_drawn_with_real_glyphs():
 def test_output_is_scaled_and_framed_around_the_drawing(tmp_path):
     c = Canvas()
     c.rect(100, 100, 50, 30)
-    assert c.frame() == (100 - PAD, 100 - PAD, 150 + PAD, 130 + PAD)
+    fx, fy, fr, fb = c.frame()
+    assert (fx, fy) == (100 - PAD, 100 - PAD)
+    assert 150 + PAD <= fr < 150 + PAD + 1 / 1.6 and 130 + PAD <= fb < 130 + PAD + 1 / 1.6
     size = c.save(tmp_path / "out.png")
+    assert size == (round((fr - fx) * 1.6), round((fb - fy) * 1.6))
     assert size[0] == pytest.approx((50 + 2 * PAD) * 1.6, abs=1)
-    assert size[1] == pytest.approx((30 + 2 * PAD) * 1.6, abs=1)
     with Image.open(tmp_path / "out.png") as img:
         assert img.format == "PNG" and img.size == size
         assert img.getextrema()[0] < 50
+
+
+@pytest.mark.parametrize("width", [100.13, 333.33, 1023.97])
+def test_frame_maps_output_pixels_exactly(width):
+    c = Canvas(1.6)
+    c.rect(0.3, 0.7, width, 50.07)
+    fx, fy, fr, fb = c.frame()
+    img = c.to_image()
+    assert img.size[0] / 1.6 == pytest.approx(fr - fx) and img.size[1] / 1.6 == pytest.approx(fb - fy)
 
 
 def test_nothing_drawn_cannot_be_rendered():
@@ -181,15 +199,27 @@ def test_oversized_drawing_is_rejected_before_allocating():
 
 
 def test_invalid_input_is_rejected_without_a_record():
-    for scale in (0, -1, math.nan, math.inf):
+    for scale in (0, -1, math.nan, math.inf, "2", None):
         with pytest.raises(ValueError):
             Canvas(scale)
     c = Canvas()
     bad = [
         lambda: c.line([(0, 0)]),
         lambda: c.line([(0, 0), (math.nan, 5)]),
+        lambda: c.line([(5, 5), (5, 5)]),
+        lambda: c.line([(5, 5), (5, 5), (5, 5)], dash=(3, 2)),
+        lambda: c.line([1, 2]),
+        lambda: c.line(5),
+        lambda: c.line([(0, 0), (1, 2, 3)]),
+        lambda: c.line([(0, 0), ("1", 2)]),
         lambda: c.line([(0, 0), (5, 5)], dash=(0.1, 3)),
         lambda: c.line([(0, 0), (5, 5)], dash=(5, 0)),
+        lambda: c.line([(0, 0), (5, 5)], dash=(5,)),
+        lambda: c.line([(0, 0), (5, 5)], dash=(5, 4, 3)),
+        lambda: c.rect("1", 2, 3, 4),
+        lambda: c.rect(1, 2, 3, 4, fill=123),
+        lambda: c.text(0, 0, 123),
+        lambda: c.closed_arrow((0, 0), (5, 5), size="big"),
         lambda: c.poly([(0, 0), (5, 5)]),
         lambda: c.rect(5, 5, -1, 2),
         lambda: c.rect(1, 1, 10, 10, fill="#zz"),

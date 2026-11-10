@@ -41,8 +41,9 @@ def is_korean(ch: str) -> bool:
 
 def _check(s: str) -> None:
     for ch in s:
-        if unicodedata.category(ch) in ("Cc", "Zl", "Zp"):
-            raise ValueError(f"제어 문자나 줄 나눔은 글자에 넣을 수 없다: U+{ord(ch):04X}")
+        category = unicodedata.category(ch)
+        if category[0] == "C" or category in ("Zl", "Zp"):
+            raise ValueError(f"제어·서식 문자나 줄 나눔은 글자에 넣을 수 없다: U+{ord(ch):04X}")
         if ord(ch) not in _codepoints(False) and ord(ch) not in _codepoints(True):
             raise ValueError(f"함께 넣은 글꼴에 없는 글자다: {ch!r} (U+{ord(ch):04X})")
 
@@ -84,7 +85,7 @@ class _Layout:
 @lru_cache(maxsize=4096)
 def _layout(s: str, bold: bool) -> _Layout:
     """왼쪽 끝·기준선을 (0, 0)으로 둔 배치. 두 글자 길이에서 뒤 글자 폭을 빼 다음 글자 자리를 잡아 커닝을 살린다.
-    글꼴에 없는 글자나 제어 문자가 있으면 ValueError."""
+    글꼴에 없는 글자나 제어·서식 문자가 있으면 ValueError."""
     _check(s)
     pen = 0.0
     glyphs = []
@@ -105,8 +106,14 @@ def _layout(s: str, bold: bool) -> _Layout:
     return _Layout(pen, tuple(glyphs), ink)
 
 
+def _layout_of(s: str, bold: bool) -> _Layout:
+    if not isinstance(s, str):
+        raise ValueError(f"글자는 문자열이어야 한다: {s!r}")
+    return _layout(s, bool(bold))
+
+
 def text_width(s: str, bold: bool = False) -> float:
-    return _layout(s, bold).width
+    return _layout_of(s, bold).width
 
 
 @dataclass(frozen=True)
@@ -128,7 +135,7 @@ def place(x: float, y: float, s: str, bold: bool = False, anchor: str = "lm") ->
     """(x, y)에 한 줄 글자 s를 놓는다. anchor "lm"이면 x가 왼쪽 끝, "mm"이면 가운데이고, y는 줄 상자의 세로 가운데다."""
     if anchor not in ("lm", "mm"):
         raise ValueError(f"anchor는 lm·mm만 받는다: {anchor!r}")
-    lay = _layout(s, bold)
+    lay = _layout_of(s, bold)
     left = x - lay.width / 2 if anchor == "mm" else x
     baseline = y + (ASCENT - DESCENT) / 2
     half = (ASCENT + DESCENT) / 2
