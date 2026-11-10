@@ -16,9 +16,9 @@
 #     우연히 그 이름의 브랜치에 있으면 이 스킬이 만든 워크트리가 아니다.
 #   - 브랜치 이름이 이 스킬의 규약 `<타입>/<번호>-<슬러그>` 다(SKILL.md 1단계 — 슬러그는 영어 소문자·숫자·`-` 만). 옛 이름 꼴 `<타입>+<번호>-<슬러그>`·
 #     `worktree-<타입>+<번호>-<슬러그>` 도 친다 — 이어받기가 push 된 옛 이름을 일부러 그대로 두고, 7단계도 그 꼴에서
-#     이슈 번호를 뽑는다(references/merge-cleanup.md "대상 브랜치와 이슈 번호를 특정한다"). 타입은 다른 레포의
-#     /issue 사본과 같은 어휘 feat·fix·docs·refactor·chore·test 다 — 이 레포 타입 라벨
-#     다섯은 그 안에 든다. 명령에 넣을 수 없는 이름(lib.sh branch_unsafe)이면 치지 않는다 — 이 이름은 뒤에서 명령의
+#     이슈 번호를 뽑는다(references/merge-cleanup.md "대상 브랜치와 이슈 번호를 특정한다"). 타입은 이 레포
+#     타입 라벨 다섯 feat·fix·docs·refactor·chore 다 — 1단계가 브랜치의 타입을 이슈의 타입 라벨로 정하고, residue.sh
+#     가 옛 타입 폴더로 보는 것도 이 다섯이다. 명령에 넣을 수 없는 이름(lib.sh branch_unsafe)이면 치지 않는다 — 이 이름은 뒤에서 명령의
 #     인자로 옮겨진다.
 #
 # stdout 첫 줄
@@ -95,9 +95,9 @@ branch=${ref#refs/heads/}
 [ "$branch" != "$ref" ] || none not-convention
 branch_unsafe "$branch" && none not-convention
 case "$branch" in
-  feat/* | fix/* | docs/* | refactor/* | chore/* | test/*) rest=${branch#*/} ;;
-  feat+* | fix+* | docs+* | refactor+* | chore+* | test+*) rest=${branch#*+} ;;
-  worktree-feat+* | worktree-fix+* | worktree-docs+* | worktree-refactor+* | worktree-chore+* | worktree-test+*)
+  feat/* | fix/* | docs/* | refactor/* | chore/*) rest=${branch#*/} ;;
+  feat+* | fix+* | docs+* | refactor+* | chore+*) rest=${branch#*+} ;;
+  worktree-feat+* | worktree-fix+* | worktree-docs+* | worktree-refactor+* | worktree-chore+*)
     rest=${branch#*+}
     ;;
   *) none not-convention ;;

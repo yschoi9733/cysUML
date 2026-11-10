@@ -17,8 +17,8 @@
 #   - 브랜치(로컬·원격)
 #   - .claude/worktrees 아래 디렉터리. 등록 여부는 이름이 아니라 등록된 경로와 같은 디렉터리인지(-ef)로
 #     본다 — 이름으로 맞추면 레포 밖에 같은 이름이 있을 때 진짜 고아를 놓친다. 등록이 없는 타입 이름
-#     디렉터리(feat·fix·refactor·docs·chore)는 옛 중첩 잔재(fix/278-x)로 보고 한 단계 더 본다. branch-issue.sh 가 받는
-#     test 는 넣지 않는다 — 이 레포 타입 라벨이 아니라 이 사본이 test/ 를 만들 일이 없고, 흔한 이름이라(EnterWorktree(name:
+#     디렉터리(feat·fix·refactor·docs·chore — branch-issue.sh 가 받는 타입과 같다)는 옛 중첩 잔재(fix/278-x)로 보고 한
+#     단계 더 본다. test 는 넣지 않는다 — 이 레포 타입 라벨이 아니라 이 사본이 test/ 를 만들 일이 없고, 흔한 이름이라(EnterWorktree(name:
 #     test) 등) 안으로 내려가면 그 체크아웃의 조각이 고아 후보로 나온다.
 #     .claude 나 .claude/worktrees 가 링크를 거치면 실제 경로로 바꿔 훑는다 — 그 안의 고아는 실제 경로로 나와 레포 밖으로
 #     판정된다(지우기 전에 확인받는다). 옛 타입 폴더가 링크면 따라가지 않고 그 링크만 보고한다(안의 잔재는 놓친다 —
