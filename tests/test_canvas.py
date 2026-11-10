@@ -274,6 +274,29 @@ def test_box_outline_coordinates_are_rounded_to_centre_the_border():
     assert thin._pixels(10.5, 2.5, 13.5, 4.5) == [(11, 3), (13, 4)]
 
 
+@pytest.mark.parametrize("k", [1, 2.5, 4, 6.4, 9.6])
+@pytest.mark.parametrize("v", [5.0, 5.3, 5.5, 5.77])
+def test_strokes_joints_and_box_edges_fill_the_same_pixels(k, v):
+    from cysuml.canvas import _Painter
+
+    img = Image.new("L", (300, 300), 255)
+    painter = _Painter(img, 0, 0, k)
+    y, h = v * k, painter.lw / 2
+    painter._stroke([(1 * k, y), (20 * k, y), (20 * k, 30 * k)])  # 가로선과 꺾는 점(20, v) — 4배 그림판 좌표
+    want = list(range(math.floor(y - h + 0.5), math.floor(y + h + 0.5)))
+    assert [r for r in range(300) if img.getpixel((round(10 * k), r)) < 128] == want
+    (_, top), (_, bottom) = painter._pixels(0, y - h, 1, y + h)  # 이음 점과 상자 변이 쓰는 규칙
+    assert (top, bottom) == (want[0], want[-1])
+
+
+def test_erase_accepts_far_apart_edges_and_arrow_angle_errors_say_angle():
+    c = Canvas()
+    c.erase(-1e308, 0, 1e308, 10)
+    assert isinstance(c.records[-1], Mask)
+    with pytest.raises(ValueError, match="각"):
+        c.open_arrow((0, 0), (5, 5), spread=0)
+
+
 def test_self_crossing_polygon_is_accepted():
     c = Canvas()
     c.poly([(0, 0), (10, 10), (10, 0), (0, 10)])

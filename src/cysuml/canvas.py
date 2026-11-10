@@ -222,16 +222,18 @@ class Canvas:
 
     def erase(self, left: float, top: float, right: float, bottom: float, owner: Optional[str] = None) -> None:
         left, top, right, bottom = _nums(left, top, right, bottom)
-        _box(left, top, right - left, bottom - top)
+        if right < left or bottom < top:
+            raise ValueError(f"지울 곳의 오른쪽·아래가 왼쪽·위보다 앞이다: {(left, top, right, bottom)}")
         self.records.append(Mask(left, top, right, bottom, owner))
 
     def open_arrow(self, tip: Point, frm: Point, size: float = 10, spread: float = math.radians(28),
                    owner: Optional[str] = None) -> None:
         """frm에서 tip으로 가는 선 끝의 열린 화살촉. 갈래 끝 → tip → 갈래 끝의 꺾은선 하나로 기록해 tip을 둥글게 잇는다.
         spread는 선과 갈래 사이 각(라디안, 직각 미만)이다."""
-        tip, c, s, (size, spread) = _head(tip, frm, size, spread)
-        if spread >= math.pi / 2:
-            raise ValueError(f"화살촉 갈래 각은 직각보다 작아야 한다: {spread}")
+        tip, c, s, (size,) = _head(tip, frm, size)
+        (spread,) = _nums(spread)
+        if not 0 < spread < math.pi / 2:
+            raise ValueError(f"화살촉 갈래 각은 0보다 크고 직각보다 작아야 한다: {spread}")
         ends = []
         for turn in (-spread, spread):
             ct, st = math.cos(turn), math.sin(turn)
@@ -285,10 +287,12 @@ class Canvas:
             raise ValueError("그린 것이 없다")
         minx, miny = b[0] - PAD, b[1] - PAD
         fw, fh = (b[2] + PAD - minx) * self.scale, (b[3] + PAD - miny) * self.scale
-        w = max(1, math.ceil(fw)) if math.isfinite(fw) else None
-        h = max(1, math.ceil(fh)) if math.isfinite(fh) else None
-        if w is None or h is None or w * SS * h * SS > MAX_PIXELS:
-            raise ValueError(f"그림이 너무 크다: 논리 {b[2] - b[0]:g}×{b[3] - b[1]:g}, 배율 {self.scale:g}")
+        too_big = ValueError(f"그림이 너무 크다: 논리 {b[2] - b[0]:g}×{b[3] - b[1]:g}, 배율 {self.scale:g}")
+        if not (math.isfinite(fw) and math.isfinite(fh)):
+            raise too_big
+        w, h = max(1, math.ceil(fw)), max(1, math.ceil(fh))
+        if w * SS * h * SS > MAX_PIXELS:
+            raise too_big
         return minx, miny, w, h
 
     def frame(self) -> Box:
@@ -335,9 +339,16 @@ class _Painter:
         h = self.lw / 2
         return self._pixels(x0 - h, y0 - h, x1 + h, y1 + h)
 
+    def _snap(self, p: Point) -> tuple[int, int]:
+        # Pillow 선은 좌표를 정수로 자르고 짝수 굵기를 아래·오른쪽으로 치우쳐 칠한다. 칠할 첫 픽셀을 상자(_pixels)와 같은
+        # 반올림으로 정하고, Pillow가 그 픽셀부터 칠하게 되는 정수 좌표로 넘긴다(가로·세로 선에서 굵기 1~12로 재 맞춘 식).
+        o = (self.lw - 1) // 2
+        return math.floor(p[0] - self.lw / 2 + 0.5) + o, math.floor(p[1] - self.lw / 2 + 0.5) + o
+
     def _stroke(self, pts: list[Point], closed: bool = False) -> None:
         # Pillow의 joint="curve"는 굵기 4px 이하에서 꺼진다. 이음은 꺾는 점마다 획 굵기의 점을 찍어 직접 둥글게 한다.
-        self.d.line(pts + pts[:1] if closed else pts, fill="black", width=self.lw)
+        path = [self._snap(p) for p in pts]
+        self.d.line(path + path[:1] if closed else path, fill="black", width=self.lw)
         r = self.lw / 2
         for x, y in pts if closed else pts[1:-1]:
             self.d.ellipse(self._pixels(x - r, y - r, x + r, y + r), fill="black")

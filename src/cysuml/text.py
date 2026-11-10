@@ -131,6 +131,8 @@ class Placement:
     box는 줄 상자다: 폭은 text_width, 높이는 Liberation Sans의 ascent~descent(한글도 이 안에 든다)이고, 그 밖으로
     칠해지는 글자(Ǻ·█ 등)가 있으면 거기까지 늘어나 ink를 늘 덮는다. glyphs는 글자마다 (왼쪽 x, 글자, Noto Sans KR로
     그리는지)다. ink는 글자가 칠해지는 곳의 상자이고(가로는 글자 진행 폭 전체를 덮는다), 공백뿐이면 None이다.
+    ink와 box는 기준 크기에서 잰 값이다. 그림은 그리는 크기에서 힌팅해 글자마다 칠하므로, 실제로 칠해진 곳은 이와 1px
+    안쪽에서 다를 수 있다 — 겹침을 가리는 쪽은 여유를 둔다.
     """
 
     box: Box
