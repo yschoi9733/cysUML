@@ -506,11 +506,12 @@ bash "<사본>/scripts/inside.sh" "<대상 path>"
 지운 워크트리 자리에 프로젝트 파일을 되살린 일이 있어 둔 확인이다). 떠 있는지는 IDE 본체 실행 파일로 본다 — 앱
 이름만으로 찾으면 IDE 에 딸린 런타임(`Contents/jbr`)으로 도는 보조 프로세스까지 걸려, IDE 를 닫은 뒤에도 묻고
 출력이 매번 달라진다. 앱 이름이 아니라 앱 꾸러미 안의 본체 자리(`<앱>.app/Contents/MacOS/<실행 파일>`)를 보므로
-`PyCharm CE.app` 같은 판도 잡는다. 실행 파일 이름은 PyCharm 이 `pycharm` 이고, 파이썬 플러그인을 얹어 같은 `.idea/`
-를 쓰는 같은 회사의 다른 IDE 가 `idea` 다:
+`PyCharm CE.app` 같은 판도 잡는다. 실행 파일 이름은 PyCharm 이 `pycharm`, 데이터 작업용 파이썬 IDE DataSpell 이
+`dataspell` 이고, 파이썬 플러그인을 얹어 같은 `.idea/` 를 쓰는 같은 회사의 다른 IDE 가 `idea` 다(`dataspell` 은
+이름만 더했고 실물로 재 보지는 않았다):
 
 ```
-pgrep -fl '\.app/Contents/MacOS/(pycharm|idea)( |$)'
+pgrep -fl '\.app/Contents/MacOS/(pycharm|idea|dataspell)( |$)'
 ```
 
 출력이 없으면 떠 있지 않으니 묻지 않는다. 떠 있으면 `<pid> /Applications/PyCharm.app/Contents/MacOS/pycharm` 꼴

@@ -41,8 +41,9 @@
 # *.egg-info 도 사람이 본다 — ruff 는 게이트에 없고, *.egg-info 는 빌드 백엔드에 따라 생기지 않는다. 게이트가 늘 만든다고
 # 실측한 자리만 이 목록에 더한다.
 # 이름만으로 넘기지 않는다. 같은 이름이 다른 자리에 있으면 사람이 만든 것일 수 있다 — 깊은 곳의 .venv·.pytest_cache·
-# .idea(.gitignore 가 어느 깊이든 무시한다), 최상위가 아닌 *.iml, scratchpad/ 에 남긴 메모(이전 리뷰에서 실측). 최상위 scratchpad/ 는 한 줄로만 나오므로 안을 들여다보고 하나씩
-# 가린다(5단계가 거기 둔 PR 본문 파일은 다 쓰면 지우므로, 위 셈 기록 두 파일 밖에 남은 것은 사람이 본다).
+# .idea(.gitignore 가 어느 깊이든 무시한다), 최상위가 아닌 *.iml, scratchpad/ 에 남긴 메모(이전 리뷰에서 실측).
+# 최상위 scratchpad/ 는 한 줄로만 나오므로 안을 들여다보고 하나씩 가린다(5단계가 거기 둔 PR 본문 파일은 다 쓰면
+# 지우므로, 위 셈 기록 두 파일 밖에 남은 것은 사람이 본다).
 #
 # 종료 코드: 0 판정함 · 2 사용법 · 3 환경 실패(git 이 "레포가 아니다" 밖의 이유로 실패했다 — 소유권 문제 등)
 
@@ -102,9 +103,9 @@ ide_local_only() {
   return 0
 }
 
-# __pycache__ 안에 링크가 아닌 *.pyc 파일만 있으면 참 — 이름만 보고 넘기지 않는다. 읽을 수 없으면 거짓.
+# 이름만 보고 넘기지 않는다.
 only_pyc() {
-  find "$1" -mindepth 1 \( -type l -o ! -type f -o ! -name '*.pyc' \) -print > "$probe" 2>/dev/null || return 1
+  find "$1" -mindepth 1 \( ! -type f -o ! -name '*.pyc' \) -print -quit > "$probe" 2>/dev/null || return 1
   [ ! -s "$probe" ]
 }
 
