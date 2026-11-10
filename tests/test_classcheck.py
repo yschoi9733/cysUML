@@ -380,6 +380,36 @@ def test_diagonal_overlap_hides_only_end_shapes_next_to_it():
     assert r.failures[1].elements == ("A->D", "A->C") and "화살촉" in r.failures[1].problem
 
 
+def test_two_end_shapes_of_one_self_relation_overlap():
+    # 자기 관계의 두 끝이 A 위 변에서 4.5px 떨어져 마름모와 화살촉이 겹친다
+    r = report([box("A", 0, 0)], [rel("aggregation", "A", "A", via=[[40, -40], [40, -60], [52, -60], [52, -40]])])
+    (f,) = [f for f in r.failures if f.kind == "head_overlap"]
+    assert f.elements == ("A->A",) and "마름모" in f.problem and "화살촉" in f.problem
+
+
+def test_orthogonal_bend_right_at_the_triangle_base_passes():
+    # 끝 구간 (345, 182)→(345, 200)이 삼각형 길이(18)와 같아, 앞 가로 구간이 삼각형 밑변(y=182)을 따라 들어온다
+    r = report([box("A", 0, 0), box("P", 300, 200)],
+               [rel("generalization", "A", "P", via=[[200, 24], [200, 182], [345, 182]])])
+    assert r.passed
+
+
+def test_shared_trunk_through_a_box_is_one_finding():
+    # 두 자식의 공유 줄기(x=195, y 48~120)와 그 위 삼각형이 상자 Q(190, 60)를 지난다
+    r = report([box("P", 150, 0), box("C1", 0, 200), box("C2", 300, 200), box("Q", 190, 60)],
+               [rel("generalization", "C1", "P", via=[[45, 120], [195, 120]]),
+                rel("generalization", "C2", "P", via=[[345, 120], [195, 120]])])
+    (f,) = r.failures
+    assert f.kind == "line_through_box" and f.elements == ("C1->P", "C2->P", "Q")
+    assert "선 C1->P(relations[0]), 선 C2->P(relations[1]), 상자 Q" in f.problem
+
+
+def test_drawing_records_must_match_the_layout():
+    d = C.render({"classes": [box("A", 0, 0), box("B", 300, 0)], "relations": [rel("association", "A", "B")]})
+    with pytest.raises(ValueError):
+        K.check(dataclasses.replace(d, drawn=()))
+
+
 def test_diamond_counts_as_an_end_shape():
     r = report([box("A", 0, 0), box("B", 300, 0), box("C", 50, -200), box("D", 50, 200)],
                [rel("composition", "A", "B", navigable="none"), rel("association", "C", "D", navigable="none")])

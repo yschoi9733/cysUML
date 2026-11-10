@@ -635,9 +635,14 @@ def layout(diagram: Diagram) -> Layout:
     return Layout(placed, tuple(out))
 
 
+def round1(v: float) -> float:
+    """오류·검사 결과에 쓰는 수: 소수 한 자리로 반올림(-0은 0으로)."""
+    return round(v, 1) + 0.0
+
+
 def fmt_num(v: float) -> str:
-    """오류·검사 문구에 쓰는 수: 소수 한 자리까지(끝의 .0은 뗀다)."""
-    s = f"{round(v, 1) + 0.0:.1f}"
+    """round1한 수를 글자로(끝의 .0은 뗀다)."""
+    s = f"{round1(v):.1f}"
     return s[:-2] if s.endswith(".0") else s
 
 
@@ -649,20 +654,23 @@ def fmt_rect(rect: T.Box) -> str:
 # ---------------------------------------------------------------- 그리기
 
 
-def _draw_relation(c: Canvas, r: PlacedRelation) -> None:
+def _draw_relation(c: Canvas, r: PlacedRelation) -> tuple[Line, tuple[Union[Line, Polygon], ...]]:
+    """선과 선 끝 모양을 그리고 그 기록을 돌려준다."""
     pts, kind, o = r.points, r.relation.kind, r.owner
-    c.line(pts, dash=DASH if kind in ("realization", "dependency") else None, owner=o)
+    line = c.line(pts, dash=DASH if kind in ("realization", "dependency") else None, owner=o)
+    heads: list[Union[Line, Polygon]] = []
     if kind in ("generalization", "realization"):
-        c.closed_arrow(pts[-1], pts[-2], filled=False, size=TRIANGLE[0], half=TRIANGLE[1], owner=o)
+        heads.append(c.closed_arrow(pts[-1], pts[-2], filled=False, size=TRIANGLE[0], half=TRIANGLE[1], owner=o))
     elif kind == "dependency":
-        c.open_arrow(pts[-1], pts[-2], size=ARROW, owner=o)
+        heads.append(c.open_arrow(pts[-1], pts[-2], size=ARROW, owner=o))
     else:
         if kind != "association":
-            c.diamond(pts[0], pts[1], filled=kind == "composition", size=DIAMOND, owner=o)
+            heads.append(c.diamond(pts[0], pts[1], filled=kind == "composition", size=DIAMOND, owner=o))
         if r.relation.navigable in ("to", "both"):
-            c.open_arrow(pts[-1], pts[-2], size=ARROW, owner=o)
+            heads.append(c.open_arrow(pts[-1], pts[-2], size=ARROW, owner=o))
         if r.relation.navigable in ("from", "both"):
-            c.open_arrow(pts[0], pts[1], size=ARROW, owner=o)
+            heads.append(c.open_arrow(pts[0], pts[1], size=ARROW, owner=o))
+    return line, tuple(heads)
 
 
 def _draw_box(c: Canvas, p: PlacedBox) -> None:
@@ -696,20 +704,13 @@ def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
     바탕을 깔아 맨 위에 쓴다."""
     lay = layout(diagram)
     c = Canvas(scale)
-    shapes = []
-    for r in lay.relations:
-        start = len(c.records)
-        _draw_relation(c, r)
-        shapes.append(c.records[start:])
+    shapes = [_draw_relation(c, r) for r in lay.relations]
     for p in lay.boxes:
         _draw_box(c, p)
     drawn = []
-    for r, (line, *heads) in zip(lay.relations, shapes):
-        texts = []
-        for lab in r.labels:
-            c.text(lab.x, lab.y, lab.text, anchor="mm", bg=True, owner=r.owner)
-            texts.append(c.records[-1])  # 흰 바탕(Mask) 다음에 글자를 기록한다
-        drawn.append(DrawnRelation(line, tuple(heads), tuple(texts)))
+    for r, (line, heads) in zip(lay.relations, shapes):
+        texts = tuple(c.text(lab.x, lab.y, lab.text, anchor="mm", bg=True, owner=r.owner) for lab in r.labels)
+        drawn.append(DrawnRelation(line, heads, texts))
     return Drawing(c, lay, tuple(drawn))
 
 

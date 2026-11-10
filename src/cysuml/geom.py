@@ -25,6 +25,11 @@ def gap(a: Box, b: Box) -> float:
     return -1 if dx == 0 and dy == 0 else math.hypot(dx, dy)
 
 
+def axis_gap(a: Box, b: Box) -> float:
+    """두 상자가 가로·세로 가운데 더 떨어진 쪽의 틈. 0이면 맞닿고, 음수면 가로·세로 모두 겹친다."""
+    return max(b[0] - a[2], a[0] - b[2], b[1] - a[3], a[1] - b[3])
+
+
 def meets(a: Box, b: Box) -> bool:
     """두 상자가 겹치거나 맞닿는지."""
     return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
@@ -105,6 +110,34 @@ def inside(v: Point, polygon: tuple[Point, ...]) -> bool:
         if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
             out = not out
     return out
+
+
+def enters(s: tuple[Point, Point], polygon: tuple[Point, ...], margin: float) -> bool:
+    """선분 s가 볼록 다각형 안쪽으로 margin 넘게 들어가는지. 테두리를 따라가거나 꼭짓점에 닿기만 하면 들어간 게 아니다."""
+    area = sum(p[0] * q[1] - q[0] * p[1] for p, q in zip(polygon, polygon[1:] + polygon[:1]))
+    sign = 1 if area > 0 else -1
+    (a, b) = s
+    lo, hi = 0.0, 1.0
+    for p, q in zip(polygon, polygon[1:] + polygon[:1]):
+        ex, ey = q[0] - p[0], q[1] - p[1]
+        n = math.hypot(ex, ey)
+
+        def inward(v: Point) -> float:
+            return sign * (ex * (v[1] - p[1]) - ey * (v[0] - p[0])) / n
+
+        da, db = inward(a), inward(b)
+        if da == db:
+            if da <= margin:
+                return False
+            continue
+        t = (margin - da) / (db - da)  # s 위에서 이 변으로부터 안쪽 margin이 되는 자리
+        if db > da:
+            lo = max(lo, t)
+        else:
+            hi = min(hi, t)
+        if lo >= hi:
+            return False
+    return True
 
 
 def crossings(a: tuple[Point, ...], b: Optional[tuple[Point, ...]], eps: float) -> list[Point]:

@@ -191,43 +191,49 @@ class Canvas:
         self.scale = scale
         self.records: list[Record] = []
 
-    def line(self, pts: Iterable[Point], dash: Optional[tuple[float, float]] = None, owner: Optional[str] = None) -> None:
-        """dash=(칠할 길이, 비울 길이)이면 점선이다(둘 다 MIN_DASH 이상). 무늬는 꺾는 점을 지나도 이어진다."""
-        self.records.append(_line(pts, dash, owner))
+    def _add(self, record: Record) -> Record:
+        self.records.append(record)
+        return record
+
+    def line(self, pts: Iterable[Point], dash: Optional[tuple[float, float]] = None, owner: Optional[str] = None) -> Line:
+        """dash=(칠할 길이, 비울 길이)이면 점선이다(둘 다 MIN_DASH 이상). 무늬는 꺾는 점을 지나도 이어진다. 그리는 함수는 모두
+        기록한 것을 돌려준다."""
+        return self._add(_line(pts, dash, owner))
 
     def rect(self, left: float, top: float, width: float, height: float, fill: Optional[str] = "white",
-             owner: Optional[str] = None) -> None:
-        self.records.append(Rect(*_box(left, top, width, height), _fill(fill), owner))
+             owner: Optional[str] = None) -> Rect:
+        return self._add(Rect(*_box(left, top, width, height), _fill(fill), owner))
 
     def ellipse(self, left: float, top: float, width: float, height: float, fill: Optional[str] = "white",
-                owner: Optional[str] = None) -> None:
-        self.records.append(Ellipse(*_box(left, top, width, height), _fill(fill), owner))
+                owner: Optional[str] = None) -> Ellipse:
+        return self._add(Ellipse(*_box(left, top, width, height), _fill(fill), owner))
 
-    def poly(self, pts: Iterable[Point], fill: Optional[str] = "white", owner: Optional[str] = None) -> None:
+    def poly(self, pts: Iterable[Point], fill: Optional[str] = "white", owner: Optional[str] = None) -> Polygon:
         pts = _points(pts, 3)
         if _collinear(pts):
             raise ValueError(f"모든 점이 한 줄 위에 있어 넓이가 없는 다각형이다: {pts}")
-        self.records.append(Polygon(pts, _fill(fill), owner))
+        return self._add(Polygon(pts, _fill(fill), owner))
 
     def text(self, x: float, y: float, s: str, bold: bool = False, anchor: str = "lm", bg: bool = False,
-             owner: Optional[str] = None) -> None:
-        """한 줄 글자. anchor와 y의 뜻은 text.place와 같다. bg면 글자가 칠해지는 곳보다 BG_MARGIN 넓게 흰 바탕을 깐다."""
+             owner: Optional[str] = None) -> Text:
+        """한 줄 글자. anchor와 y의 뜻은 text.place와 같다. bg면 글자가 칠해지는 곳보다 BG_MARGIN 넓게 흰 바탕을 깐다(돌려주는
+        것은 글자 기록이다)."""
         x, y = _nums(x, y)
         record = Text(x, y, s, bool(bold), anchor, False, owner)
         ink = record.placement.ink
         if bg and ink is not None:
             self.erase(ink[0] - BG_MARGIN, ink[1] - BG_MARGIN, ink[2] + BG_MARGIN, ink[3] + BG_MARGIN, owner=owner)
             record = replace(record, bg=True)
-        self.records.append(record)
+        return self._add(record)
 
-    def erase(self, left: float, top: float, right: float, bottom: float, owner: Optional[str] = None) -> None:
+    def erase(self, left: float, top: float, right: float, bottom: float, owner: Optional[str] = None) -> Mask:
         left, top, right, bottom = _nums(left, top, right, bottom)
         if right < left or bottom < top:
             raise ValueError(f"지울 곳의 오른쪽·아래가 왼쪽·위보다 앞이다: {(left, top, right, bottom)}")
-        self.records.append(Mask(left, top, right, bottom, owner))
+        return self._add(Mask(left, top, right, bottom, owner))
 
     def open_arrow(self, tip: Point, frm: Point, size: float = 10, spread: float = math.radians(28),
-                   owner: Optional[str] = None) -> None:
+                   owner: Optional[str] = None) -> Line:
         """frm에서 tip으로 가는 선 끝의 열린 화살촉. 갈래 끝 → tip → 갈래 끝의 꺾은선 하나로 기록해 tip을 둥글게 잇는다.
         spread는 선과 갈래 사이 각(라디안, 직각 미만)이다."""
         tip, c, s, (size,) = _head(tip, frm, size)
@@ -240,25 +246,25 @@ class Canvas:
             ends.append((tip[0] + size * (c * ct - s * st), tip[1] + size * (s * ct + c * st)))
         if tip in ends:
             raise ValueError(f"화살촉 갈래 길이가 0이다: {size}")
-        self.records.append(_line([ends[0], tip, ends[1]], None, owner))
+        return self._add(_line([ends[0], tip, ends[1]], None, owner))
 
     def closed_arrow(self, tip: Point, frm: Point, filled: bool = True, size: float = 10, half: float = 4.5,
-                     owner: Optional[str] = None) -> None:
+                     owner: Optional[str] = None) -> Polygon:
         """닫힌 삼각형 화살촉. 기본값은 호출 메시지의 채운 화살촉이고, 상속·실체화의 빈 삼각형은 filled=False, size=18,
         half=9로 부른다."""
         tip, c, s, (size, half) = _head(tip, frm, size, half)
         base = (tip[0] + c * size, tip[1] + s * size)
-        self.poly([tip, (base[0] - s * half, base[1] + c * half), (base[0] + s * half, base[1] - c * half)],
-                  fill="black" if filled else "white", owner=owner)
+        return self.poly([tip, (base[0] - s * half, base[1] + c * half), (base[0] + s * half, base[1] - c * half)],
+                         fill="black" if filled else "white", owner=owner)
 
     def diamond(self, tip: Point, frm: Point, filled: bool = True, size: float = 18, half: float = 6,
-                owner: Optional[str] = None) -> None:
+                owner: Optional[str] = None) -> Polygon:
         """선 끝의 마름모. 채우면 합성, 비우면 집합이다."""
         tip, c, s, (size, half) = _head(tip, frm, size, half)
         mid = (tip[0] + c * size / 2, tip[1] + s * size / 2)
         far = (tip[0] + c * size, tip[1] + s * size)
-        self.poly([tip, (mid[0] - s * half, mid[1] + c * half), far, (mid[0] + s * half, mid[1] - c * half)],
-                  fill="black" if filled else "white", owner=owner)
+        return self.poly([tip, (mid[0] - s * half, mid[1] + c * half), far, (mid[0] + s * half, mid[1] - c * half)],
+                         fill="black" if filled else "white", owner=owner)
 
     def bounds(self) -> Optional[Box]:
         """그린 것이 차지하는 논리 좌표 범위(왼, 위, 오른, 아래). 지운 곳과 공백뿐인 글자는 넣지 않고, 없으면 None."""

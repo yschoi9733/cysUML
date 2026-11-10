@@ -252,6 +252,16 @@ def test_frame_maps_output_pixels_exactly(width):
     assert img.size[0] / 1.6 == pytest.approx(fr - fx) and img.size[1] / 1.6 == pytest.approx(fb - fy)
 
 
+def test_drawing_calls_return_what_they_record():
+    c = Canvas()
+    made = [c.line([(0, 0), (10, 0)]), c.rect(0, 0, 5, 5), c.ellipse(0, 0, 5, 5), c.poly([(0, 0), (5, 0), (0, 5)]),
+            c.open_arrow((20, 0), (0, 0)), c.closed_arrow((20, 0), (0, 0)), c.diamond((0, 0), (20, 0)),
+            c.erase(0, 0, 1, 1)]
+    assert made == c.records
+    label = c.text(0, 0, "가", bg=True)
+    assert label is c.records[-1] and label.bg and type(c.records[-2]).__name__ == "Mask"
+
+
 def test_nothing_drawn_cannot_be_rendered():
     c = Canvas()
     with pytest.raises(ValueError, match="그린 것이 없다"):
