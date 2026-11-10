@@ -17,7 +17,8 @@ from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 from . import text as T
-from .canvas import BG_MARGIN, SCALE, Canvas, Line, Point, Polygon
+from .canvas import BG_MARGIN, SCALE, Canvas, Point
+from .geom import gap, grow, hits, meets, outline
 
 CLASS_KINDS = ("class", "abstract", "interface", "enum")
 RELATION_KINDS = ("association", "aggregation", "composition", "generalization", "realization", "dependency")
@@ -496,47 +497,6 @@ def multiplicity_spots(end: Point, toward: Point) -> list[Point]:
             for d in MULT_DISTANCES for a in MULT_ANGLES for turn in (a, -a)]
 
 
-def _gap(a: T.Box, b: T.Box) -> float:
-    """두 상자 사이 거리. 겹치거나 맞닿으면 -1."""
-    dx = max(b[0] - a[2], a[0] - b[2], 0)
-    dy = max(b[1] - a[3], a[1] - b[3], 0)
-    return -1 if dx == 0 and dy == 0 else math.hypot(dx, dy)
-
-
-def _grow(rect: T.Box, m: float) -> T.Box:
-    return rect[0] - m, rect[1] - m, rect[2] + m, rect[3] + m
-
-
-def _hits(p: Point, q: Point, rect: T.Box) -> bool:
-    """선분 pq가 상자 rect를 지나거나 닿는지."""
-    lo, hi = 0.0, 1.0
-    for a, d, low, high in ((p[0], q[0] - p[0], rect[0], rect[2]), (p[1], q[1] - p[1], rect[1], rect[3])):
-        if d == 0:
-            if not low <= a <= high:
-                return False
-            continue
-        t1, t2 = sorted(((low - a) / d, (high - a) / d))
-        lo, hi = max(lo, t1), min(hi, t2)
-        if lo > hi:
-            return False
-    return True
-
-
-def _meets(a: T.Box, b: T.Box) -> bool:
-    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
-
-
-def _outline_segments(records) -> list[tuple[Point, Point]]:
-    """그림판 기록의 선·다각형 테두리를 선분으로."""
-    out: list[tuple[Point, Point]] = []
-    for r in records:
-        if isinstance(r, Line):
-            out += zip(r.points, r.points[1:])
-        elif isinstance(r, Polygon):
-            out += zip(r.points, r.points[1:] + r.points[:1])
-    return out
-
-
 class _Spots:
     """선 글자의 자리를 고른다. 글자의 흰 바탕(글자 상자를 LABEL_CLEAR만큼 넓힌 것)이 상자에 겹치지 않는 자리, 그 가운데
     관계선과 선 끝 모양(화살촉·삼각형·마름모)과 앞서 놓은 선 글자에 닿지 않는 자리, 그 가운데 상자에서 먼(MULT_ENOUGH까지)
@@ -550,17 +510,17 @@ class _Spots:
 
     def pick(self, text: str, candidates: list[Point]) -> Point:
         boxes = [T.place(x, y, text, False, "mm").box for x, y in candidates]
-        wides = [_grow(b, LABEL_CLEAR) for b in boxes]
+        wides = [grow(b, LABEL_CLEAR) for b in boxes]
         region = (min(w[0] for w in wides), min(w[1] for w in wides), max(w[2] for w in wides), max(w[3] for w in wides))
         # 후보들이 닿을 수 있는 것만 먼저 거른다. 상자는 MULT_ENOUGH 밖이면 점수가 같아 거리를 잴 필요가 없다.
-        near_boxes = [b for b in self.boxes if _meets(b, _grow(region, MULT_ENOUGH))]
-        near_segments = [(p, q) for p, q, bb in self.segments if _meets(bb, region)]
-        near_labels = [x for x in self.labels if _meets(x, region)]
+        near_boxes = [b for b in self.boxes if meets(b, grow(region, MULT_ENOUGH))]
+        near_segments = [(p, q) for p, q, bb in self.segments if meets(bb, region)]
+        near_labels = [x for x in self.labels if meets(x, region)]
         best = None
         for p, box, wide in zip(candidates, boxes, wides):
-            gap = min((_gap(wide, b) for b in near_boxes), default=MULT_ENOUGH)
-            clear = not any(_hits(a, b, wide) for a, b in near_segments) and all(_gap(wide, x) >= 0 for x in near_labels)
-            score = (gap >= 0, clear, min(gap, MULT_ENOUGH))
+            room = min((gap(wide, b) for b in near_boxes), default=MULT_ENOUGH)
+            clear = not any(hits(a, b, wide) for a, b in near_segments) and all(gap(wide, x) >= 0 for x in near_labels)
+            score = (room >= 0, clear, min(room, MULT_ENOUGH))
             if best is None or score > best[0]:
                 best = score, p, box
         assert best is not None
@@ -603,8 +563,8 @@ def _route(r: Relation, a: T.Box, b: T.Box, path: str) -> tuple[Optional[tuple[P
     # 선 끝은 상자 변 위에 있으므로, 변에서 EDGE_SLACK 안쪽으로 줄인 상자를 지나면 선이 끝 상자 안으로 들어간 것이다.
     # 상자가 선 위에 그려져 그 부분은 가려지므로 선이 엉뚱한 변에서 시작하는 것처럼 보인다.
     for key, rect, name in (("from", a, r.source),) + ((("to", b, r.target),) if r.target != r.source else ()):
-        inner = _grow(rect, -EDGE_SLACK)
-        if any(_hits(p, q, inner) for p, q in zip(points, points[1:])):
+        inner = grow(rect, -EDGE_SLACK)
+        if any(hits(p, q, inner) for p, q in zip(points, points[1:])):
             problems.append(f"{path}: 선이 {key} 상자 {_show(name)}({_fmt_rect(rect)}) 안을 지난다 — 꺾는 점을 그 상자 밖으로 "
                             "돌린다")
     lengths = [math.dist(p, q) for p, q in zip(points, points[1:])]
@@ -647,7 +607,7 @@ def layout(diagram: Diagram) -> Layout:
     sketch = Canvas()  # 선 끝 모양을 그림판과 똑같이 얻으려고 선만 한 번 그려 본다
     for p in bare:
         _draw_relation(sketch, p)
-    spots = _Spots([p.rect for p in placed], _outline_segments(sketch.records))
+    spots = _Spots([p.rect for p in placed], outline(sketch.records))
     out = []
     for p in bare:
         r, points = p.relation, p.points
