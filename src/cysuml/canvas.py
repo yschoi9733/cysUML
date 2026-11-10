@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import numbers
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Optional, Union
 
 from PIL import Image, ImageColor, ImageDraw
@@ -63,10 +63,10 @@ class Polygon:
 
 @dataclass(frozen=True)
 class Text:
-    """한 줄 글자. box는 줄 상자(text.Placement.box)다.
+    """한 줄 글자. text는 normalize한 글자이고, box는 줄 상자(text.Placement.box)다.
 
     bg는 글자 밑에 흰 바탕을 깔았다는 뜻이고, 그 바탕은 바로 앞의 Mask다. 칠할 글자가 없으면(공백뿐) 깔지 않고 bg도
-    False다.
+    False다. placement는 Canvas.text가 놓은 결과로, 범위 계산과 그리기가 그대로 쓴다.
     """
 
     x: float
@@ -77,6 +77,10 @@ class Text:
     box: Box
     bg: bool = False
     owner: Optional[str] = None
+    placement: Optional[T.Placement] = field(default=None, compare=False, repr=False)
+
+    def placed(self) -> T.Placement:
+        return self.placement or T.place(self.x, self.y, self.text, self.bold, self.anchor)
 
 
 @dataclass(frozen=True)
@@ -132,14 +136,17 @@ def _fill(fill: Optional[str]) -> Optional[str]:
     return fill
 
 
-def _direction(tip: Point, frm: Point) -> tuple[float, float]:
-    """tip에서 frm으로 가는 단위 벡터."""
+def _head(tip: Point, frm: Point, *sizes) -> tuple[Point, float, float, tuple[float, ...]]:
+    """선 끝 장식의 자리: 확인한 tip, tip에서 frm으로 가는 단위 벡터, 확인한 크기들(모두 0보다 커야 한다)."""
     tip, frm = _point(tip), _point(frm)
+    sizes = _nums(*sizes)
+    if min(sizes) <= 0:
+        raise ValueError(f"선 끝 장식의 크기는 0보다 커야 한다: {sizes}")
     dx, dy = frm[0] - tip[0], frm[1] - tip[1]
     n = math.hypot(dx, dy)
     if n == 0:
         raise ValueError(f"선 끝 장식의 방향을 정할 수 없다(두 점이 같다): {tip}")
-    return dx / n, dy / n
+    return tip, dx / n, dy / n, sizes
 
 
 class Canvas:
@@ -151,7 +158,7 @@ class Canvas:
         self.records: list[Record] = []
 
     def line(self, pts: Iterable[Point], dash: Optional[tuple[float, float]] = None, owner: Optional[str] = None) -> None:
-        """dash=(칠할 길이, 비울 길이)이면 점선이다(둘 다 MIN_DASH 이상). 무늬는 꺾는 점마다 새로 시작한다."""
+        """dash=(칠할 길이, 비울 길이)이면 점선이다(둘 다 MIN_DASH 이상). 무늬는 꺾는 점을 지나도 이어진다."""
         pts = _points(pts, 2)
         if all(a == b for a, b in zip(pts, pts[1:])):
             raise ValueError(f"길이가 0인 선이다: {pts}")
@@ -175,6 +182,9 @@ class Canvas:
 
     def poly(self, pts: Iterable[Point], fill: Optional[str] = "white", owner: Optional[str] = None) -> None:
         pts = _points(pts, 3)
+        area2 = sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]))
+        if area2 == 0:
+            raise ValueError(f"넓이가 0인 다각형이다: {pts}")
         self.records.append(Polygon(pts, _fill(fill), owner))
 
     def text(self, x: float, y: float, s: str, bold: bool = False, anchor: str = "lm", bg: bool = False,
@@ -182,12 +192,13 @@ class Canvas:
         """한 줄 글자. anchor와 y의 뜻은 text.place와 같다. bg면 글자가 칠해지는 곳보다 BG_MARGIN 넓게 흰 바탕을 깐다."""
         x, y = _nums(x, y)
         bold = bool(bold)
+        s = T.normalize(s)
         placed = T.place(x, y, s, bold, anchor)
         laid = bg and placed.ink is not None
         if laid:
             l, t, r, b = placed.ink
             self.erase(l - BG_MARGIN, t - BG_MARGIN, r + BG_MARGIN, b + BG_MARGIN, owner=owner)
-        self.records.append(Text(x, y, s, bold, anchor, placed.box, laid, owner))
+        self.records.append(Text(x, y, s, bold, anchor, placed.box, laid, owner, placed))
 
     def erase(self, left: float, top: float, right: float, bottom: float, owner: Optional[str] = None) -> None:
         left, top, right, bottom = _nums(left, top, right, bottom)
@@ -196,10 +207,10 @@ class Canvas:
 
     def open_arrow(self, tip: Point, frm: Point, size: float = 10, spread: float = math.radians(28),
                    owner: Optional[str] = None) -> None:
-        """frm에서 tip으로 가는 선 끝의 열린 화살촉(두 갈래 선)."""
-        c, s = _direction(tip, frm)
-        tip = _point(tip)
-        size, spread = _nums(size, spread)
+        """frm에서 tip으로 가는 선 끝의 열린 화살촉(두 갈래 선). spread는 선과 갈래 사이 각(라디안, 직각 미만)이다."""
+        tip, c, s, (size, spread) = _head(tip, frm, size, spread)
+        if spread >= math.pi / 2:
+            raise ValueError(f"화살촉 갈래 각은 직각보다 작아야 한다: {spread}")
         for turn in (-spread, spread):
             ct, st = math.cos(turn), math.sin(turn)
             self.line([tip, (tip[0] + size * (c * ct - s * st), tip[1] + size * (s * ct + c * st))], owner=owner)
@@ -207,9 +218,7 @@ class Canvas:
     def closed_arrow(self, tip: Point, frm: Point, filled: bool = True, size: float = 10, half: float = 4.5,
                      owner: Optional[str] = None) -> None:
         """닫힌 삼각형 화살촉. 채우면 호출 메시지, 비우면(크기 18·9) 상속·실체화다."""
-        c, s = _direction(tip, frm)
-        tip = _point(tip)
-        size, half = _nums(size, half)
+        tip, c, s, (size, half) = _head(tip, frm, size, half)
         base = (tip[0] + c * size, tip[1] + s * size)
         self.poly([tip, (base[0] - s * half, base[1] + c * half), (base[0] + s * half, base[1] - c * half)],
                   fill="black" if filled else "white", owner=owner)
@@ -217,9 +226,7 @@ class Canvas:
     def diamond(self, tip: Point, frm: Point, filled: bool = True, size: float = 18, half: float = 6,
                 owner: Optional[str] = None) -> None:
         """선 끝의 마름모. 채우면 합성, 비우면 집합이다."""
-        c, s = _direction(tip, frm)
-        tip = _point(tip)
-        size, half = _nums(size, half)
+        tip, c, s, (size, half) = _head(tip, frm, size, half)
         mid = (tip[0] + c * size / 2, tip[1] + s * size / 2)
         far = (tip[0] + c * size, tip[1] + s * size)
         self.poly([tip, (mid[0] - s * half, mid[1] + c * half), far, (mid[0] + s * half, mid[1] - c * half)],
@@ -235,7 +242,7 @@ class Canvas:
             elif isinstance(r, (Rect, Ellipse)):
                 pts = ((r.left, r.top), (r.left + r.width, r.top + r.height))
             elif isinstance(r, Text):
-                ink = T.place(r.x, r.y, r.text, r.bold, r.anchor).ink
+                ink = r.placed().ink
                 if ink is None:
                     continue
                 pts = ((ink[0], ink[1]), (ink[2], ink[3]))
@@ -310,26 +317,35 @@ class _Painter:
                 self.d.line(pts + pts[:2], fill="black", width=self.lw, joint="curve")
             elif isinstance(r, Text):
                 self.text(r)
-            else:
+            elif isinstance(r, Mask):
                 self.d.rectangle([self._p((r.left, r.top)), self._p((r.right, r.bottom))], fill="white")
+            else:
+                raise TypeError(f"그릴 줄 모르는 기록이다: {r!r}")
 
     def line(self, r: Line) -> None:
         if r.dash is None:
             self.d.line([self._p(p) for p in r.points], fill="black", width=self.lw, joint="curve")
             return
         on, off = r.dash
+        period = on + off
+        done = 0.0  # 선 처음부터 지금 구간 앞까지의 길이. 무늬 k번째 칠할 곳은 [k·period, k·period + on]이다.
         for (x1, y1), (x2, y2) in zip(r.points, r.points[1:]):
             n = math.hypot(x2 - x1, y2 - y1)
-            s = 0.0
-            while s < n:
-                a, b = s / n, min(s + on, n) / n
-                self.d.line([self._p((x1 + (x2 - x1) * a, y1 + (y2 - y1) * a)),
-                             self._p((x1 + (x2 - x1) * b, y1 + (y2 - y1) * b))], fill="black", width=self.lw)
-                s += on + off
+            if n == 0:
+                continue
+            k = math.floor(done / period)
+            while k * period < done + n:
+                a, b = max(k * period, done), min(k * period + on, done + n)
+                if b > a:
+                    ta, tb = (a - done) / n, (b - done) / n
+                    self.d.line([self._p((x1 + (x2 - x1) * ta, y1 + (y2 - y1) * ta)),
+                                 self._p((x1 + (x2 - x1) * tb, y1 + (y2 - y1) * tb))], fill="black", width=self.lw)
+                k += 1
+            done += n
 
     def text(self, r: Text) -> None:
         # 조각째 그리면 이 크기에서 힌팅으로 반올림된 글자 폭이 쌓여 기록한 상자와 어긋난다. 글자를 잰 자리에 하나씩 놓는다.
-        placed = T.place(r.x, r.y, r.text, r.bold, r.anchor)
+        placed = r.placed()
         for left, ch, korean in placed.glyphs:
             if not ch.isspace():
                 self.d.text(self._p((left, placed.baseline)), ch, fill="black",

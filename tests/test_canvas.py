@@ -1,4 +1,5 @@
 import math
+import unicodedata
 
 import pytest
 from PIL import Image
@@ -102,6 +103,30 @@ def test_dashed_line_has_gaps():
     c.line([(0, 10), (100, 10)], dash=(5, 4))
     img = c.to_image()
     assert pixel(c, img, 2, 10) < 60 and pixel(c, img, 7, 10) > 200 and pixel(c, img, 11, 10) < 60
+
+
+def test_dash_pattern_carries_over_bend_points():
+    c = Canvas(8)
+    c.line([(x, 10) for x in range(0, 31, 3)], dash=(5, 4))  # 구간마다 3 — 무늬를 새로 시작하면 실선이 된다
+    img = c.to_image()
+    assert pixel(c, img, 2, 10) < 60 and pixel(c, img, 7, 10) > 200 and pixel(c, img, 11, 10) < 60
+    assert pixel(c, img, 16, 10) > 200 and pixel(c, img, 20, 10) < 60
+
+
+def test_text_record_keeps_its_placement_and_normalized_text():
+    c = Canvas()
+    c.text(10, 20, unicodedata.normalize("NFD", "주문 Order"), anchor="mm")
+    r = c.records[-1]
+    assert r.text == "주문 Order"
+    assert r.placement == T.place(10, 20, "주문 Order", anchor="mm") and r.placed() is r.placement
+
+
+def test_painter_refuses_unknown_records():
+    c = Canvas()
+    c.line([(0, 0), (10, 0)])
+    c.records.append(object())
+    with pytest.raises(TypeError):
+        c.to_image()
 
 
 def test_borders_of_boxes_and_polygons_are_centred_on_their_edges_like_lines():
@@ -221,6 +246,12 @@ def test_invalid_input_is_rejected_without_a_record():
         lambda: c.text(0, 0, 123),
         lambda: c.closed_arrow((0, 0), (5, 5), size="big"),
         lambda: c.poly([(0, 0), (5, 5)]),
+        lambda: c.poly([(5, 5), (5, 5), (5, 5)]),
+        lambda: c.poly([(0, 0), (1, 1), (2, 2)]),
+        lambda: c.open_arrow((0, 0), (5, 5), size=0),
+        lambda: c.open_arrow((0, 0), (5, 5), spread=math.pi / 2),
+        lambda: c.closed_arrow((0, 0), (5, 5), size=-1),
+        lambda: c.diamond((0, 0), (5, 5), half=0),
         lambda: c.rect(5, 5, -1, 2),
         lambda: c.rect(1, 1, 10, 10, fill="#zz"),
         lambda: c.ellipse(5, 5, 2, -1),

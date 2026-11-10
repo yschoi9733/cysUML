@@ -106,10 +106,15 @@ def _layout(s: str, bold: bool) -> _Layout:
     return _Layout(pen, tuple(glyphs), ink)
 
 
-def _layout_of(s: str, bold: bool) -> _Layout:
+def normalize(s: str) -> str:
+    """그리고 잴 글자. 풀어 쓴 한글(NFD — macOS 파일 이름 등에서 옮긴 것)은 자모가 흩어져 그려지므로 NFC로 모은다."""
     if not isinstance(s, str):
         raise ValueError(f"글자는 문자열이어야 한다: {s!r}")
-    return _layout(s, bool(bold))
+    return unicodedata.normalize("NFC", s)
+
+
+def _layout_of(s: str, bold: bool) -> _Layout:
+    return _layout(normalize(s), bool(bold))
 
 
 def text_width(s: str, bold: bool = False) -> float:
@@ -132,7 +137,8 @@ class Placement:
 
 
 def place(x: float, y: float, s: str, bold: bool = False, anchor: str = "lm") -> Placement:
-    """(x, y)에 한 줄 글자 s를 놓는다. anchor "lm"이면 x가 왼쪽 끝, "mm"이면 가운데이고, y는 줄 상자의 세로 가운데다."""
+    """(x, y)에 한 줄 글자 s를 놓는다(normalize한 글자로). anchor "lm"이면 x가 왼쪽 끝, "mm"이면 가운데이고, y는
+    줄 상자의 세로 가운데다."""
     if anchor not in ("lm", "mm"):
         raise ValueError(f"anchor는 lm·mm만 받는다: {anchor!r}")
     lay = _layout_of(s, bold)

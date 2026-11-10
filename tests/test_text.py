@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -74,6 +75,14 @@ def test_split_runs():
 ])
 def test_width_is_fixed(s, bold, width):
     assert T.text_width(s, bold) == pytest.approx(width, abs=0.02)
+
+
+def test_decomposed_hangul_is_composed_before_measuring():
+    nfd = unicodedata.normalize("NFD", "주문 Order")
+    assert len(nfd) > len("주문 Order")
+    assert T.normalize(nfd) == "주문 Order"
+    assert T.text_width(nfd) == T.text_width("주문 Order")
+    assert [ch for _, ch, _ in T.place(0, 0, nfd).glyphs] == list("주문 Order")
 
 
 def test_mixed_width_is_sum_of_runs():
