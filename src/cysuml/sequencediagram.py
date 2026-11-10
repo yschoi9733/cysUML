@@ -334,7 +334,7 @@ class _SeqReader(_Reader):
     def condition(self, v, path: str) -> Optional[str]:
         """조건 글자. 도구가 대괄호를 씌우므로, 전체를 감싼 대괄호는 받지 않는다(안쪽 대괄호 "[x] or [y]"는 받는다)."""
         s = self.text(v, path)
-        if s is not None and _wrapped(s):
+        if s is not None and _wrapped(s.strip()):
             self.fail(path, f"대괄호 없이 조건만 쓴다(받은 값 {_show(s)})")
             return None
         return s
@@ -555,13 +555,16 @@ class _Activations:
     바로 밑에서 끝날 수 있어서다. 다만 그 생명선이 반환하면 그 높이에서 끝난다(프레임 윗변에서 FRAME_HEAD 넘게 아래다).
     프레임 안에서 연 막대는 칸이 끝날 때 닫는다. alt의 칸은 서로 대신하는 갈래라 칸마다 프레임이 열릴 때의 막대에서 시작한다
     — 앞 칸에서 반환한 그런 막대는 거기서 끝나고, 다음 칸에서는 칸 나눔선 EDGE_CLEAR 아래에서 이어지는 막대를 새로 연다.
-    ref는 그때 열린 막대를 ref 아래까지 잇는다.
+    어느 한 칸에서라도 반환한 막대는 alt와 함께 끝나고(이어 가던 막대는 밑변 EDGE_CLEAR 위에서 닫는다), 모든 칸에서 계속
+    일한 막대만 프레임 밖으로 이어진다 — 칸 차례에 따라 그 뒤 그림이 달라지지 않게.
+    ref는 그때 열린 막대를 ref 아래까지 잇는다(바로 다음 메시지가 닫을 막대는 ref 앞에서 닫는다).
     """
 
     def __init__(self):
         self.stack: list[_Bar] = []
         self.bars: list[_Bar] = []
-        self.kept: list[_Bar] = []  # 지금 프레임이 열릴 때 열려 있던 막대(쌓인 차례대로, alt는 지금 칸에서 잇는 막대)
+        self.kept: list[_Bar] = []    # 지금 프레임이 열릴 때 열려 있던 막대(쌓인 차례대로, alt는 지금 칸에서 잇는 막대)
+        self.ended: list[bool] = []   # kept 자리마다, 앞 칸에서 반환한 적이 있는지
 
     def open(self, life: int, e: int, fixed: bool = False, parent: Optional[_Bar] = None) -> _Bar:
         """막대를 연다. fixed(액터가 받는 호출)면 높이 ACT_H로 끝나 쌓지 않는다."""
@@ -636,6 +639,7 @@ class _Activations:
         for b in self.stack:
             b.protected = True
         self.kept = list(self.stack)
+        self.ended = [False] * len(self.kept)
 
     def branch(self, e: int) -> None:
         """alt 칸 나눔: 앞 칸에서 연 막대를 닫고, 프레임이 열릴 때의 막대로 돌아간다. 앞 칸에서 반환해 끝난 막대는 이 칸에서
@@ -644,6 +648,7 @@ class _Activations:
         now: dict[int, _Bar] = {}  # 바꾼 막대 → 이 칸에서 잇는 막대
         for i, b in enumerate(self.kept):
             if b not in self.stack:
+                self.ended[i] = True
                 parent = now.get(id(b.parent), b.parent) if b.parent is not None else None
                 self.kept[i] = _Bar(b.life, e, {(e, EDGE_CLEAR)}, protected=True, top_off=EDGE_CLEAR, parent=parent)
                 self.bars.append(self.kept[i])
@@ -652,11 +657,17 @@ class _Activations:
 
     def frame_end(self, e: int) -> None:
         self.close_all()
-        for b in self.kept:
+        for i in reversed(range(len(self.kept))):
+            b = self.kept[i]
             b.protected = False
-            if b in self.stack:  # 프레임 안에서 반환한 막대는 이미 끝났다
+            if b not in self.stack:  # 마지막 칸에서 반환해 이미 끝났다
+                continue
+            if self.ended[i]:  # 앞 칸에서 반환했다 — 이어 가던 막대를 프레임 밑변 위에서 닫는다
+                b.terms.add((e, -EDGE_CLEAR))
+                self._close(b)
+            else:
                 b.terms.add((e, EDGE_CLEAR))
-        self.kept = []
+        self.kept, self.ended = [], []
 
     def ref(self, e: int) -> None:
         for b in self.stack:
@@ -729,6 +740,10 @@ def _plan(d: Diagram) -> _Plan:
         elif ev.kind == "end":
             acts.frame_end(e)
         else:
+            before = d.refs[ev.item].before
+            if before < len(d.messages):  # 바로 다음 메시지가 닫을 막대는 ref 앞에서 닫는다 — ref 밑에 짧은 조각이 남지 않게
+                s = index[d.messages[before].source]
+                acts.send_from(s, d.messages[before].kind, actor[s])
             acts.ref(e)
     acts.close_all()
     bars = acts.bars

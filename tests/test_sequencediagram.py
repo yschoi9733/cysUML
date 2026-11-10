@@ -91,6 +91,8 @@ def test_frames_are_read_by_kind():
     ({"participants": life("A", "B"), "messages": [call("A", "B")],
       "frames": [{"kind": "opt", "first": 0, "last": 0, "condition": "[x > 0]"}]}, "frames[0].condition: 대괄호 없이"),
     ({"participants": life("A", "B"), "messages": [call("A", "B")],
+      "frames": [{"kind": "opt", "first": 0, "last": 0, "condition": " [x] "}]}, "frames[0].condition: 대괄호 없이"),
+    ({"participants": life("A", "B"), "messages": [call("A", "B")],
       "frames": [{"kind": "loop", "first": 0, "last": 0, "name": "x"}]}, "frames[0].name: loop 프레임에는 쓰지 않는 필드다"),
     ({"participants": life("A", "B"), "messages": [call("A", "B")],
       "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 0}]}]},
@@ -302,13 +304,16 @@ def test_reply_after_returning_in_a_branch_leaves_from_the_bare_lifeline():
     assert rule_breaks(lay) == []
 
 
-def test_bar_kept_through_a_branch_that_does_not_use_it_goes_on_after_the_alt():
+def test_bar_returned_in_one_branch_goes_on_through_the_others_and_ends_with_the_alt():
     lay = lay_of(life("A", "B", "C"), [call("A", "B"), reply("B", "A", "ok"), call("A", "C", "log()"), reply("B", "A", "late")],
                  frames=[{"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 1},
                                                       {"condition": "else", "first": 2, "last": 2}]}])
-    late = lay.messages[3]
-    b = bars_of(lay, "B")[-1]
-    assert b.top <= late.y == b.bottom and late.start == b.rect[0]
+    f, late = lay.frames[0], lay.messages[3]
+    b1, b2 = bars_of(lay, "B")
+    assert b1.bottom == lay.messages[1].y
+    assert b2.top == f.dividers[0] + S.EDGE_CLEAR and b2.bottom == f.bottom - S.EDGE_CLEAR  # 첫 칸에서 반환해 alt와 함께 끝난다
+    assert late.start == lay.participants[1].x
+    assert rule_breaks(lay) == []
 
 
 def test_bar_opened_by_a_reply_hands_its_end_only_to_its_caller():
@@ -326,6 +331,28 @@ def test_callee_kept_by_a_frame_ends_when_its_caller_returns():
     (a,), (b,) = bars_of(lay, "A"), bars_of(lay, "B")
     assert a.bottom == lay.messages[4].y and b.bottom <= lay.messages[4].y + S.CLEAR
     assert rule_breaks(lay) == []
+
+
+def test_bars_after_an_alt_do_not_depend_on_the_branch_order():
+    # B는 한 칸에서만 반환한다 — 어느 칸이 먼저든 B 막대는 alt 안에서 끝나고 그 뒤 B의 호출은 새 막대에서 나간다
+    def bars(first, second):
+        lay = lay_of(life("A", "B", "C"), [call("A", "B"), first, second, call("B", "C", "g")],
+                     frames=[{"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 1},
+                                                          {"condition": "else", "first": 2, "last": 2}]}])
+        assert rule_breaks(lay) == []
+        f = lay.frames[0]
+        return lay, [b for b in bars_of(lay, "B") if b.top < f.bottom], f
+
+    for first, second in ((reply("B", "A"), reply("C", "A")), (reply("C", "A"), reply("B", "A"))):
+        lay, inside, f = bars(first, second)
+        assert all(b.bottom < f.bottom for b in inside)
+        assert bars_of(lay, "B")[-1].top == lay.messages[3].y
+
+
+def test_bar_closed_by_the_message_after_a_ref_ends_before_the_ref():
+    lay = lay_of(life("A", "B", "C"), [call("A", "B"), call("A", "C")], frames=[{"kind": "ref", "name": "R", "before": 1}])
+    (b,), r = bars_of(lay, "B"), lay.refs[0]
+    assert b.bottom <= r.top - S.EDGE_CLEAR
 
 
 def test_brackets_inside_a_condition_are_kept():
