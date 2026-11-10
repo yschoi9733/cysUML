@@ -548,7 +548,7 @@ bash "<사본>/scripts/ignored-check.sh" "<대상 path>"
   산출물, 하네스의 `.claude/settings.local.json`, SKILL.md 4단계의 셈 기록 파일, 빈 디렉터리 등 — 스크립트 머리말)뿐이다. 아래
   `remove` 로 간다.
 - `KEEP` — **이 절차는 지우지 않는다.** `keep` 줄을 보여 주고, 사람이 그 파일을 옮기거나 직접 지운 뒤 다시
-  부르게 한다. "그냥 지워라"는 답이어도 같다 — 디렉터리 줄(`tools/build/`)은 그 안을 통째로 가리켜서 답한 뒤에
+  부르게 한다. "그냥 지워라"는 답이어도 같다 — 디렉터리 줄(`tools/.venv/`)은 그 안을 통째로 가리켜서 답한 뒤에
   안에 새로 생긴 것이 목록에 드러나지 않고, `keep-more 20+` 면 목록이 전부도 아니다. 정리했다는 답을 받으면 위
   "먼저 알아 둘 것"의 규칙대로 다시 돌고(0~3번에서 물었으니 0번 ①을 본 뒤 ②부터), 이 확인이 `CLEAN` 일 때만 `remove` 로 간다(이 갈래에는
   "같은 출력이면 답대로 간다"를 적용하지 않는다 — 3번 `contains modified` 갈래와 같다).
@@ -623,7 +623,7 @@ bash "<사본>/scripts/find.sh" "<스냅숏>" "<브랜치>" "<대상 path>"
   `orphan-check.sh` 로 판정해 치운다. 1번이 `INSIDE` 였어도 여기서는 나가지 않는다 — `prune` 은 등록만
   지워 cwd 가 남아 있고, 그 디렉터리는 4번 2)가 `INSIDE` 로 멈춘다.
 - `contains modified or untracked files` — **커밋되지 않은 변경**(추적 안 된 신규 파일이든 수정된 추적
-  파일이든)이 있다. `.gitignore` 에 있는 것(`__pycache__/`·`.venv/`·`build/`·`.idea/`·`.DS_Store`·`scratchpad/`)은
+  파일이든)이 있다. `.gitignore` 에 있는 것(`__pycache__/`·`.venv/`·최상위 `build/`·`.idea/`·`.DS_Store`·`scratchpad/`)은
   제거를 막지 않으므로, 막고 있는 건 커밋 전에 중단된 실작업이다. (무시 대상은 막지 않는 대신 묻지 않고 함께
   지워진다 — 그래서 위에서 `ignored-check.sh` 로 먼저 봤다.) **`--force` 를 쓰지
   않고**(그 작업이 사라진다) 사람에게 알린다. **어떤 답으로도 `--force` 를 쓰지 않는다** — "그냥 지워라"는

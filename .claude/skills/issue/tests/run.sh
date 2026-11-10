@@ -914,6 +914,12 @@ has "ignored: .ruff_cache 줄" "keep .ruff_cache/"
 has "ignored: 최상위 egg-info 줄" "keep cysuml.egg-info/"
 has "ignored: src 아래 egg-info 줄" "keep src/cysuml.egg-info/"
 rm -rf "$IG/.ruff_cache" "$IG/cysuml.egg-info" "$IG/src/cysuml.egg-info"
+# __pycache__ 라도 *.pyc 밖의 것이 들었으면 사람이 본다 — 이름만 보고 넘기지 않는다.
+printf 'memo\n' > "$IG/src/cysuml/__pycache__/notes.txt"
+run "$R" "$S/ignored-check.sh" "$IG"
+check "ignored: pyc 밖의 것이 든 __pycache__" KEEP
+has "ignored: 그 __pycache__ 줄" "keep src/cysuml/__pycache__/"
+rm -f "$IG/src/cysuml/__pycache__/notes.txt"
 # 최상위 build/·dist/ 는 게이트가 만드는 자리가 아니고, .gitignore 에 걸려 사람이 둔 스크립트가 숨을 수 있다 — 사람이
 # 본다(이전 리뷰에서 나온 기준이다).
 mkdir -p "$IG/build/lib" "$IG/dist"

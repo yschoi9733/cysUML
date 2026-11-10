@@ -16,7 +16,7 @@
 ## 빌드 / 테스트
 
 - 준비는 `uv sync`, 테스트는 `uv run pytest`.
-- AI 기본 게이트: 파이썬 코드·`pyproject.toml`·`uv.lock`·글꼴을 고쳤으면 `uv run pytest`, `.claude/skills/`를 고쳤으면 `bash .claude/skills/issue/tests/run.sh`를 통과시킨다.
+- AI 기본 게이트: 파이썬 코드·`pyproject.toml`·`uv.lock`·글꼴을 고쳤으면 `uv run pytest`, `.claude/skills/`·`.gitignore`를 고쳤으면 `bash .claude/skills/issue/tests/run.sh`를 통과시킨다(스킬 테스트가 `.gitignore`도 검사한다).
 
 ## Git / 협업 규칙
 
