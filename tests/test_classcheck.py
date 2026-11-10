@@ -291,6 +291,29 @@ def test_line_through_another_relations_arrowhead(navigable, passed):
         assert f.kind == "line_through_head" and f.elements == ("C->D", "A->B") and "화살촉" in f.problem
 
 
+def test_line_under_its_own_diamond_fails():
+    # 돌아온 세로 구간(x=100)이 제 마름모(x 90~108)를 지난다
+    via = [[150, 24], [150, 80], [100, 80], [100, 10], [200, 10], [200, 24]]
+    r = report([box("A", 0, 0), box("B", 400, 0)], [rel("aggregation", "A", "B", navigable="none", via=via)])
+    (f,) = r.failures
+    assert f.kind == "line_through_head" and f.elements == ("A->B",) and "제 선 끝 모양" in f.problem
+    assert report([box("A", 0, 0), box("B", 400, 0)], [rel("association", "A", "B", navigable="none", via=via)]).passed
+
+
+def test_own_end_shape_on_its_own_end_segments_is_fine():
+    assert report([box("A", 0, 0), box("B", 300, 0)],
+                  [rel("composition", "A", "B", via=[[108, 24], [108, 100], [345, 100]])]).passed
+
+
+def test_overlap_hides_only_the_end_shapes_it_reaches():
+    # C→D가 A→B 가로선의 가운데(x 120~250)에 포개진 뒤, 멀리 B 앞 화살촉(x 391~400)을 세로로 지난다
+    r = report([box("A", 0, 0), box("B", 400, 0), box("C", 75, -200), box("D", 350, 100)],
+               [rel("association", "A", "B"),
+                rel("association", "C", "D", via=[[120, 24], [250, 24], [250, -60], [395, -60]])])
+    assert kinds(r) == ["line_overlap", "line_through_head"]
+    assert r.failures[1].elements == ("C->D", "A->B")
+
+
 def test_diamond_counts_as_an_end_shape():
     r = report([box("A", 0, 0), box("B", 300, 0), box("C", 50, -200), box("D", 50, 200)],
                [rel("composition", "A", "B", navigable="none"), rel("association", "C", "D", navigable="none")])
@@ -325,7 +348,41 @@ def test_bend_point_exactly_on_another_line_counts_when_the_line_goes_across():
     r = bent_over([[150, -100], [245, 24], [300, 150]], 250)
     assert r.passed
     (f,) = r.crossings
-    assert f.where == (245, 24, 245, 24) and f.elements == ("A->B", "C->D")
+    assert f.where == pytest.approx((245, 24, 245, 24)) and f.elements == ("A->B", "C->D")
+
+
+@pytest.mark.parametrize("leave_y, y_top, crossed", [(21, -200, True), (27, 200, False)])
+def test_short_run_along_another_line_counts_by_where_it_leaves(leave_y, y_top, crossed):
+    # X→Y가 아래에서 A→B 가로선(y=24)에 올라 3px(포개짐으로 치기엔 짧다)을 같이 가다 위(21)나 아래(27)로 나간다
+    r = report([box("A", 0, 0), box("B", 400, 0), box("X", 155, 200), box("Y", 300, y_top)],
+               [rel("association", "A", "B", navigable="none"),
+                rel("association", "X", "Y", navigable="none", via=[[245, 27], [248, 24], [251, 24], [254, leave_y]])])
+    assert r.passed
+    assert len(r.crossings) == (1 if crossed else 0)
+    if crossed:
+        assert r.crossings[0].where == pytest.approx((249.5, 24, 249.5, 24))
+
+
+def trunk_with(third):
+    """P(150, 0)의 두 자식 C1·C2가 y=120 줄기로 모여 x=195로 올라가는 트리에 관계 하나(third)와 그 상자들을 더한다."""
+    classes, relation = third
+    return report([box("P", 150, 0), box("C1", 0, 200), box("C2", 300, 200), *classes],
+                  [rel("generalization", "C1", "P", via=[[45, 120], [195, 120]]),
+                   rel("generalization", "C2", "P", via=[[345, 120], [195, 120]]), relation])
+
+
+def test_line_across_a_shared_trunk_is_one_crossing():
+    r = trunk_with(([box("X", -200, 76), box("Y", 500, 76)], rel("association", "X", "Y", navigable="none")))
+    assert r.passed
+    (f,) = r.crossings
+    assert f.elements == ("C1->P", "C2->P", "X->Y") and f.where == pytest.approx((195, 100, 195, 100))
+
+
+def test_line_along_a_shared_trunk_is_one_overlap():
+    r = trunk_with(([box("Z", 150, 300)], rel("dependency", "Z", "P")))
+    (f,) = r.failures
+    assert f.kind == "line_overlap" and f.elements == ("C1->P", "C2->P", "Z->P")
+    assert f.where == pytest.approx((195, 48, 195, 120))
 
 
 def test_bend_point_touching_another_line_from_one_side_is_not_a_crossing():

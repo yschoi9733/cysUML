@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import bisect
 import math
 from typing import Iterable, Optional
 
@@ -109,64 +110,142 @@ def inside(v: Point, polygon: tuple[Point, ...]) -> bool:
 def crossings(a: tuple[Point, ...], b: Optional[tuple[Point, ...]], eps: float) -> list[Point]:
     """꺾은선 a와 b가 서로 건너가는 점. b가 None이면 a가 제 몸을 건너가는 점이다.
 
-    닿기만 하는 곳과 한 직선 위에서 포개지는 곳은 넣지 않는다. 꺾는 점이 다른 선 위에 딱 놓이면(정수 좌표에서 흔하다) 두 선분
-    어느 쪽도 속끼리 건너가지 않으므로, 그 점의 앞뒤 점이 다른 선의 양쪽에 있는지로 건너감을 가린다.
+    두 선이 닿은 곳(한 점이든, 한 직선 위를 같이 가는 구간이든)마다 a가 그곳에 들어오기 전과 나간 뒤가 b의 다른 쪽에 있으면
+    건너간 것이다. 그래서 꺾는 점이 다른 선 위에 딱 놓이거나(정수 좌표에서 흔하다) 짧게 같이 가다 나가도 건너감으로 센다. 닿기만
+    하고 같은 쪽으로 돌아가는 곳과 어느 한 선이 닿은 채 끝나는 곳은 넣지 않는다. 같이 가는 구간은 그 가운데 점으로 낸다.
     """
     same = b is None
     if b is None:
         b = a
-    sa, sb = list(zip(a, a[1:])), list(zip(b, b[1:]))
-    out = []
-    for i, (p, q) in enumerate(sa):
-        for j, (r, w) in enumerate(sb):
+    ca, cb = _lengths(a), _lengths(b)
+    contacts = []
+    for i in range(len(a) - 1):
+        for j in range(len(b) - 1):
             if same and j <= i + 1:
                 continue
-            if side(p, q, r, eps) * side(p, q, w, eps) < 0 and side(r, w, p, eps) * side(r, w, q, eps) < 0:
-                d = (q[0] - p[0]) * (w[1] - r[1]) - (q[1] - p[1]) * (w[0] - r[0])
-                k = ((r[0] - p[0]) * (w[1] - r[1]) - (r[1] - p[1]) * (w[0] - r[0])) / d
-                out.append(_lerp(p, q, k))
-    out += _vertices_on_segments(a, b, same, eps)
-    if not same:
-        out += _vertices_on_segments(b, a, same, eps)
-    for k in range(1, len(a) - 1):
-        for m in range(k + 1 if same else 1, len(b) - 1):
-            if math.dist(a[k], b[m]) <= eps and _interleaved(a[k], a[k - 1], a[k + 1], b[m - 1], b[m + 1], eps):
-                out.append(a[k])
+            c = _contact((a[i], a[i + 1]), (b[j], b[j + 1]), eps)
+            if c is not None:
+                (k0, k1), (m0, m1) = c
+                la, lb = ca[i + 1] - ca[i], cb[j + 1] - cb[j]
+                contacts.append((_snap(ca, ca[i] + k0 * la, eps), _snap(ca, ca[i] + k1 * la, eps),
+                                 _snap(cb, cb[j] + m0 * lb, eps), _snap(cb, cb[j] + m1 * lb, eps)))
+    return [_at(a, ca, (sa0 + sa1) / 2) for sa0, sa1, sb0, sb1 in _components(contacts, eps)
+            if _crosses(a, ca, b, cb, sa0, sa1, sb0, sb1, eps)]
+
+
+def _lengths(pts: tuple[Point, ...]) -> list[float]:
+    out = [0.0]
+    for p, q in zip(pts, pts[1:]):
+        out.append(out[-1] + math.dist(p, q))
     return out
 
 
-def _vertices_on_segments(a: tuple[Point, ...], b: tuple[Point, ...], same: bool, eps: float) -> list[Point]:
-    """a의 꺾는 점이 b의 선분 속(끝이 아닌 곳)에 놓이고, 그 앞뒤 점이 그 선분의 양쪽에 있는 곳."""
-    out = []
-    for k in range(1, len(a) - 1):
-        v = a[k]
-        for j, (r, w) in enumerate(zip(b, b[1:])):
-            if same and j in (k - 1, k):
-                continue
-            if (side(r, w, v, eps) == 0 and _within(r, w, v, eps) and math.dist(v, r) > eps and math.dist(v, w) > eps
-                    and side(r, w, a[k - 1], eps) * side(r, w, a[k + 1], eps) < 0):
-                out.append(v)
+def _snap(cum: list[float], s: float, eps: float) -> float:
+    """선 위의 자리 s(처음부터의 길이)가 꺾는 점에서 eps 안이면 그 꺾는 점의 자리로."""
+    i = bisect.bisect_left(cum, s)
+    for k in (i - 1, i):
+        if 0 <= k < len(cum) and abs(cum[k] - s) <= eps:
+            return cum[k]
+    return s
+
+
+def _at(pts: tuple[Point, ...], cum: list[float], s: float) -> Point:
+    k = min(max(bisect.bisect_right(cum, s) - 1, 0), len(pts) - 2)
+    n = cum[k + 1] - cum[k]
+    return _lerp(pts[k], pts[k + 1], 0.0 if n == 0 else (s - cum[k]) / n)
+
+
+def _unit(p: Point, q: Point) -> Point:
+    n = math.dist(p, q)
+    return (q[0] - p[0]) / n, (q[1] - p[1]) / n
+
+
+def _back(pts: tuple[Point, ...], cum: list[float], s: float) -> Point:
+    """자리 s에서 선을 거슬러 가는 방향(s 바로 앞 선분)."""
+    k = min(max(bisect.bisect_left(cum, s) - 1, 0), len(pts) - 2)
+    return _unit(pts[k + 1], pts[k])
+
+
+def _ahead(pts: tuple[Point, ...], cum: list[float], s: float) -> Point:
+    """자리 s에서 선을 따라가는 방향(s 바로 뒤 선분)."""
+    k = min(max(bisect.bisect_right(cum, s) - 1, 0), len(pts) - 2)
+    return _unit(pts[k], pts[k + 1])
+
+
+def _clamp(v: float) -> float:
+    return min(max(v, 0.0), 1.0)
+
+
+def _contact(s: tuple[Point, Point], t: tuple[Point, Point],
+             eps: float) -> Optional[tuple[tuple[float, float], tuple[float, float]]]:
+    """두 선분이 만나는 부분: s 위의 자리 구간 (k0, k1)과 그 두 점의 t 위 자리 (m0, m1)(모두 0~1). 만나지 않으면 None."""
+    if not touches(s, t, eps):
+        return None
+    (p, q), (r, w) = s, t
+    ux, uy, vx, vy = q[0] - p[0], q[1] - p[1], w[0] - r[0], w[1] - r[1]
+    if (side(p, q, r, eps) == 0 and side(p, q, w, eps) == 0) or (side(r, w, p, eps) == 0 and side(r, w, q, eps) == 0):
+        ll, mm = ux * ux + uy * uy, vx * vx + vy * vy
+        kr = ((r[0] - p[0]) * ux + (r[1] - p[1]) * uy) / ll
+        kw = ((w[0] - p[0]) * ux + (w[1] - p[1]) * uy) / ll
+        k0, k1 = _clamp(min(kr, kw)), _clamp(max(kr, kw))
+
+        def onto_t(k: float) -> float:
+            x, y = p[0] + ux * k, p[1] + uy * k
+            return _clamp(((x - r[0]) * vx + (y - r[1]) * vy) / mm)
+
+        return (k0, k1), (onto_t(k0), onto_t(k1))
+    d = ux * vy - uy * vx
+    if d == 0:
+        return None
+    k = _clamp(((r[0] - p[0]) * vy - (r[1] - p[1]) * vx) / d)
+    m = _clamp(((r[0] - p[0]) * uy - (r[1] - p[1]) * ux) / d)
+    return (k, k), (m, m)
+
+
+def _components(contacts: list[tuple[float, float, float, float]], eps: float) -> list[tuple[float, float, float, float]]:
+    """닿은 부분들을 a와 b 위에서 함께 이어지는 것끼리 묶는다. 묶음마다 (a 위 처음, a 위 끝, 그 처음의 b 위 자리, 그 끝의
+    b 위 자리)다."""
+    out: list[tuple[float, float, float, float]] = []
+    for c in sorted(contacts):
+        for k, (sa0, sa1, sb0, sb1) in enumerate(out):
+            if c[0] <= sa1 + eps and abs(c[2] - sb1) <= eps:
+                out[k] = (sa0, c[1], sb0, c[3]) if c[1] > sa1 else (sa0, sa1, sb0, sb1)
+                break
+        else:
+            out.append(c)
     return out
 
 
-def _interleaved(v: Point, a0: Point, a1: Point, b0: Point, b1: Point, eps: float) -> bool:
-    """두 꺾은선이 같은 꺾는 점 v를 지날 때 건너가는지 — v에서 a의 두 갈래 사이를 b의 갈래가 하나만 지나면 건너간다.
-    갈래 방향이 겹치면(한 직선 위에서 포개진다) 건너가지 않는 것으로 본다."""
-    def angle(x: Point) -> float:
-        return math.atan2(x[1] - v[1], x[0] - v[0])
+def _left(x: Point, start: Point, end: Point) -> Optional[bool]:
+    """방향 x가 start에서 end까지 한쪽으로 돌아가는 사이에 드는지. x가 start나 end와 같은 방향이면 None."""
+    base = math.atan2(start[1], start[0])
+    sweep = (math.atan2(end[1], end[0]) - base) % math.tau
+    r = (math.atan2(x[1], x[0]) - base) % math.tau
+    if min(r, math.tau - r) <= 1e-9 or abs(r - sweep) <= 1e-9:
+        return None
+    return r < sweep
 
-    base = angle(a0)
-    sweep = (angle(a1) - base) % math.tau
-    rel = [(angle(x) - base) % math.tau for x in (b0, b1)]
-    tiny = eps / max(math.dist(v, x) for x in (a0, a1, b0, b1))
-    if any(min(abs(r), math.tau - abs(r), abs(r - sweep)) <= tiny for r in rel):
+
+def _crosses(a: tuple[Point, ...], ca: list[float], b: tuple[Point, ...], cb: list[float],
+             sa0: float, sa1: float, sb0: float, sb1: float, eps: float) -> bool:
+    """닿은 묶음에서 a가 b를 건너가는지. b를 P(a가 들어오는 끝)에서 Q(a가 나가는 끝)로 가는 선으로 보고, a가 들어오기 전
+    방향이 P에서 b의 어느 쪽인지와 나간 뒤 방향이 Q에서 b의 어느 쪽인지를 견준다."""
+    if sa0 <= eps or sa1 >= ca[-1] - eps or min(sb0, sb1) <= eps or max(sb0, sb1) >= cb[-1] - eps:
         return False
-    return (rel[0] < sweep) != (rel[1] < sweep)
+    a_in, a_out = _back(a, ca, sa0), _ahead(a, ca, sa1)
+    if sa1 - sa0 <= eps:
+        b_in, b_out = _back(b, cb, sb0), _ahead(b, cb, sb0)
+        sides = _left(a_in, b_out, b_in), _left(a_out, b_out, b_in)
+    else:
+        run_p, run_q = _ahead(a, ca, sa0), _back(a, ca, sa1)
+        bp, bq = (_back(b, cb, sb0), _ahead(b, cb, sb1)) if sb0 <= sb1 else (_ahead(b, cb, sb0), _back(b, cb, sb1))
+        sides = _left(a_in, run_p, bp), _left(a_out, bq, run_q)
+    return None not in sides and sides[0] != sides[1]
 
 
-def alongside(s: tuple[Point, Point], t: tuple[Point, Point], gap: float, least: float,
+def alongside(s: tuple[Point, Point], t: tuple[Point, Point], width: float, least: float,
               parallel: float) -> Optional[tuple[Point, Point]]:
-    """선분 t 가운데 선분 s와 나란히(사이 각의 사인이 parallel 안) gap 안으로 붙어 가는 부분. 나란하지 않거나 그 부분의 길이가
+    """선분 t 가운데 선분 s와 나란히(사이 각의 사인이 parallel 안) width 안으로 붙어 가는 부분. 나란하지 않거나 그 부분의 길이가
     least 이하면 None."""
     (p, q), (r, w) = s, t
     ls, lt = math.dist(p, q), math.dist(r, w)
@@ -183,7 +262,7 @@ def alongside(s: tuple[Point, Point], t: tuple[Point, Point], gap: float, least:
         return ux * (v[1] - p[1]) - uy * (v[0] - p[0])
 
     lo, hi = 0.0, 1.0  # t 위의 자리(r에서 0, w에서 1)
-    for c, k, low, high in ((along(r), along(w) - along(r), 0.0, ls), (off(r), off(w) - off(r), -gap, gap)):
+    for c, k, low, high in ((along(r), along(w) - along(r), 0.0, ls), (off(r), off(w) - off(r), -width, width)):
         if k == 0:
             if not low <= c <= high:
                 return None
