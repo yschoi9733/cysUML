@@ -281,19 +281,29 @@ class Canvas:
                 ys.append(y)
         return (min(xs), min(ys), max(xs), max(ys)) if xs else None
 
+    def _fit(self, b: Box) -> Optional[tuple[float, float, int, int]]:
+        """범위 b를 그릴 PNG의 왼쪽 위(논리 좌표)와 픽셀 크기. 그림이 MAX_PIXELS를 넘으면 None."""
+        minx, miny = b[0] - PAD, b[1] - PAD
+        fw, fh = (b[2] + PAD - minx) * self.scale, (b[3] + PAD - miny) * self.scale
+        if not (math.isfinite(fw) and math.isfinite(fh)):
+            return None
+        w, h = max(1, math.ceil(fw)), max(1, math.ceil(fh))
+        return None if w * SS * h * SS > MAX_PIXELS else (minx, miny, w, h)
+
     def _frame_px(self) -> tuple[float, float, int, int]:
         b = self.bounds()
         if b is None:
             raise ValueError("그린 것이 없다")
-        minx, miny = b[0] - PAD, b[1] - PAD
-        fw, fh = (b[2] + PAD - minx) * self.scale, (b[3] + PAD - miny) * self.scale
-        too_big = ValueError(f"그림이 너무 크다: 논리 {b[2] - b[0]:g}×{b[3] - b[1]:g}, 배율 {self.scale:g}")
-        if not (math.isfinite(fw) and math.isfinite(fh)):
-            raise too_big
-        w, h = max(1, math.ceil(fw)), max(1, math.ceil(fh))
-        if w * SS * h * SS > MAX_PIXELS:
-            raise too_big
-        return minx, miny, w, h
+        fit = self._fit(b)
+        if fit is None:
+            raise ValueError(f"그림이 너무 크다: 논리 {b[2] - b[0]:g}×{b[3] - b[1]:g}, 배율 {self.scale:g}")
+        return fit
+
+    def png_size(self) -> Optional[tuple[int, int]]:
+        """to_image가 낼 PNG의 픽셀 크기. 그린 것이 없거나 그림이 너무 커(MAX_PIXELS) 그릴 수 없으면 None."""
+        b = self.bounds()
+        fit = None if b is None else self._fit(b)
+        return None if fit is None else (fit[2], fit[3])
 
     def frame(self) -> Box:
         """결과 PNG가 덮는 논리 좌표 범위: 그린 것의 범위에 PAD만큼 여백을 두고, 오른쪽·아래를 출력 픽셀에 맞춰 늘린다.

@@ -257,6 +257,47 @@ def test_same_child_twice_is_not_a_trunk():
     assert kinds(r) == ["line_overlap"]
 
 
+# ---------------------------------------------------------------- 선이 다른 관계의 선 끝 모양에 닿는다
+
+
+def triangle_over(d_top):
+    """A→B 가로선(y=24) 위로 C→D 상속선이 내려와 D 위 변(d_top)에 삼각형(길이 18)을 그린다."""
+    return report([box("A", 0, 0), box("B", 400, 0), box("C", 200, -200), box("D", 200, d_top)],
+                  [rel("association", "A", "B"), rel("generalization", "C", "D")])
+
+
+def test_line_under_another_relations_triangle_fails():
+    # 삼각형(y 12~30)은 흰색으로 칠해져 그 밑을 지나는 A→B 선을 끊는다
+    r = triangle_over(30)
+    (f,) = r.failures
+    assert f.kind == "line_through_head" and f.elements == ("A->B", "C->D")
+    assert "관계 C->D(relations[1])의 삼각형" in f.problem
+    assert f.where == pytest.approx((236, 12, 254, 30))
+
+
+def test_moving_the_triangle_off_the_line_passes():
+    r = triangle_over(100)
+    assert r.passed and len(r.crossings) == 1
+
+
+@pytest.mark.parametrize("navigable, passed", [("to", False), ("none", True)])
+def test_line_through_another_relations_arrowhead(navigable, passed):
+    # B(300, 0) 앞 화살촉의 갈래는 x 291~300에 걸친다. C→D 세로선(x=295)은 B에서 5px 떨어져 상자는 비켜 가지만 갈래를 지난다.
+    r = report([box("A", 0, 0), box("B", 300, 0), box("C", 250, -200), box("D", 250, 200)],
+               [rel("association", "A", "B", navigable=navigable), rel("association", "C", "D", navigable="none")])
+    assert r.passed is passed
+    if not passed:
+        (f,) = r.failures
+        assert f.kind == "line_through_head" and f.elements == ("C->D", "A->B") and "화살촉" in f.problem
+
+
+def test_diamond_counts_as_an_end_shape():
+    r = report([box("A", 0, 0), box("B", 300, 0), box("C", 50, -200), box("D", 50, 200)],
+               [rel("composition", "A", "B", navigable="none"), rel("association", "C", "D", navigable="none")])
+    (f,) = r.failures
+    assert f.kind == "line_through_head" and "마름모" in f.problem
+
+
 # ---------------------------------------------------------------- 알림
 
 
@@ -274,6 +315,46 @@ def test_lines_meeting_at_a_point_are_not_counted_as_crossing():
     assert tree("generalization", "generalization").crossings == ()
 
 
+def bent_over(via, d_top):
+    """A→B 가로선(y=24, x 90~400)을 C(100, -200)→D(300, d_top)이 꺾는 점 via로 지나간다."""
+    return report([box("A", 0, 0), box("B", 400, 0), box("C", 100, -200), box("D", 300, d_top)],
+                  [rel("association", "A", "B", navigable="none"), rel("association", "C", "D", navigable="none", via=via)])
+
+
+def test_bend_point_exactly_on_another_line_counts_when_the_line_goes_across():
+    r = bent_over([[150, -100], [245, 24], [300, 150]], 250)
+    assert r.passed
+    (f,) = r.crossings
+    assert f.where == (245, 24, 245, 24) and f.elements == ("A->B", "C->D")
+
+
+def test_bend_point_touching_another_line_from_one_side_is_not_a_crossing():
+    assert bent_over([[150, -100], [245, 24], [340, -100]], -350).crossings == ()
+
+
+def test_lines_sharing_a_bend_point_count_when_they_cross_there():
+    # 두 선이 같은 꺾는 점 (200, 24)를 지나며 가로·세로로 건너간다
+    r = report([box("A", 0, 0), box("B", 400, 0), box("C", 155, -200), box("D", 155, 200)],
+               [rel("association", "A", "B", navigable="none", via=[[200, 24]]),
+                rel("association", "C", "D", navigable="none", via=[[200, 24]])])
+    assert [f.where for f in r.crossings] == [(200, 24, 200, 24)]
+
+
+def test_lines_sharing_a_bend_point_without_crossing_are_not_counted():
+    # 두 선 다 (200, 24)에서 위로 꺾어 나가 서로 건너가지 않는다
+    r = report([box("A", 0, 0), box("B", 400, -300), box("C", 0, 100), box("D", 400, -150)],
+               [rel("association", "A", "B", navigable="none", via=[[200, 24], [150, -276]]),
+                rel("association", "C", "D", navigable="none", via=[[200, 24], [250, -126]])])
+    assert r.crossings == ()
+
+
+def test_line_crossing_itself_is_a_crossing():
+    r = report([box("A", 0, 0), box("B", 400, 0)],
+               [rel("association", "A", "B", via=[[200, 24], [200, 100], [150, 100], [150, -20], [250, -20]])])
+    (f,) = r.crossings
+    assert f.elements == ("A->B",) and f.where == (150, 24, 150, 24) and "제 선을 엇갈린다" in f.problem
+
+
 @pytest.mark.parametrize("scale", [1.0, C.SCALE, 2.5])
 def test_size_is_the_png_the_canvas_draws(scale):
     d = C.render({"classes": [box("A", 0, 0), box("B", 300, 50)], "relations": [rel("association", "A", "B", name="x")]},
@@ -285,11 +366,14 @@ def test_size_is_the_png_the_canvas_draws(scale):
     assert r.scale == scale
 
 
-def test_size_of_a_huge_scale_is_not_counted():
-    d = C.render({"classes": [box("A", 0, 0)]}, 1e308)
+@pytest.mark.parametrize("classes, scale", [([box("A", 0, 0)], 1e308), ([box("A", 0, 0), box("B", 1800, 1800)], 2)])
+def test_picture_too_big_for_a_png_has_no_png_size(classes, scale):
+    d = C.render({"classes": classes}, scale)
+    with pytest.raises(ValueError, match="너무 크다"):
+        d.canvas.to_image()
     r = K.check(d)
-    assert r.png_size is None and r.passed
-    assert "PNG 크기는 셀 수 없음" in r.summary()
+    assert r.png_size is None and r.to_dict()["size"]["png_width"] is None
+    assert f"배율 {scale:g}로는 PNG로 그리기에 너무 크다" in r.summary()
 
 
 # ---------------------------------------------------------------- 결과 형식
@@ -319,7 +403,8 @@ def test_summary_lists_failures_then_notices():
 def test_findings_come_boxes_first_then_lines_then_labels():
     r = report([box("A", 0, 0), box("B", 300, 0), box("P", 150, 0), box("Q", 160, 10)],
                [rel("association", "A", "B", name="n"), rel("dependency", "B", "A")])
-    order = ["box_overlap", "line_through_box", "line_overlap", "line_through_text", "text_on_box", "text_overlap"]
+    order = ["box_overlap", "line_through_box", "line_overlap", "line_through_head", "line_through_text", "text_on_box",
+             "text_overlap"]
     found = kinds(r)
     assert found == sorted(found, key=order.index)
     assert {"box_overlap", "line_through_box", "line_overlap"} <= set(found)

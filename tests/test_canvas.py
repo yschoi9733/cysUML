@@ -268,6 +268,16 @@ def test_oversized_drawing_is_rejected_before_allocating(scale, pts):
     for call in (c.frame, c.to_image):
         with pytest.raises(ValueError, match="너무 크다"):
             call()
+    assert c.png_size() is None
+
+
+@pytest.mark.parametrize("scale", [0.25, 1.6, 3.0])
+def test_png_size_is_the_size_to_image_draws(scale):
+    c = Canvas(scale)
+    c.rect(0.3, 0.7, 333.33, 50.07)
+    c.text(10, 10, "가 A")
+    assert c.png_size() == c.to_image().size
+    assert Canvas(scale).png_size() is None
 
 
 def test_box_outline_coordinates_are_rounded_to_centre_the_border():
