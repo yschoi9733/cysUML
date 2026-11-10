@@ -84,8 +84,8 @@
   **`git worktree add "<경로>" "<브랜치>"` 와 `git branch -D "<브랜치>"` 에는 붙이지 않는다** — 둘은 맨 이름을
   브랜치로 보고(실측), `worktree add` 에 `refs/heads/<브랜치>` 를 주면 오히려 **detached** 로 열린다(실측).
   `ls-remote --heads`·`for-each-ref refs/heads/…`·`gh pr list --head` 도 이미 브랜치만 본다. (같은 이름의
-  태그가 있으면 `for-each-ref` 의 `%(refname:short)` 는 `heads/<브랜치>` 로 낸다 — 실측. 이름 칸은 표시용이라
-  그대로 둔다.)
+  태그가 있으면 `for-each-ref` 의 `%(refname:short)` 는 `heads/<브랜치>` 로 낸다 — 실측. 그래서 이 문서와
+  merge-cleanup.md 의 `for-each-ref` 는 `%(refname)` 으로 전체 이름을 낸다.)
 - **자기가 서 있는 워크트리는 안에 선 채 `remove` 한 뒤 `ExitWorktree(keep)` 로 나간다 — 순서를 바꾸지
   않는다.** 제거 절차 1번의 `INSIDE` 갈래가 이 순서다(전제·나간 뒤의 확인·실패 신호는 거기 있다). PR 을 만든
   세션에서 곧바로 "머지했어"를 받는 가장 흔한 흐름이 이 경우라, 그 세션에서 정리를 끝낼 수 있어야 한다.
@@ -175,7 +175,7 @@
 ```
 bash "<스킬 디렉터리>/scripts/residue.sh" <이슈번호>
 git worktree list --porcelain
-git for-each-ref --format='%(refname:short) %(objectname) %(worktreepath)' "refs/heads/<브랜치>" "refs/remotes/origin/<브랜치>"
+git for-each-ref --format='%(refname) %(objectname) %(worktreepath)' "refs/heads/<브랜치>" "refs/remotes/origin/<브랜치>"
 gh pr list --head "<브랜치>" --state all --limit 100 --json number,state,baseRefName,headRefOid
 ```
 
@@ -191,10 +191,12 @@ gh pr list --head "<브랜치>" --state all --limit 100 --json number,state,base
 - `for-each-ref` 가 내는 **로컬 팁을 L, 원격 팁을 R** 이라 부른다(없으면 "없음"). **`%(objectname)` 이라 전체
   40자 sha 다** — 6번이 `ls-remote` 가 낸 sha 와 그대로 견주므로 축약형(`%(objectname:short)`)을 쓰면 늘
   "다르다"가 되어 원격 정리가 끝나지 않는다(이전 리뷰에서 잡힌 실제 결함이다). 이어받기 4번과 제거
-  절차 5·6번이 이 이름을 쓴다. 줄은 `이름 SHA [워크트리 경로]` 이고 원격 ref는 경로 칸이 없다. 같은 이름의
-  태그가 있으면 로컬 줄의 이름 칸은 `heads/<브랜치>` 로 나온다(위 "먼저 알아 둘 것" — 실측) — 그 줄이 L 이다. **줄이
+  절차 5·6번이 이 이름을 쓴다. 줄은 `전체 ref 이름 SHA [워크트리 경로]` 다 — 로컬 줄은 `refs/heads/<브랜치>`, 원격
+  줄은 `refs/remotes/origin/<브랜치>` 로 시작하고 원격 줄에는 경로 칸이 없다. 같은 이름의 태그가 있어도 이름이 바뀌지
+  않는다(`%(refname:short)` 는 그때 로컬 줄을 `heads/<브랜치>` 로 낸다 — 위 "먼저 알아 둘 것"). **줄이
   셋 이상이면 이름을 확인한다** — git은 "완전히 같거나 슬래시 앞까지 같으면" 매칭하므로 `fix/278` 을
-  물으면 `fix/278/sub` 도 나온다. **없는 ref는 조용히 생략한다**(실측) — 출력이 비면 정말 ref가 없다.
+  물으면 `refs/heads/fix/278/sub` 도 나온다. L 은 이름이 정확히 `refs/heads/<브랜치>` 인 줄, R 은 정확히
+  `refs/remotes/origin/<브랜치>` 인 줄이다. **없는 ref는 조용히 생략한다**(실측) — 출력이 비면 정말 ref가 없다.
   (`%(ahead-behind:…)` 를 쓰지 않는다 — git 2.41 미만에서는 명령 전체가 죽어 빈 출력이 "ref 없음"과
   구분되지 않는다.)
 - `%(worktreepath)` 는 **브랜치가 체크아웃된 워크트리에만** 붙는다 — 사람이 그 안에서

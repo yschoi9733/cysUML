@@ -654,15 +654,32 @@ check "residue: 옛 test/ 타입 폴더 아래 중첩 잔재" RESIDUE
 has "residue: test/ 아래 중첩 고아" "orphan $C/test/62-old"
 hasnt "residue: test 폴더를 통째로 남의 고아로 내지 않는다" "other-orphan $C/test"
 rm -rf "$C/test"
-# 바로 안에 .git 이 있으면 타입 폴더가 아니라 그 이름으로 만든 체크아웃(EnterWorktree(name: test) 등)이다 — 내려가면
-# 체크아웃 자체는 안 나오고 그 안의 폴더가 이슈 번호에 맞으면 고아로 나온다. 등록이 지워진 채 남은 모양으로 만든다.
-mkdir -p "$C/test/69-notes"
+# 바로 안에 .git 이 있으면 타입 폴더가 아니라 그 이름으로 만든 체크아웃(EnterWorktree(name: test) 등)이다 — 그 폴더를
+# 한 줄로 내고 안에서는 이 이슈 이름인 것만 본다. 안의 다른 폴더(src)를 남의 고아로 내면 체크아웃 자체는 안 보이고
+# 조각들이 고아처럼 나오고, 안을 아예 안 보면 그 안에 남은 이 이슈의 옛 중첩 잔재를 놓친다(이전 셀프 리뷰 두 번).
+# 등록이 지워진 채 남은 모양으로 만든다.
+mkdir -p "$C/test/69-old" "$C/test/src"
 printf 'gitdir: %s\n' "$R/.git/worktrees/test" > "$C/test/.git"
 run "$R" "$S/residue.sh" 69
-check "residue: .git 이 든 test 체크아웃에는 내려가지 않는다" CLEAN
+check "residue: .git 이 든 test 체크아웃 안의 이 이슈 잔재" RESIDUE
+has "residue: 그 안의 이 이슈 폴더는 고아" "orphan $C/test/69-old"
 has "residue: 그 체크아웃은 한 줄로 남의 고아" "other-orphan $C/test"
-hasnt "residue: 그 안의 폴더를 고아로 내지 않는다" "orphan $C/test/69-notes"
+hasnt "residue: 그 안의 다른 폴더를 남의 고아로 내지 않는다" "other-orphan $C/test/src"
+run "$R" "$S/residue.sh" 99
+has "residue: 다른 이슈 조사에도 체크아웃은 한 줄" "other-orphan $C/test"
+hasnt "residue: 다른 이슈 조사에 그 안의 폴더를 내지 않는다" "other-orphan $C/test/69-old"
 rm -rf "$C/test"
+# 번호를 앞자리 0 째로 받던 옛 실행이 만든 이름도 이 이슈 것이다 — 지금은 0 을 떼고 부르므로 판별식이 0 을 허용한다.
+g branch fix/081-padded origin/main
+mkdir -p "$C/fix+0081-padded"
+run "$R" "$S/residue.sh" 81
+check "residue: 앞자리 0 이 든 옛 이름" RESIDUE
+has "residue: 그 브랜치" "branch fix/081-padded"
+has "residue: 그 고아" "orphan $C/fix+0081-padded"
+run "$R" "$S/residue.sh" 1
+hasnt "residue: 0 을 허용해도 81 은 1 이 아님" "branch fix/081-padded"
+g branch -D fix/081-padded
+rmdir "$C/fix+0081-padded"
 # 옛 중첩 디렉터리 안의 잔재가 링크여도 잡는다 — 바깥 스캔만 링크를 보면 CLEAN 이 된다(이전 codex 지적).
 mkdir -p "$T/linked-target2"
 ln -s "$T/linked-target2" "$C/fix/60-linked"
@@ -682,6 +699,9 @@ g tag fix/42-tagged origin/main
 run "$R" "$S/residue.sh" 42
 has "residue: 같은 이름 태그가 있어도 브랜치 이름 그대로" "branch fix/42-tagged"
 hasnt "residue: heads/ 접두어가 붙지 않는다" "branch heads/fix/42-tagged"
+# 잔재 조사·머지 정리의 for-each-ref 도 같은 이유로 %(refname) 을 쓴다 — 문서의 명령 그대로다.
+OUT=$(git -C "$R" for-each-ref --format='%(refname) %(objectname) %(worktreepath)' "refs/heads/fix/42-tagged" "refs/remotes/origin/fix/42-tagged")
+has_prefix "for-each-ref: 태그가 있어도 로컬 줄은 전체 이름" "refs/heads/fix/42-tagged [0-9a-f]\{40\} *$"
 # detached·bisect 중인 워크트리에서 부르면 git branch -a 는 유사 줄을 내는데(실측), 그 안의 브랜치 이름이
 # 판별식에 걸려 없는 브랜치를 잔재로 보고하면 안 된다. 유사 줄에 브랜치 이름이 들어가려면 브랜치에 붙어
 # 있다가 그 이름으로 detach 해야 한다(실측: 이미 detached 면 같은 명령을 쳐도 sha 형태 그대로다).
@@ -1171,6 +1191,7 @@ mkdir -p "$T/ign-cdpath/fix+61-ign"
 run "$C" -c 'CDPATH="$1" bash "$2" fix+61-ign' _ "$T/ign-cdpath" "$S/ignored-check.sh"
 check "ignored: CDPATH 가 있어도 작업 디렉터리 기준" KEEP
 has "ignored: CDPATH 쪽이 아니라 그 워크트리를 판정" "keep diagrams/"
+rm -rf "$T/ign-cdpath"
 # - 로 시작하는 상대경로도 판정한다 — cd 가 옵션(-66…)이나 OLDPWD(- 하나)로 읽어 들어가지 못했다.
 add "$CC/-66-dash" fix/66-dash
 add "$CC/-" fix/68-lone-dash
@@ -2097,6 +2118,13 @@ if [ -z "$OUT" ]; then ok; else bad "문서: 디렉터리만 모으는 옛 find 
 for want in '`OTHER_FILES` 이고, `other-more` 줄이 없고, 사람이' '`OTHER_FILES` 이고 `other-more` 줄 없이 `other` 목록이'; do
   if LC_ALL=C grep -Fq -- "$want" "$SKILL_DIR/references/worktree.md"; then ok; else bad "문서: 고아 재확인은 other-more 줄까지 본다" "$want"; fi
 done
+# L·R 을 받는 for-each-ref 는 전체 ref 이름을 낸다 — %(refname:short) 는 같은 이름의 태그가 있으면 로컬 줄을 heads/<브랜치>
+# 로 내, 줄이 셋 이상일 때 L 을 못 알아보고 "없음"으로 읽을 수 있다(위 "for-each-ref" 테스트).
+for f in "$SKILL_DIR/references/worktree.md" "$SKILL_DIR/references/merge-cleanup.md"; do
+  if LC_ALL=C grep -Fq -- "git for-each-ref --format='%(refname) %(objectname) %(worktreepath)'" "$f"; then ok; else bad "문서: L·R 을 받는 for-each-ref 는 전체 이름을 낸다" "$f"; fi
+done
+OUT=$(LC_ALL=C grep -nF -- "--format='%(refname:short)" "${DOCS[@]}")
+if [ -z "$OUT" ]; then ok; else bad "문서: 짧은 이름을 내는 옛 for-each-ref 가 남지 않았다" "$OUT"; fi
 
 # 판정 스크립트와 이 테스트는 실행 권한을 둔다(lib.sh 는 불러오기만 하므로 뺀다) — 파일을 새로 써서 바꿔 끼우면 권한이
 # 빠진 채 커밋된다(이전 셀프 리뷰). 작업 트리의 권한과, git 이 인덱스에 올려 둔 모드(올렸으면)를 둘 다 본다 — 작업
