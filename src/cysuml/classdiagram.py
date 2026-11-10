@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from . import text as T
-from .canvas import SCALE, Canvas, Point
+from .canvas import BG_MARGIN, SCALE, Canvas, Point
 
 CLASS_KINDS = ("class", "abstract", "interface", "enum")
 RELATION_KINDS = ("association", "aggregation", "composition", "generalization", "realization", "dependency")
@@ -45,7 +45,12 @@ BOTTOM = 4
 
 DASH = (5, 4)
 TRIANGLE = (18, 9)  # 상속·실체화 빈 삼각형의 길이와 반폭
-NAME_DISTANCE = 15
+DIAMOND = 18        # 집합·합성 마름모 길이(그림판 기본값)
+ARROW = 10          # 열린 화살촉 길이(그림판 기본값)
+MAX_LINE = 200_000  # 관계선 하나의 길이 상한 — 그림판 점선 칸 수 상한(MAX_DASHES × 무늬)보다 넉넉히 작게
+
+NAME_GAP = 8        # 이름 글자 상자와 선 사이
+LABEL_CLEAR = BG_MARGIN + 1  # 선 글자의 흰 바탕이 선에 닿지 않게 글자 상자를 이만큼 넓혀 선과 견준다
 MULT_ANGLES = (math.pi / 8, math.pi / 6, math.pi / 4, math.pi / 3)
 MULT_DISTANCES = (20, 25, 30, 35, 40, 50)
 MULT_ENOUGH = 20    # 상자와 이만큼 떨어지면 더 멀리 두지 않고 선 끝에 가까운 자리를 고른다
@@ -83,7 +88,7 @@ class ClassBox:
     @property
     def keyword(self) -> Optional[str]:
         words = {"interface": ["interface"], "enum": ["enumeration"]}.get(self.kind, [])
-        if self.stereotype:
+        if self.stereotype and self.stereotype not in words:
             words.append(self.stereotype)
         return f"«{', '.join(words)}»" if words else None
 
@@ -217,13 +222,17 @@ class _Reader:
         return T.normalize(v)
 
     def number(self, v, path: str, least: float = -COORD_LIMIT) -> Optional[float]:
-        if not isinstance(v, numbers.Real) or isinstance(v, bool) or not math.isfinite(v):
+        try:
+            f = float(v) if isinstance(v, numbers.Real) and not isinstance(v, bool) else math.nan
+        except OverflowError:  # float으로 못 바꾸는 큰 정수(JSON 정수는 자릿수 제한이 없다)
+            f = math.inf
+        if math.isnan(f):
             self.fail(path, f"수여야 한다(받은 값 {_show(v)})")
             return None
-        if not least <= v <= COORD_LIMIT:
-            self.fail(path, f"{least:g}~{COORD_LIMIT:g} 사이여야 한다(받은 값 {v:g})")
+        if not least <= f <= COORD_LIMIT:
+            self.fail(path, f"{least:g}~{COORD_LIMIT:g} 사이여야 한다(받은 값 {_show(v)})")
             return None
-        return float(v)
+        return f
 
     def choice(self, v, path: str, options: tuple[str, ...]) -> Optional[str]:
         if not isinstance(v, str) or v not in options:
@@ -290,7 +299,7 @@ class _Reader:
         o = self.obj(v, path, CLASS_FIELDS, ("name", "left", "top"))
         if o is None:
             return None, None
-        name =self.text(o["name"], _at(path, "name"), bold=True) if "name" in o else None
+        name = self.text(o["name"], _at(path, "name"), bold=True) if "name" in o else None
         kind = self.choice(o["kind"], _at(path, "kind"), CLASS_KINDS) if "kind" in o else "class"
         stereotype = None
         if "stereotype" in o:
@@ -321,7 +330,7 @@ class _Reader:
         o = self.obj(v, path, RELATION_FIELDS, ("kind", "from", "to"))
         if o is None:
             return None
-        kind =self.choice(o["kind"], _at(path, "kind"), RELATION_KINDS) if "kind" in o else None
+        kind = self.choice(o["kind"], _at(path, "kind"), RELATION_KINDS) if "kind" in o else None
         source = self.text(o["from"], _at(path, "from")) if "from" in o else None
         target = self.text(o["to"], _at(path, "to")) if "to" in o else None
         name = self.text(o["name"], _at(path, "name")) if "name" in o else None
@@ -344,8 +353,8 @@ class _Reader:
             if q is not None and via and q == via[-1]:
                 self.fail(_at(_at(path, "via"), i), f"앞 꺾는 점과 같다 {q}")
             via.append(q)
-        if source is not None and source == target and not via:
-            self.fail(path, "자기 자신으로 가는 관계는 꺾는 점(via)이 있어야 그릴 수 있다")
+        if source is not None and source == target and len(via) < 2:
+            self.fail(path, "자기 자신으로 가는 관계는 꺾는 점(via)이 둘 이상 있어야 고리로 그릴 수 있다")
         if len(self.problems) > before:
             return None
         return Relation(kind, source, target, name, mults[0], mults[1], navigable, tuple(via))
@@ -437,72 +446,143 @@ def _center(rect: T.Box) -> Point:
     return (rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2
 
 
-def middle_label(points: tuple[Point, ...], distance: float = NAME_DISTANCE) -> Point:
-    """이름 글자의 가운데: 가운데 구간(점이 짝수 개면 그 중점, 홀수 개면 가운데 꺾는 점)에서 다음 점으로 가는 방향의
-    왼쪽(오른쪽으로 가는 가로선이면 위)으로 distance."""
-    n = len(points)
-    mid = n // 2
-    if n % 2 == 0:
-        (x1, y1), (x2, y2) = points[mid - 1], points[mid]
-        ax, ay = (x1 + x2) / 2, (y1 + y2) / 2
-    else:
-        (x1, y1), (x2, y2) = points[mid], points[mid + 1]
-        ax, ay = x1, y1
-    ln = math.hypot(x2 - x1, y2 - y1) or 1
-    return ax + (y2 - y1) / ln * distance, ay - (x2 - x1) / ln * distance
+def name_spots(points: tuple[Point, ...], text: str) -> list[Point]:
+    """이름 글자 가운데의 후보: 가장 긴 구간(길이가 같으면 앞 구간)의 가운데에서, 진행 방향의 왼쪽(오른쪽으로 가는
+    가로선이면 위)과 오른쪽으로 글자 상자가 선과 NAME_GAP만큼 떨어지는 자리. 꺾는 점에서 먼 곳이라 다른 구간에 덜 걸린다."""
+    k = max(range(len(points) - 1), key=lambda j: (math.dist(points[j], points[j + 1]), -j))
+    (x1, y1), (x2, y2) = points[k], points[k + 1]
+    ln = math.dist(points[k], points[k + 1])
+    ux, uy = (x2 - x1) / ln, (y2 - y1) / ln
+    b = T.place(0, 0, text, False, "mm").box
+    out = []
+    for nx, ny in ((uy, -ux), (-uy, ux)):
+        reach = max(cx * nx + cy * ny for cx in (b[0], b[2]) for cy in (b[1], b[3]))
+        out.append(((x1 + x2) / 2 + nx * (reach + NAME_GAP), (y1 + y2) / 2 + ny * (reach + NAME_GAP)))
+    return out
+
+
+def multiplicity_spots(end: Point, toward: Point) -> list[Point]:
+    """다중도 글자 가운데의 후보: 선 끝 end에서 선 방향(end→toward)을 MULT_ANGLES만큼 양쪽으로 돌린 쪽으로
+    MULT_DISTANCES만큼 떨어진 자리. 선 끝에 가까운 것부터 늘어놓는다."""
+    th = math.atan2(toward[1] - end[1], toward[0] - end[0])
+    return [(end[0] + d * math.cos(th - turn), end[1] + d * math.sin(th - turn))
+            for d in MULT_DISTANCES for a in MULT_ANGLES for turn in (a, -a)]
 
 
 def _gap(a: T.Box, b: T.Box) -> float:
-    """두 상자 사이 거리. 겹치면 -1."""
+    """두 상자 사이 거리. 겹치거나 맞닿으면 -1."""
     dx = max(b[0] - a[2], a[0] - b[2], 0)
     dy = max(b[1] - a[3], a[1] - b[3], 0)
     return -1 if dx == 0 and dy == 0 else math.hypot(dx, dy)
 
 
-def multiplicity_at(end: Point, toward: Point, text: str, boxes: list[T.Box]) -> Point:
-    """다중도 글자의 가운데. 선 끝 end에서 선 방향(end→toward)을 MULT_ANGLES만큼 양쪽으로 돌린 쪽으로 MULT_DISTANCES만큼
-    떨어진 자리 가운데, 상자에서 가장 먼 곳을 고른다. MULT_ENOUGH 넘게 떨어진 자리가 여럿이면 선 끝에 가까운 곳이다."""
-    th = math.atan2(toward[1] - end[1], toward[0] - end[0])
-    best: Optional[tuple[tuple[float, float], Point]] = None
-    for a in MULT_ANGLES:
-        for turn in (a, -a):
-            for d in MULT_DISTANCES:
-                p = end[0] + d * math.cos(th - turn), end[1] + d * math.sin(th - turn)
-                box = T.place(p[0], p[1], text, False, "mm").box
-                score = (min(min((_gap(box, b) for b in boxes), default=MULT_ENOUGH), MULT_ENOUGH), -d)
-                if best is None or score > best[0]:
-                    best = score, p
-    assert best is not None
-    return best[1]
+def _grow(rect: T.Box, m: float) -> T.Box:
+    return rect[0] - m, rect[1] - m, rect[2] + m, rect[3] + m
+
+
+def _hits(p: Point, q: Point, rect: T.Box) -> bool:
+    """선분 pq가 상자 rect를 지나거나 닿는지."""
+    lo, hi = 0.0, 1.0
+    for a, d, low, high in ((p[0], q[0] - p[0], rect[0], rect[2]), (p[1], q[1] - p[1], rect[1], rect[3])):
+        if d == 0:
+            if not low <= a <= high:
+                return False
+            continue
+        t1, t2 = sorted(((low - a) / d, (high - a) / d))
+        lo, hi = max(lo, t1), min(hi, t2)
+        if lo > hi:
+            return False
+    return True
+
+
+class _Spots:
+    """선 글자의 자리를 고른다. 상자에 겹치지 않는 자리, 그 가운데 선(어느 관계선이든)과 앞서 놓은 선 글자에 닿지 않는
+    자리, 그 가운데 상자에서 먼(MULT_ENOUGH까지) 자리가 낫고, 같으면 후보 목록의 앞쪽이다."""
+
+    def __init__(self, boxes: list[T.Box], lines: list[tuple[Point, ...]]):
+        self.boxes = boxes
+        self.segments = [s for pts in lines for s in zip(pts, pts[1:])]
+        self.labels: list[T.Box] = []
+
+    def pick(self, text: str, candidates: list[Point]) -> Point:
+        best = None
+        for p in candidates:
+            box = T.place(p[0], p[1], text, False, "mm").box
+            wide = _grow(box, LABEL_CLEAR)
+            gap = min(_gap(box, b) for b in self.boxes)
+            clear = not any(_hits(a, b, wide) for a, b in self.segments) and all(_gap(wide, x) >= 0 for x in self.labels)
+            score = (gap >= 0, clear, min(gap, MULT_ENOUGH))
+            if best is None or score > best[0]:
+                best = score, p, box
+        assert best is not None
+        self.labels.append(best[2])
+        return best[1]
+
+
+def shape_lengths(r: Relation) -> tuple[float, float]:
+    """선 처음(from)과 끝(to)에 그리는 모양이 선을 따라 차지하는 길이."""
+    if r.kind in ("generalization", "realization"):
+        return 0, TRIANGLE[0]
+    if r.kind == "dependency":
+        return 0, ARROW
+    start = DIAMOND if r.kind != "association" else ARROW if r.navigable in ("from", "both") else 0
+    return start, ARROW if r.navigable in ("to", "both") else 0
+
+
+def _route(r: Relation, a: T.Box, b: T.Box, path: str) -> tuple[Optional[tuple[Point, ...]], list[str]]:
+    """관계선의 점들(선 끝은 상자 가운데에서 첫·마지막 꺾는 점으로, 꺾는 점이 없으면 다른 상자 가운데로 가는 선이 상자
+    변과 만나는 곳)과, 그렇게 그을 수 없으면 그 까닭들."""
+    ca, cb = _center(a), _center(b)
+    if r.via:
+        start, end = _exit(a, ca, r.via[0]), _exit(b, cb, r.via[-1])
+        problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} 상자 {name!r}({_fmt_rect(rect)}) 안이나 "
+                    "변 위에 있다 — 상자 밖으로 옮긴다"
+                    for p, rect, name, j, key in ((start, a, r.source, 0, "from"), (end, b, r.target, len(r.via) - 1, "to"))
+                    if p is None]
+        if problems:
+            return None, problems
+    else:
+        start, end = _exit(a, ca, cb), _exit(b, cb, ca)
+        if start is None or end is None or (end[0] - start[0]) * (cb[0] - ca[0]) + (end[1] - start[1]) * (cb[1] - ca[1]) <= 0:
+            return None, [f"{path}: 상자 {r.source!r}와 {r.target!r}가 겹치거나 맞닿아 둘 사이에 선을 그을 자리가 없다 — "
+                          "떼어 놓거나 상자 밖을 도는 꺾는 점(via)을 준다"]
+    assert start is not None and end is not None
+    points = (start, *r.via, end)
+    if start == end:
+        return None, [f"{path}: 선의 두 끝이 같은 점 {start}이다 — 첫·마지막 꺾는 점을 상자의 다른 쪽으로 옮긴다"]
+    lengths = [math.dist(p, q) for p, q in zip(points, points[1:])]
+    head, tail = shape_lengths(r)
+    problems = []
+    if len(lengths) == 1 and lengths[0] < head + tail:
+        problems.append(f"{path}: 선 길이 {lengths[0]:.1f}가 양 끝 모양 길이({head:g}+{tail:g})보다 짧다 — 상자를 더 떼어 놓는다")
+    elif len(lengths) > 1:
+        for length, need, key, which in ((lengths[0], head, "from", "첫"), (lengths[-1], tail, "to", "마지막")):
+            if length < need:
+                problems.append(f"{path}: {key} 쪽 끝 구간 길이 {length:.1f}가 끝 모양 길이({need:g})보다 짧다 — "
+                                f"{which} 꺾는 점을 상자에서 더 떼어 놓는다")
+    if sum(lengths) > MAX_LINE:
+        problems.append(f"{path}: 선 길이 {sum(lengths):.0f}가 {MAX_LINE}을 넘는다 — 상자를 가까이 모은다")
+    return (None if problems else points), problems
 
 
 def layout(diagram: Diagram) -> Layout:
-    """상자 크기, 선의 점들, 선 글자 자리를 잡는다. 선을 그릴 수 없는 배치면(꺾는 점이 상자 안이거나 두 상자가 너무
-    겹친다) 모두 모아 InputError."""
+    """상자 크기, 선의 점들, 선 글자 자리를 잡는다. 선을 그을 수 없는 배치면(꺾는 점이 상자 안이다, 두 상자가 겹치거나
+    맞닿았다, 끝 구간이 끝 모양보다 짧다 등) 모두 모아 InputError. 선 글자는 관계 순서대로 이름 → from 다중도 → to 다중도
+    차례로 놓고, 앞서 놓은 글자를 뒤 글자가 피한다."""
     placed = tuple(PlacedBox(b, *fit(b)) for b in diagram.classes)
     by_name = {p.box.name: p for p in placed}
-    rects = [p.rect for p in placed]
-    used = set(by_name)
-    problems = []
-    out = []
+    problems: list[str] = []
+    routes = []
     for i, r in enumerate(diagram.relations):
-        path = _at("relations", i)
-        a, b = by_name[r.source].rect, by_name[r.target].rect
-        ca, cb = _center(a), _center(b)
-        first, last = (r.via[0], r.via[-1]) if r.via else (cb, ca)
-        start, end = _exit(a, ca, first), _exit(b, cb, last)
-        if r.via:
-            for p, rect, name, j, key in ((start, a, r.source, 0, "from"), (end, b, r.target, len(r.via) - 1, "to")):
-                if p is None:
-                    problems.append(f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} 상자 {name!r}"
-                                    f"({_fmt_rect(rect)}) 안이나 변 위에 있다 — 상자 밖으로 옮긴다")
-        elif start is None or end is None:
-            inner, outer = (r.target, r.source) if start is None else (r.source, r.target)
-            problems.append(f"{path}: 상자 {inner!r}의 가운데가 상자 {outer!r} 안에 있어 둘 사이 선을 그릴 수 없다 — "
-                            "두 상자를 떼어 놓는다")
-        if start is None or end is None:
-            continue
-        points = (start, *r.via, end)
+        points, found = _route(r, by_name[r.source].rect, by_name[r.target].rect, _at("relations", i))
+        problems += found
+        routes.append(points)
+    if problems:
+        raise InputError(problems)
+    spots = _Spots([p.rect for p in placed], routes)
+    used = set(by_name)
+    out = []
+    for r, points in zip(diagram.relations, routes):
         owner = base = f"{r.source}->{r.target}"
         n = 2
         while owner in used:
@@ -510,14 +590,12 @@ def layout(diagram: Diagram) -> Layout:
         used.add(owner)
         labels = []
         if r.name:
-            labels.append(Label("name", r.name, *middle_label(points)))
+            labels.append(Label("name", r.name, *spots.pick(r.name, name_spots(points, r.name))))
         for role, text, tip, toward in (("from_multiplicity", r.source_multiplicity, points[0], points[1]),
                                         ("to_multiplicity", r.target_multiplicity, points[-1], points[-2])):
             if text:
-                labels.append(Label(role, text, *multiplicity_at(tip, toward, text, rects)))
+                labels.append(Label(role, text, *spots.pick(text, multiplicity_spots(tip, toward))))
         out.append(PlacedRelation(r, owner, points, tuple(labels)))
-    if problems:
-        raise InputError(problems)
     return Layout(placed, tuple(out))
 
 
@@ -586,5 +664,6 @@ def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
 
 
 def render(data: Any, scale: float = SCALE) -> Drawing:
-    """JSON을 읽어 그린다. PNG는 Drawing.canvas.save(경로)나 to_image()로 얻는다."""
+    """JSON을 읽어 그린다. PNG는 Drawing.canvas.save(경로)나 to_image()로 얻는다 — 그 배율로 그리기에 그림이 너무 크면
+    그 둘이 ValueError를 낸다(canvas.MAX_PIXELS)."""
     return draw(parse(data), scale)

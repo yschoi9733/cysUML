@@ -173,6 +173,15 @@ def test_member_text_from_objects_and_strings():
         "Shop", "+id: Long", "count", "#tag: String = \"a\"", "+find(id: Long, all: bool): Item", "~reset()"]
 
 
+@pytest.mark.parametrize("box, keyword", [
+    ({"kind": "interface", "stereotype": "interface"}, "«interface»"),
+    ({"kind": "enum", "stereotype": "enumeration"}, "«enumeration»"),
+    ({"kind": "enum", "stereotype": "flags"}, "«enumeration, flags»"),
+])
+def test_stereotype_that_repeats_the_kind_is_written_once(box, keyword):
+    assert C.parse({"classes": [{"name": "X", "left": 0, "top": 0, **box}]}).classes[0].keyword == keyword
+
+
 @pytest.mark.parametrize("box, texts, height", [
     ({"kind": "interface"}, [("«interface»", False, 12), ("X", True, 27)], 42),
     ({"kind": "interface", "stereotype": "remote", "operations": ["+go()"]},
@@ -202,19 +211,40 @@ def test_interface_and_enum_hide_empty_sections_but_class_keeps_them():
     assert section_lines({"kind": "enum", "operations": ["+of()"]}) == 2
 
 
-def test_association_name_sits_left_of_the_line_middle():
+def touches_a_line(drawing, box):
+    wide = C._grow(box, C.LABEL_CLEAR)
+    return any(C._hits(p, q, wide) for r in drawing.layout.relations for p, q in zip(r.points, r.points[1:]))
+
+
+def test_association_name_sits_above_the_middle_of_a_rightward_line():
     d = C.render(two_boxes(kind="association", name="places"))
     (name,) = [t for t in owned(d, "A->B", Text)]
-    assert (name.text, name.x, name.y, name.anchor, name.bg) == ("places", 195, 9, "mm", True)
-    assert d.layout.relations[0].labels == (C.Label("name", "places", 195, 9),)
+    assert (name.text, name.x, name.anchor, name.bg) == ("places", 195, "mm", True)
+    assert name.box[3] == pytest.approx(24 - C.NAME_GAP)
+    assert d.layout.relations[0].labels == (C.Label("name", "places", name.x, name.y),)
 
 
-def test_name_on_middle_bend_and_on_other_kinds():
-    d = C.render(two_boxes(kind="dependency", name="«use»", via=[[200, 100]]))
+def test_name_on_a_vertical_line_clears_it_by_the_gap():
+    d = C.render({"classes": [{"name": "A", "left": 0, "top": 0, "width": 100, "height": 60},
+                              {"name": "B", "left": 0, "top": 200, "width": 100, "height": 60}],
+                  "relations": [{"kind": "association", "from": "A", "to": "B", "name": "owns"}]})
     (name,) = owned(d, "A->B", Text)
-    points = d.layout.relations[0].points
-    assert len(points) == 3 and (name.x, name.y) == pytest.approx(C.middle_label(points))
-    assert math.dist((name.x, name.y), (200, 100)) == pytest.approx(C.NAME_DISTANCE)
+    assert name.y == pytest.approx(130)
+    assert name.box[0] == pytest.approx(50 + C.NAME_GAP)  # 아래로 가는 선의 왼쪽은 화면 오른쪽
+    assert not touches_a_line(d, name.box)
+
+
+def test_name_goes_on_the_longest_segment_and_other_side_if_blocked():
+    d = C.render(two_boxes(kind="dependency", name="«use»", via=[[150, 200], [450, 200]]))
+    (name,) = owned(d, "A->B", Text)
+    assert name.x == pytest.approx(300) and name.y < 200
+    assert not touches_a_line(d, name.box)
+
+    blocked = two_boxes(kind="dependency", name="«use»", via=[[150, 200], [450, 200]])
+    blocked["classes"].append({"name": "Lid", "left": 270, "top": 150, "width": 60, "height": 40})
+    d2 = C.render(blocked)
+    (name2,) = owned(d2, "A->B", Text)
+    assert name2.y > 200 and not touches_a_line(d2, name2.box)
 
 
 def test_multiplicities_avoid_boxes():
@@ -234,6 +264,22 @@ def test_multiplicities_avoid_boxes():
     assert one.y > 24
     assert all(C._gap(one.box, p.rect) > 0 for p in d2.layout.boxes)
     assert labels["1"].y < 24
+
+
+def test_multiplicities_keep_off_lines_and_each_other():
+    d = C.render({"classes": [{"name": "A", "left": 0, "top": 0, "width": 100, "height": 60},
+                              {"name": "B", "left": 0, "top": 200, "width": 100, "height": 60},
+                              {"name": "C", "left": 200, "top": 200, "width": 100, "height": 60}],
+                  "relations": [{"kind": "association", "from": "A", "to": "B", "name": "owns",
+                                 "from_multiplicity": "0..*", "to_multiplicity": "1..*"},
+                                {"kind": "association", "from": "A", "to": "C",
+                                 "from_multiplicity": "0..*", "to_multiplicity": "1"}]})
+    labels = [t for t in d.canvas.records if isinstance(t, Text) and t.bg]
+    assert len(labels) == 5
+    for i, t in enumerate(labels):
+        assert not touches_a_line(d, t.box), t.text
+        assert all(C._gap(t.box, p.rect) >= 0 for p in d.layout.boxes), t.text
+        assert all(C._gap(C._grow(t.box, C.LABEL_CLEAR), u.box) >= 0 for u in labels[:i]), t.text
 
 
 def test_relation_owners_are_unique():
@@ -309,7 +355,10 @@ def cls0(**fields):
     (rel(kind="dependency", navigable="to"), "relations[0].navigable: 방향은 연관·집합·합성에만 쓴다"),
     (rel(kind="composition", navigable="both"), "relations[0].navigable: 집합·합성은 마름모가 있는 from 쪽에"),
     (rel(navigable="forward"), "relations[0].navigable: 'to' · 'from' · 'both' · 'none' 가운데 하나여야 한다"),
-    (rel(to="A"), "relations[0]: 자기 자신으로 가는 관계는 꺾는 점(via)이 있어야"),
+    (rel(to="A"), "relations[0]: 자기 자신으로 가는 관계는 꺾는 점(via)이 둘 이상 있어야"),
+    (rel(to="A", via=[[200, 24]]), "relations[0]: 자기 자신으로 가는 관계는 꺾는 점(via)이 둘 이상 있어야"),
+    (cls0(left=10 ** 400), "classes[0].left: -1e+06~1e+06 사이여야 한다(받은 값 1000"),
+    (cls0(left=float("inf")), "classes[0].left: -1e+06~1e+06 사이여야 한다(받은 값 inf)"),
     (rel(via=[[1]]), "relations[0].via[0]: [x, y]여야 한다"),
     (rel(via=[[1, "2"]]), "relations[0].via[0][1]: 수여야 한다"),
     (rel(via=[[150, 100], [150, 100]]), "relations[0].via[1]: 앞 꺾는 점과 같다 (150.0, 100.0)"),
@@ -349,7 +398,17 @@ def test_all_problems_are_reported_at_once():
     (rel(via=[[10, 10]]), "relations[0].via[0]: 꺾는 점 (10.0, 10.0)이 from 상자 'A'(0, 0, 90×48) 안이나 변 위에 있다"),
     (rel(via=[[150, 100], [300, 24]]), "relations[0].via[1]: 꺾는 점 (300.0, 24.0)이 to 상자 'B'"),
     (lambda d: d["classes"][1].update(left=20, top=10) or rel()(d),
-     "relations[0]: 상자 'B'의 가운데가 상자 'A' 안에 있어 둘 사이 선을 그릴 수 없다"),
+     "relations[0]: 상자 'A'와 'B'가 겹치거나 맞닿아 둘 사이에 선을 그을 자리가 없다"),
+    (lambda d: d["classes"][1].update(left=90) or rel(navigable="none")(d), "relations[0]: 상자 'A'와 'B'가 겹치거나 맞닿아"),
+    (lambda d: d["classes"][1].update(left=60) or rel()(d), "relations[0]: 상자 'A'와 'B'가 겹치거나 맞닿아"),
+    (lambda d: d["classes"][1].update(left=110) or rel(kind="composition")(d),
+     "relations[0]: 선 길이 20.0가 양 끝 모양 길이(18+10)보다 짧다"),
+    (rel(kind="composition", navigable="none", via=[[95, 24], [195, 200]]),
+     "relations[0]: from 쪽 끝 구간 길이 5.0가 끝 모양 길이(18)보다 짧다 — 첫 꺾는 점을"),
+    (rel(kind="generalization", via=[[195, 200], [345, 60]]),
+     "relations[0]: to 쪽 끝 구간 길이 12.0가 끝 모양 길이(18)보다 짧다 — 마지막 꺾는 점을"),
+    (lambda d: d["classes"][0].update(left=-999_000) or rel(kind="dependency")(d), "relations[0]: 선 길이 999210가 200000을 넘는다"),
+    (rel(to="A", via=[[200, 24], [300, 24]]), "relations[0]: 선의 두 끝이 같은 점 (90.0, 24.0)이다"),
 ])
 def test_layout_refuses_lines_it_cannot_draw(change, expected):
     diagram = C.parse(mutate(change))
