@@ -647,30 +647,13 @@ hasnt "residue: 같은 워크트리를 다른 표기로 또 내지 않음" "work
 run "$R" "$S/residue.sh" 11
 check "residue: 옛 중첩 잔재" RESIDUE
 has "residue: 중첩 고아" "orphan $C/fix/11-nested"
-# 옛 test/ 타입 폴더 아래도 본다 — branch-issue.sh 가 받는 타입인데 빠지면 그 폴더가 통째로 남의 고아로만 나와 CLEAN 이다.
-mkdir -p "$C/test/62-old/src"
-run "$R" "$S/residue.sh" 62
-check "residue: 옛 test/ 타입 폴더 아래 중첩 잔재" RESIDUE
-has "residue: test/ 아래 중첩 고아" "orphan $C/test/62-old"
-hasnt "residue: test 폴더를 통째로 남의 고아로 내지 않는다" "other-orphan $C/test"
-rm -rf "$C/test"
-# 바로 안에 .git 이 있으면 타입 폴더가 아니라 그 이름으로 만든 체크아웃(EnterWorktree(name: test) 등)이다 — 그 폴더를
-# 한 줄로 내고 안에서는 이 이슈 이름이면서 자기 .git 이 있는 것(그 안에 만든 옛 중첩 워크트리)만 본다. 안의 다른 폴더(src)를
-# 남의 고아로 내면 체크아웃 자체는 안 보이고 조각들이 고아처럼 나오고, 안을 아예 안 보면 그 안에 남은 이 이슈의 옛 중첩
-# 잔재를 놓치고, .git 없는 폴더까지 보면 이름이 맞는 그 체크아웃의 내용이 고아로 나온다(이전 셀프 리뷰 세 번).
-# 등록이 지워진 채 남은 모양으로 만든다.
-mkdir -p "$C/test/69-old" "$C/test/69-content" "$C/test/src"
-printf 'gitdir: %s\n' "$R/.git/worktrees/test" > "$C/test/.git"
-printf 'gitdir: %s\n' "$R/.git/worktrees/69-old" > "$C/test/69-old/.git"
+# test/ 는 옛 타입 폴더로 보지 않는다 — 이 레포 타입이 아니고, 흔한 이름의 체크아웃(EnterWorktree(name: test))이면 안으로
+# 내려갈 때 그 조각(src·69-old …)이 고아 후보로 나온다. 폴더째 남의 고아 한 줄로 낸다(머리말).
+mkdir -p "$C/test/69-old" "$C/test/src"
 run "$R" "$S/residue.sh" 69
-check "residue: .git 이 든 test 체크아웃 안의 이 이슈 잔재" RESIDUE
-has "residue: 그 안의 이 이슈 워크트리는 고아" "orphan $C/test/69-old"
-hasnt "residue: .git 없는 폴더는 이름이 맞아도 그 체크아웃의 내용" "orphan $C/test/69-content"
-has "residue: 그 체크아웃은 한 줄로 남의 고아" "other-orphan $C/test"
-hasnt "residue: 그 안의 다른 폴더를 남의 고아로 내지 않는다" "other-orphan $C/test/src"
-run "$R" "$S/residue.sh" 99
-has "residue: 다른 이슈 조사에도 체크아웃은 한 줄" "other-orphan $C/test"
-hasnt "residue: 다른 이슈 조사에 그 안의 폴더를 내지 않는다" "other-orphan $C/test/69-old"
+check "residue: test/ 는 옛 타입 폴더가 아니다" CLEAN
+has "residue: test 폴더는 한 줄로 남의 고아" "other-orphan $C/test"
+hasnt "residue: 그 안의 폴더를 고아로 내지 않는다" "orphan $C/test/69-old"
 rm -rf "$C/test"
 # 앞자리 0 이 든 이름은 잡지 않는다(알려진 한계) — 0 을 허용하면 docs/01-intro 같은 남의 이름이 1번 이슈 잔재가 된다.
 g branch docs/01-intro origin/main

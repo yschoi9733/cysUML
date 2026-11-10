@@ -12,16 +12,14 @@
 #   규약 브랜치(fix/278-x), 평탄화한 디렉터리(fix+278-x), 옛 EnterWorktree 이름(worktree-fix+278-x)을
 #   잡고, 1278-x·feat/300-fix+278-x 는 안 잡는다. 앞자리 0 이 든 이름(fix/07-x — 번호를 0 째로 받던 옛 실행이 만들 수
 #   있었다)도 잡지 않는다(알려진 한계). branch-issue.sh 도 그 이름을 규약 밖으로 보고, 0 을 허용하면 docs/01-intro 같은
-#   남의 이름까지 1번 이슈 잔재로 잡는다(이전 셀프 리뷰).
+#   남의 이름까지 1번 이슈 잔재로 잡는다.
 # 세 가지를 훑는다:
 #   - 브랜치(로컬·원격)
 #   - .claude/worktrees 아래 디렉터리. 등록 여부는 이름이 아니라 등록된 경로와 같은 디렉터리인지(-ef)로
 #     본다 — 이름으로 맞추면 레포 밖에 같은 이름이 있을 때 진짜 고아를 놓친다. 등록이 없는 타입 이름
-#     디렉터리(feat·fix·refactor·docs·chore·test — branch-issue.sh 가 받는 타입과 같다)는 옛 중첩 잔재(fix/278-x)로
-#     보고 한 단계 더 본다. 다만 바로 안에 .git 이 있으면 그 이름으로 만든 체크아웃(EnterWorktree(name: test) 등)이라
-#     그 폴더 자체를 한 줄로 내고, 안에서는 이 이슈 이름이면서 자기 .git 이 있는 것(그 안에 만든 옛 중첩 워크트리)만
-#     본다 — 안의 다른 폴더(src·tests …)를 남의 고아로 내면 체크아웃 자체는 안 보이고 그 조각들이 고아처럼 나오고,
-#     .git 없는 폴더는 이름이 맞아도 그 체크아웃의 내용이다.
+#     디렉터리(feat·fix·refactor·docs·chore)는 옛 중첩 잔재(fix/278-x)로 보고 한 단계 더 본다. branch-issue.sh 가 받는
+#     test 는 넣지 않는다 — 이 레포 타입 라벨이 아니라 이 사본이 test/ 를 만들 일이 없고, 흔한 이름이라(EnterWorktree(name:
+#     test) 등) 안으로 내려가면 그 체크아웃의 조각이 고아 후보로 나온다.
 #     .claude 나 .claude/worktrees 가 링크를 거치면 실제 경로로 바꿔 훑는다 — 그 안의 고아는 실제 경로로 나와 레포 밖으로
 #     판정된다(지우기 전에 확인받는다). 옛 타입 폴더가 링크면 따라가지 않고 그 링크만 보고한다(안의 잔재는 놓친다 —
 #     알려진 한계).
@@ -192,27 +190,19 @@ if [ -d "$container" ]; then
     name=${d##*/}
     if ! registered_dir "$d"; then
       case "$name" in
-        feat | fix | refactor | docs | chore | test)
+        feat | fix | refactor | docs | chore)
           # 옛 타입 폴더가 링크면 따라가지 않고 아래 classify 로 그 링크만 보고한다 — 링크 너머는 레포 밖일 수
           # 있어 그 안을 고아로 내면 확인 없이 지워진다. 안의 잔재는 놓친다(알려진 한계).
           if [ ! -L "$d" ]; then
-            # 바로 안에 .git 이 있으면 그 이름의 체크아웃이다 — 안에서는 이 이슈 이름이면서 자기 .git 이 있는 것만 보고,
-            # 폴더 자체는 아래 classify 로 한 줄 낸다(머리말).
-            checkout=0
-            if [ -e "$d/.git" ] || [ -L "$d/.git" ]; then checkout=1; fi
             # 바깥 스캔처럼 링크도 받는다 — -type d 만 보면 링크로 남은 옛 잔재(fix/11-old)를 놓쳐 CLEAN 이 된다.
             find "$d" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 > "$subs" ||
               die_env "끝까지 읽지 못했다 — 사람이 직접 확인해야 한다: $d"
             nested=0
             while IFS= read -r -d '' sub; do
               nested=1
-              if [ "$checkout" = 1 ]; then
-                matches_issue "$name/${sub##*/}" || continue
-                [ -e "$sub/.git" ] || [ -L "$sub/.git" ] || continue
-              fi
               classify "$sub" "$name/${sub##*/}"
             done < "$subs"
-            [ "$nested" = 1 ] && [ "$checkout" = 0 ] && continue
+            [ "$nested" = 1 ] && continue
           fi
           ;;
       esac
