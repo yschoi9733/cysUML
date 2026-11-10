@@ -114,10 +114,11 @@ ide_local_only() {
 }
 
 # 이름만 보고 넘기지 않는다. *.pyc 밖의 것은 링크가 아닌 파일이고 이름이 <이름>.pyc.<숫자> 일 때만 넘긴다 — 숫자는
-# 범위(0-9) 대신 하나씩 적는다(lib.sh branch_unsafe 와 같은 까닭).
+# 범위(0-9) 대신 하나씩 적는다(lib.sh branch_unsafe 와 같은 까닭). 하위 디렉터리가 있으면 그것만으로 사람이 보므로
+# 바로 아래만 훑는다.
 only_pyc() {
   local f n
-  find "$1" -mindepth 1 \( ! -type f -o ! -name '*.pyc' \) -print0 > "$probe" 2>/dev/null || return 1
+  find "$1" -mindepth 1 -maxdepth 1 \( ! -type f -o ! -name '*.pyc' \) -print0 > "$probe" 2>/dev/null || return 1
   while IFS= read -r -d '' f; do
     plain_file "$f" || return 1
     n=${f##*/}

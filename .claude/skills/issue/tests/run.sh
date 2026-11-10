@@ -998,6 +998,12 @@ mkdir "$IG/src/cysuml/__pycache__/draw.cpython-312.pyc.124" || setup_fail "ignor
 run "$R" "$S/ignored-check.sh" "$IG"
 check "ignored: 임시 파일 이름의 디렉터리" KEEP
 rmdir "$IG/src/cysuml/__pycache__/draw.cpython-312.pyc.124"
+# 안에 *.pyc 만 든 하위 디렉터리여도 사람이 본다.
+mkdir "$IG/src/cysuml/__pycache__/sub" || setup_fail "ignored __pycache__ 하위 디렉터리"
+: > "$IG/src/cysuml/__pycache__/sub/draw.cpython-312.pyc"
+run "$R" "$S/ignored-check.sh" "$IG"
+check "ignored: 하위 디렉터리가 든 __pycache__" KEEP
+rm -rf "$IG/src/cysuml/__pycache__/sub"
 # 최상위 build/·dist/ 는 게이트가 만드는 자리가 아니고, .gitignore 에 걸려 사람이 둔 스크립트가 숨을 수 있다 — 사람이
 # 본다(이전 리뷰에서 나온 기준이다).
 mkdir -p "$IG/build/lib" "$IG/dist"
