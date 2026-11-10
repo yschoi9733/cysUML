@@ -974,6 +974,30 @@ run "$R" "$S/ignored-check.sh" "$IG"
 check "ignored: pyc 밖의 것이 든 __pycache__" KEEP
 has "ignored: 그 __pycache__ 줄" "keep src/cysuml/__pycache__/"
 rm -f "$IG/src/cysuml/__pycache__/notes.txt"
+# 바이트코드를 쓰다 끊긴 임시 파일(<이름>.pyc.<숫자>)은 다시 만들 수 있다 — import 와 pytest 를 SIGKILL 로 끊어 본 이름
+# 꼴 그대로다.
+: > "$IG/src/cysuml/__pycache__/draw.cpython-310.pyc.4429462048"
+: > "$IG/__pycache__/test_canvas.cpython-310-pytest-9.2.0.pyc.53332"
+run "$R" "$S/ignored-check.sh" "$IG"
+check "ignored: 끊긴 바이트코드 임시 파일" CLEAN
+rm -f "$IG/src/cysuml/__pycache__/draw.cpython-310.pyc.4429462048" "$IG/__pycache__/test_canvas.cpython-310-pytest-9.2.0.pyc.53332"
+# 꼴이 비슷해도 .pyc. 뒤가 숫자만이 아니거나 비었거나, .pyc. 앞이 비었으면 사람이 본다.
+for n in draw.cpython-310.pyc. draw.cpython-310.pyc.12a draw.cpython-310.pyc.tmp draw.cpython-310.pyc.1.2 .pyc.123 draw.pyc12; do
+  : > "$IG/src/cysuml/__pycache__/$n"
+  run "$R" "$S/ignored-check.sh" "$IG"
+  check "ignored: 임시 파일 꼴이 아닌 이름($n)" KEEP
+  has "ignored: 그 __pycache__ 줄($n)" "keep src/cysuml/__pycache__/"
+  rm -f "$IG/src/cysuml/__pycache__/$n"
+done
+# 임시 파일 이름이어도 링크·디렉터리면 사람이 본다.
+ln -s draw.cpython-312.pyc "$IG/src/cysuml/__pycache__/draw.cpython-312.pyc.123" || setup_fail "ignored 임시 파일 이름 링크"
+run "$R" "$S/ignored-check.sh" "$IG"
+check "ignored: 임시 파일 이름의 링크" KEEP
+rm -f "$IG/src/cysuml/__pycache__/draw.cpython-312.pyc.123"
+mkdir "$IG/src/cysuml/__pycache__/draw.cpython-312.pyc.124" || setup_fail "ignored 임시 파일 이름 디렉터리"
+run "$R" "$S/ignored-check.sh" "$IG"
+check "ignored: 임시 파일 이름의 디렉터리" KEEP
+rmdir "$IG/src/cysuml/__pycache__/draw.cpython-312.pyc.124"
 # 최상위 build/·dist/ 는 게이트가 만드는 자리가 아니고, .gitignore 에 걸려 사람이 둔 스크립트가 숨을 수 있다 — 사람이
 # 본다(이전 리뷰에서 나온 기준이다).
 mkdir -p "$IG/build/lib" "$IG/dist"

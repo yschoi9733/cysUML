@@ -19,7 +19,10 @@
 # 다시 만들 수 있는 것으로 치는 것은 /issue 3단계 게이트(uv sync·uv run pytest)와 IDE·하네스가 만드는 자리뿐이다:
 #   - 어느 깊이든, 안에 *.pyc 파일만 든 __pycache__ 디렉터리(파이썬이 모듈을 불러올 때 만든다 — scratchpad/ 바로 아래도
 #     그렇다. 사람이 거기 둔 도우미 스크립트를 돌려도 생기는 바이트코드 캐시라 아래 scratchpad 규칙의 "사람이 남긴 것"이
-#     아니다). *.pyc 밖의 것이 하나라도 들었으면 사람이 본다
+#     아니다). 바이트코드를 쓰다 끊긴 임시 파일 <이름>.pyc.<숫자> 도 *.pyc 와 같이 친다 — 파이썬 import 와 pytest 의
+#     단언 재작성은 임시 이름으로 다 쓴 뒤 *.pyc 로 옮기는데, 그 사이에 프로세스가 죽으면 그대로 남는다(SIGKILL 로
+#     끊어 실측 — CPython 3.10·3.14 는 <모듈>.cpython-310.pyc.4429462048 꼴, pytest 9.2.0 은
+#     <모듈>.cpython-310-pytest-9.2.0.pyc.53332 꼴). 그 밖의 것이 하나라도 들었으면 사람이 본다
 #   - 최상위 .venv·.pytest_cache 디렉터리(uv sync·uv run pytest 가 만든다)
 #   - .claude/settings.local.json 파일(하네스가 그 워크트리에서 받은 허용 설정을 적는다 — 잃어도 다시 묻는다)
 #   - scratchpad/issue-rounds·scratchpad/issue-rereview-rounds 파일(/issue 셀프 리뷰의 셈 기록 — SKILL.md 4단계 "셈 기록",
@@ -110,10 +113,21 @@ ide_local_only() {
   return 0
 }
 
-# 이름만 보고 넘기지 않는다.
+# 이름만 보고 넘기지 않는다. *.pyc 밖의 것은 링크가 아닌 파일이고 이름이 <이름>.pyc.<숫자> 일 때만 넘긴다 — 숫자는
+# 범위(0-9) 대신 하나씩 적는다(lib.sh branch_unsafe 와 같은 까닭).
 only_pyc() {
-  find "$1" -mindepth 1 \( ! -type f -o ! -name '*.pyc' \) -print -quit > "$probe" 2>/dev/null || return 1
-  [ ! -s "$probe" ]
+  local f n
+  find "$1" -mindepth 1 \( ! -type f -o ! -name '*.pyc' \) -print0 > "$probe" 2>/dev/null || return 1
+  while IFS= read -r -d '' f; do
+    plain_file "$f" || return 1
+    n=${f##*/}
+    case "$n" in
+      *.pyc. | *.pyc.*[!0123456789]*) return 1 ;;
+      ?*.pyc.*) ;;
+      *) return 1 ;;
+    esac
+  done < "$probe"
+  return 0
 }
 
 # $1 슬래시를 뗀 상대경로. 다시 만들 수 있는 자리면 참 — 파일·디렉터리 구분은 git 이 낸 모양이 아니라 plain_file·
