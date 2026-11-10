@@ -1,0 +1,24 @@
+[project]
+name = "cysuml"
+version = "0.1.0"
+description = "MCP server that draws document-ready UML diagrams: the AI lays them out, cysUML draws and checks them"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2.3.0",
+    "pillow>=10.1.0",
+]
+
+[project.scripts]
+cysuml = "cysuml.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.24,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
