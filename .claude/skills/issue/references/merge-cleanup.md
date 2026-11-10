@@ -134,7 +134,8 @@ detached 로 서 있으면 브랜치명이 비어 여기서는 안 잡히고, �
   **이슈 번호를 못 뽑았으면**(위 "어느 꼴로도 번호를 못 뽑으면") `residue.sh` 를 부를 수 없으니 컨테이너를
   통째로 훑어 보고한다 — `find -H "<레포 루트>/.claude/worktrees" -mindepth 1 -maxdepth 1 \( -type d -o -type l \)` 로
   디렉터리와 링크를 모으고(`-H` 는 컨테이너가 다른 볼륨을 가리키는 링크일 때 따라간다. `-type l` 은 디렉터리를 가리키는
-  링크 잔재가 `-type d` 에 안 걸려서 함께 받는다 — `residue.sh` 와 같다) 각각에 `bash "<스킬 디렉터리>/scripts/orphan-check.sh" "<경로>"` 를 돌려, `REGISTERED` 가 아닌
+  링크 잔재가 `-type d` 에 안 걸려서 함께 받는다 — `residue.sh` 와 같다. 파일을 가리키는 링크도 함께 나오는데, 그것도
+  아래대로 링크로 보고한다) 각각에 `bash "<스킬 디렉터리>/scripts/orphan-check.sh" "<경로>"` 를 돌려, `REGISTERED` 가 아닌
   것을 **지우지 말고 보고에 적는다.** 링크는 `REGISTERED` 여도 링크라고 보고에 적는다(링크인지는
   `test -L "<경로>" && echo link` 로 본다) — 등록된 워크트리를 가리키는 링크는 `-ef` 로 `REGISTERED` 가 나오지만 링크
   자체는 등록이 아니다. 이 절차는 링크를 지우지 않는다(위 `link` 줄 항목). porcelain 줄과 이름을 문자열로 맞추지 않는다 — 표기(NFC/NFD)가 다르면

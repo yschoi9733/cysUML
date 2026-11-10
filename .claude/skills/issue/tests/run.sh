@@ -654,6 +654,15 @@ check "residue: 옛 test/ 타입 폴더 아래 중첩 잔재" RESIDUE
 has "residue: test/ 아래 중첩 고아" "orphan $C/test/62-old"
 hasnt "residue: test 폴더를 통째로 남의 고아로 내지 않는다" "other-orphan $C/test"
 rm -rf "$C/test"
+# 바로 안에 .git 이 있으면 타입 폴더가 아니라 그 이름으로 만든 체크아웃(EnterWorktree(name: test) 등)이다 — 내려가면
+# 체크아웃 자체는 안 나오고 그 안의 폴더가 이슈 번호에 맞으면 고아로 나온다. 등록이 지워진 채 남은 모양으로 만든다.
+mkdir -p "$C/test/69-notes"
+printf 'gitdir: %s\n' "$R/.git/worktrees/test" > "$C/test/.git"
+run "$R" "$S/residue.sh" 69
+check "residue: .git 이 든 test 체크아웃에는 내려가지 않는다" CLEAN
+has "residue: 그 체크아웃은 한 줄로 남의 고아" "other-orphan $C/test"
+hasnt "residue: 그 안의 폴더를 고아로 내지 않는다" "orphan $C/test/69-notes"
+rm -rf "$C/test"
 # 옛 중첩 디렉터리 안의 잔재가 링크여도 잡는다 — 바깥 스캔만 링크를 보면 CLEAN 이 된다(이전 codex 지적).
 mkdir -p "$T/linked-target2"
 ln -s "$T/linked-target2" "$C/fix/60-linked"
