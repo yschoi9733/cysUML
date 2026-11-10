@@ -9,6 +9,7 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import groupby
 from pathlib import Path
 from typing import Optional
 
@@ -51,24 +52,24 @@ def _check(s: str) -> None:
 
 def split_runs(s: str) -> list[tuple[str, bool]]:
     """s를 같은 글꼴로 그리는 조각으로 나눈다. 조각마다 (글자들, Noto Sans KR로 그리는지)."""
-    runs: list[tuple[str, bool]] = []
-    for ch in s:
-        korean = is_korean(ch)
-        if runs and runs[-1][1] == korean:
-            runs[-1] = (runs[-1][0] + ch, korean)
-        else:
-            runs.append((ch, korean))
-    return runs
+    return [("".join(chars), korean) for korean, chars in groupby(s, key=is_korean)]
+
+
+def _open(korean: bool, bold: bool, size: float) -> ImageFont.FreeTypeFont:
+    # 어느 컴퓨터에서든 같게 그리려고 libraqm 대신 Pillow 기본 배치를 쓴다.
+    return ImageFont.truetype(str(FONT_DIR / _FILES[korean, bold]), size, layout_engine=ImageFont.Layout.BASIC)
 
 
 @lru_cache(maxsize=32)
 def font(korean: bool, bold: bool, size: float) -> ImageFont.FreeTypeFont:
-    """함께 넣은 글꼴. 어느 컴퓨터에서든 같게 그리려고 libraqm 대신 Pillow 기본 배치를 쓴다."""
-    return ImageFont.truetype(str(FONT_DIR / _FILES[korean, bold]), size, layout_engine=ImageFont.Layout.BASIC)
+    """함께 넣은 글꼴(그리는 크기용)."""
+    return _open(korean, bold, size)
 
 
+@lru_cache(maxsize=4)
 def _ref(korean: bool, bold: bool) -> ImageFont.FreeTypeFont:
-    return font(korean, bold, SIZE * _REF)
+    # 재는 기준 크기 글꼴. 그리는 크기는 배율마다 늘어나므로 font()와 캐시를 나누어 밀려나지 않게 한다.
+    return _open(korean, bold, SIZE * _REF)
 
 
 _ascent, _descent = _ref(False, False).getmetrics()

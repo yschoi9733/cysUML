@@ -166,6 +166,13 @@ def test_painter_refuses_unknown_records():
         c.to_image()
 
 
+def test_painter_stops_on_a_hand_made_dash_with_no_period():
+    c = Canvas()
+    c.records.append(Line(((0.0, 0.0), (5.0, 5.0)), (0.0, 0.0)))
+    with pytest.raises(ValueError, match="점선 무늬"):
+        c.to_image()
+
+
 def test_borders_of_boxes_and_polygons_are_centred_on_their_edges_like_lines():
     c = Canvas(8)
     c.rect(10, 10, 40, 20)

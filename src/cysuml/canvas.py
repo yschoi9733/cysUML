@@ -88,7 +88,7 @@ class Text:
 
     @property
     def box(self) -> Box:
-        """줄 상자(text.Placement.box). 칠해지는 곳을 늘 덮는다."""
+        """줄 상자(text.Placement.box). 기준 크기에서 잰 잉크를 늘 덮고, 실제로 칠해진 곳과는 1px 안쪽에서 다를 수 있다."""
         return self.placement.box
 
 
@@ -386,6 +386,8 @@ class _Painter:
         # 점선 k번째 칸은 선 처음부터의 길이로 [k·주기, k·주기 + 칠할 길이]이고, 그 안의 꺾는 점을 지나는 꺾은선으로 그린다.
         on, off = r.dash
         period = on + off
+        if not period > 0:  # Canvas.line을 거치지 않고 records에 넣은 기록 — 그대로 두면 아래 반복이 끝나지 않는다
+            raise ValueError(f"점선 무늬가 잘못된 기록이다: {r.dash}")
         done = [0.0]
         for p, q in zip(r.points, r.points[1:]):
             done.append(done[-1] + math.dist(p, q))
