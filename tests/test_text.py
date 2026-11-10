@@ -127,6 +127,15 @@ def test_ink_of_mixed_text_stays_in_line_box():
     assert p.box[1] <= t < p.baseline < b <= p.box[3]
 
 
+@pytest.mark.parametrize("s", ["Ǻ", "|", "█╬", "Order 주문 gy", "※①"])
+@pytest.mark.parametrize("bold", [False, True])
+def test_line_box_always_covers_the_ink(s, bold):
+    p = T.place(0, 0, s, bold)
+    l, t, r, b = p.ink
+    assert p.box[0] <= l and p.box[1] <= t and r <= p.box[2] and b <= p.box[3]
+    assert p.box[1] <= -(T.ASCENT + T.DESCENT) / 2 and p.box[3] >= (T.ASCENT + T.DESCENT) / 2
+
+
 def test_blank_text_has_no_ink():
     assert T.place(0, 0, "   ").ink is None
     assert T.place(0, 0, "").ink is None

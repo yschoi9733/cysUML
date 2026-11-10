@@ -118,7 +118,17 @@ def test_text_record_keeps_its_placement_and_normalized_text():
     c.text(10, 20, unicodedata.normalize("NFD", "주문 Order"), anchor="mm")
     r = c.records[-1]
     assert r.text == "주문 Order"
-    assert r.placement == T.place(10, 20, "주문 Order", anchor="mm") and r.placed() is r.placement
+    assert r.placement == T.place(10, 20, "주문 Order", anchor="mm") and r.box == r.placement.box
+    assert Text(10, 20, "주문 Order", False, "mm").placement == r.placement  # 손으로 만든 기록도 놓인다
+
+
+def test_bends_are_joined_round_in_solid_and_dashed_lines():
+    c = Canvas(8)
+    c.line([(0, 0), (10, 0), (10, 10)])
+    c.line([(30, 0), (40, 0), (40, 10)], dash=(5, 4))  # 9~14 칸이 꺾는 점(40, 0)을 지난다
+    img = c.to_image()
+    for x in (10, 40):
+        assert pixel(c, img, x + 0.3, -0.3) < 128  # 바깥 모서리가 파이지 않았다
 
 
 def test_painter_refuses_unknown_records():
@@ -216,11 +226,28 @@ def test_nothing_drawn_cannot_be_rendered():
     assert c.bounds() is None
 
 
-def test_oversized_drawing_is_rejected_before_allocating():
+@pytest.mark.parametrize("scale, pts", [(1.6, [(0, 0), (5000, 5000)]), (1e308, [(0, 0), (100, 100)]),
+                                        (1.6, [(-1e308, 0), (1e308, 0)])])
+def test_oversized_drawing_is_rejected_before_allocating(scale, pts):
+    c = Canvas(scale)
+    c.line(pts)
+    for call in (c.frame, c.to_image):
+        with pytest.raises(ValueError, match="너무 크다"):
+            call()
+
+
+def test_box_outline_coordinates_are_rounded_to_centre_the_border():
+    from cysuml.canvas import _Painter
+
+    painter = _Painter(Image.new("L", (1, 1)), 0, 0, 6.4)
+    assert painter.lw == 6
+    assert painter._outlined(10, 10, 40, 20) == [(61, 61), (322, 194)]
+
+
+def test_self_crossing_polygon_is_accepted():
     c = Canvas()
-    c.line([(0, 0), (5000, 5000)])
-    with pytest.raises(ValueError, match="너무 크다"):
-        c.to_image()
+    c.poly([(0, 0), (10, 10), (10, 0), (0, 10)])
+    assert isinstance(c.records[-1], Polygon)
 
 
 def test_invalid_input_is_rejected_without_a_record():

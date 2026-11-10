@@ -7,6 +7,7 @@ ValueError로 막는다. 그릴 때는 그린 것의 범위에 PAD만큼 여백�
 """
 from __future__ import annotations
 
+import bisect
 import math
 import numbers
 from dataclasses import dataclass, field
@@ -63,10 +64,10 @@ class Polygon:
 
 @dataclass(frozen=True)
 class Text:
-    """한 줄 글자. text는 normalize한 글자이고, box는 줄 상자(text.Placement.box)다.
+    """한 줄 글자. text는 normalize한 글자다.
 
     bg는 글자 밑에 흰 바탕을 깔았다는 뜻이고, 그 바탕은 바로 앞의 Mask다. 칠할 글자가 없으면(공백뿐) 깔지 않고 bg도
-    False다. placement는 Canvas.text가 놓은 결과로, 범위 계산과 그리기가 그대로 쓴다.
+    False다. placement는 글자를 놓은 결과로, 범위 계산과 그리기가 그대로 쓴다(주지 않으면 만들 때 놓는다).
     """
 
     x: float
@@ -74,13 +75,18 @@ class Text:
     text: str
     bold: bool
     anchor: str
-    box: Box
     bg: bool = False
     owner: Optional[str] = None
-    placement: Optional[T.Placement] = field(default=None, compare=False, repr=False)
+    placement: T.Placement = field(default=None, compare=False, repr=False)  # type: ignore[assignment]
 
-    def placed(self) -> T.Placement:
-        return self.placement or T.place(self.x, self.y, self.text, self.bold, self.anchor)
+    def __post_init__(self):
+        if self.placement is None:
+            object.__setattr__(self, "placement", T.place(self.x, self.y, self.text, self.bold, self.anchor))
+
+    @property
+    def box(self) -> Box:
+        """줄 상자(text.Placement.box). 칠해지는 곳을 늘 덮는다."""
+        return self.placement.box
 
 
 @dataclass(frozen=True)
@@ -121,6 +127,21 @@ def _points(pts: Iterable[Point], least: int) -> tuple[Point, ...]:
     return out
 
 
+def _line(pts: Iterable[Point], dash, owner: Optional[str]) -> Line:
+    pts = _points(pts, 2)
+    if all(a == b for a, b in zip(pts, pts[1:])):
+        raise ValueError(f"길이가 0인 선이다: {pts}")
+    if dash is not None:
+        try:
+            on, off = dash
+        except (TypeError, ValueError):
+            raise ValueError(f"점선 무늬는 (칠할 길이, 비울 길이)여야 한다: {dash!r}") from None
+        dash = _nums(on, off)
+        if min(dash) < MIN_DASH:
+            raise ValueError(f"점선 무늬가 너무 짧다(최소 {MIN_DASH}): {dash}")
+    return Line(pts, dash, owner)
+
+
 def _box(left, top, width, height) -> tuple[float, float, float, float]:
     out = _nums(left, top, width, height)
     if out[2] < 0 or out[3] < 0:
@@ -149,6 +170,14 @@ def _head(tip: Point, frm: Point, *sizes) -> tuple[Point, float, float, tuple[fl
     return tip, dx / n, dy / n, sizes
 
 
+def _collinear(pts: tuple[Point, ...]) -> bool:
+    (x0, y0), others = pts[0], pts[1:]
+    far = next((p for p in others if p != pts[0]), None)
+    if far is None:
+        return True
+    return all((far[0] - x0) * (y - y0) == (far[1] - y0) * (x - x0) for x, y in others)
+
+
 class Canvas:
     def __init__(self, scale: float = SCALE):
         (scale,) = _nums(scale)
@@ -159,18 +188,7 @@ class Canvas:
 
     def line(self, pts: Iterable[Point], dash: Optional[tuple[float, float]] = None, owner: Optional[str] = None) -> None:
         """dash=(칠할 길이, 비울 길이)이면 점선이다(둘 다 MIN_DASH 이상). 무늬는 꺾는 점을 지나도 이어진다."""
-        pts = _points(pts, 2)
-        if all(a == b for a, b in zip(pts, pts[1:])):
-            raise ValueError(f"길이가 0인 선이다: {pts}")
-        if dash is not None:
-            try:
-                on, off = dash
-            except (TypeError, ValueError):
-                raise ValueError(f"점선 무늬는 (칠할 길이, 비울 길이)여야 한다: {dash!r}") from None
-            dash = _nums(on, off)
-            if min(dash) < MIN_DASH:
-                raise ValueError(f"점선 무늬가 너무 짧다(최소 {MIN_DASH}): {dash}")
-        self.records.append(Line(pts, dash, owner))
+        self.records.append(_line(pts, dash, owner))
 
     def rect(self, left: float, top: float, width: float, height: float, fill: Optional[str] = "white",
              owner: Optional[str] = None) -> None:
@@ -182,9 +200,8 @@ class Canvas:
 
     def poly(self, pts: Iterable[Point], fill: Optional[str] = "white", owner: Optional[str] = None) -> None:
         pts = _points(pts, 3)
-        area2 = sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]))
-        if area2 == 0:
-            raise ValueError(f"넓이가 0인 다각형이다: {pts}")
+        if _collinear(pts):
+            raise ValueError(f"모든 점이 한 줄 위에 있어 넓이가 없는 다각형이다: {pts}")
         self.records.append(Polygon(pts, _fill(fill), owner))
 
     def text(self, x: float, y: float, s: str, bold: bool = False, anchor: str = "lm", bg: bool = False,
@@ -198,7 +215,7 @@ class Canvas:
         if laid:
             l, t, r, b = placed.ink
             self.erase(l - BG_MARGIN, t - BG_MARGIN, r + BG_MARGIN, b + BG_MARGIN, owner=owner)
-        self.records.append(Text(x, y, s, bold, anchor, placed.box, laid, owner, placed))
+        self.records.append(Text(x, y, s, bold, anchor, laid, owner, placed))
 
     def erase(self, left: float, top: float, right: float, bottom: float, owner: Optional[str] = None) -> None:
         left, top, right, bottom = _nums(left, top, right, bottom)
@@ -211,13 +228,16 @@ class Canvas:
         tip, c, s, (size, spread) = _head(tip, frm, size, spread)
         if spread >= math.pi / 2:
             raise ValueError(f"화살촉 갈래 각은 직각보다 작아야 한다: {spread}")
+        arms = []
         for turn in (-spread, spread):
             ct, st = math.cos(turn), math.sin(turn)
-            self.line([tip, (tip[0] + size * (c * ct - s * st), tip[1] + size * (s * ct + c * st))], owner=owner)
+            arms.append(_line([tip, (tip[0] + size * (c * ct - s * st), tip[1] + size * (s * ct + c * st))], None, owner))
+        self.records.extend(arms)
 
     def closed_arrow(self, tip: Point, frm: Point, filled: bool = True, size: float = 10, half: float = 4.5,
                      owner: Optional[str] = None) -> None:
-        """닫힌 삼각형 화살촉. 채우면 호출 메시지, 비우면(크기 18·9) 상속·실체화다."""
+        """닫힌 삼각형 화살촉. 기본값은 호출 메시지의 채운 화살촉이고, 상속·실체화의 빈 삼각형은 filled=False, size=18,
+        half=9로 부른다."""
         tip, c, s, (size, half) = _head(tip, frm, size, half)
         base = (tip[0] + c * size, tip[1] + s * size)
         self.poly([tip, (base[0] - s * half, base[1] + c * half), (base[0] + s * half, base[1] - c * half)],
@@ -242,7 +262,7 @@ class Canvas:
             elif isinstance(r, (Rect, Ellipse)):
                 pts = ((r.left, r.top), (r.left + r.width, r.top + r.height))
             elif isinstance(r, Text):
-                ink = r.placed().ink
+                ink = r.placement.ink
                 if ink is None:
                     continue
                 pts = ((ink[0], ink[1]), (ink[2], ink[3]))
@@ -258,19 +278,23 @@ class Canvas:
         if b is None:
             raise ValueError("그린 것이 없다")
         minx, miny = b[0] - PAD, b[1] - PAD
-        return (minx, miny, max(1, math.ceil((b[2] + PAD - minx) * self.scale)),
-                max(1, math.ceil((b[3] + PAD - miny) * self.scale)))
+        fw, fh = (b[2] + PAD - minx) * self.scale, (b[3] + PAD - miny) * self.scale
+        if not (math.isfinite(fw) and math.isfinite(fh)) or fw * fh * SS * SS > MAX_PIXELS:
+            raise ValueError(f"그림이 너무 크다: 논리 {b[2] - b[0]:g}×{b[3] - b[1]:g}, 배율 {self.scale:g}")
+        w, h = max(1, math.ceil(fw)), max(1, math.ceil(fh))
+        if w * SS * h * SS > MAX_PIXELS:
+            raise ValueError(f"그림이 너무 크다: 논리 {b[2] - b[0]:g}×{b[3] - b[1]:g}, 배율 {self.scale:g}")
+        return minx, miny, w, h
 
     def frame(self) -> Box:
         """결과 PNG가 덮는 논리 좌표 범위: 그린 것의 범위에 PAD만큼 여백을 두고, 오른쪽·아래를 출력 픽셀에 맞춰 늘린다.
-        PNG의 픽셀 (px, py)는 논리 좌표 (frame[0] + px / scale, frame[1] + py / scale)다."""
+        PNG의 픽셀 (px, py)는 논리 좌표 (frame[0] + px / scale, frame[1] + py / scale)다. 그린 것이 없거나 그림이
+        MAX_PIXELS를 넘으면 ValueError."""
         minx, miny, w, h = self._frame_px()
         return minx, miny, minx + w / self.scale, miny + h / self.scale
 
     def to_image(self) -> Image.Image:
         minx, miny, w, h = self._frame_px()
-        if w * SS * h * SS > MAX_PIXELS:
-            raise ValueError(f"그림이 너무 크다: 논리 {w / self.scale:g}×{h / self.scale:g}, 배율 {self.scale:g}")
         img = Image.new("L", (w * SS, h * SS), 255)
         _Painter(img, minx, miny, self.scale * SS).paint(self.records)
         return img.resize((w, h), Image.LANCZOS)
@@ -282,7 +306,7 @@ class Canvas:
 
 
 class _Painter:
-    """기록을 SS배 그림판에 그린다. 테두리와 선은 모두 논리 좌표의 선·변을 가운데로 칠한다."""
+    """기록을 SS배 그림판에 그린다. 테두리와 선은 모두 논리 좌표의 선·변을 가운데로 칠하고, 꺾는 점은 둥글게 잇는다."""
 
     def __init__(self, img: Image.Image, minx: float, miny: float, k: float):
         self.d = ImageDraw.Draw(img)
@@ -292,11 +316,19 @@ class _Painter:
     def _p(self, p: Point) -> Point:
         return (p[0] - self.minx) * self.k, (p[1] - self.miny) * self.k
 
-    def _outlined(self, left: float, top: float, width: float, height: float) -> list[Point]:
-        # Pillow는 상자 테두리를 안쪽으로 칠한다. 반 획씩 넓혀 선과 같이 변 가운데로 칠하게 한다.
+    def _outlined(self, left: float, top: float, width: float, height: float) -> list[tuple[int, int]]:
+        # Pillow는 상자 테두리를 안쪽으로 칠하고, 좌표를 정수로 자르며 오른쪽·아래 끝을 포함한다. 반 획씩 넓히고 반올림해
+        # 선과 같이 변 가운데로 칠하게 한다.
         (x0, y0), (x1, y1) = self._p((left, top)), self._p((left + width, top + height))
         h = self.lw / 2
-        return [(x0 - h, y0 - h), (x1 + h, y1 + h)]
+        return [(round(x0 - h), round(y0 - h)), (round(x1 + h) - 1, round(y1 + h) - 1)]
+
+    def _stroke(self, pts: list[Point], closed: bool = False) -> None:
+        # Pillow의 joint="curve"는 굵기 4px 이하에서 꺼진다. 이음은 꺾는 점마다 획 굵기의 점을 찍어 직접 둥글게 한다.
+        self.d.line(pts + pts[:1] if closed else pts, fill="black", width=self.lw)
+        r = self.lw / 2
+        for x, y in pts if closed else pts[1:-1]:
+            self.d.ellipse([x - r, y - r, x + r, y + r], fill="black")
 
     def paint(self, records: Iterable[Record]) -> None:
         for r in records:
@@ -310,11 +342,11 @@ class _Painter:
                                fill=r.fill)
             elif isinstance(r, Polygon):
                 # Pillow polygon은 테두리를 안쪽으로 칠하고, 그러려고 그림판 크기의 마스크를 새로 잡는다. 채우기만 맡기고
-                # 테두리는 닫힌 선으로 변 가운데에 칠한다(첫 변을 한 번 더 그어 첫 꼭짓점도 둥글게 잇는다).
+                # 테두리는 닫힌 선으로 변 가운데에 칠한다.
                 pts = [self._p(p) for p in r.points]
                 if r.fill is not None:
                     self.d.polygon(pts, fill=r.fill)
-                self.d.line(pts + pts[:2], fill="black", width=self.lw, joint="curve")
+                self._stroke(pts, closed=True)
             elif isinstance(r, Text):
                 self.text(r)
             elif isinstance(r, Mask):
@@ -324,28 +356,33 @@ class _Painter:
 
     def line(self, r: Line) -> None:
         if r.dash is None:
-            self.d.line([self._p(p) for p in r.points], fill="black", width=self.lw, joint="curve")
+            self._stroke([self._p(p) for p in r.points])
             return
+        # 점선 k번째 칸은 선 처음부터의 길이로 [k·주기, k·주기 + 칠할 길이]이고, 그 안의 꺾는 점을 지나는 꺾은선으로 그린다.
         on, off = r.dash
         period = on + off
-        done = 0.0  # 선 처음부터 지금 구간 앞까지의 길이. 무늬 k번째 칠할 곳은 [k·period, k·period + on]이다.
-        for (x1, y1), (x2, y2) in zip(r.points, r.points[1:]):
-            n = math.hypot(x2 - x1, y2 - y1)
-            if n == 0:
-                continue
-            k = math.floor(done / period)
-            while k * period < done + n:
-                a, b = max(k * period, done), min(k * period + on, done + n)
-                if b > a:
-                    ta, tb = (a - done) / n, (b - done) / n
-                    self.d.line([self._p((x1 + (x2 - x1) * ta, y1 + (y2 - y1) * ta)),
-                                 self._p((x1 + (x2 - x1) * tb, y1 + (y2 - y1) * tb))], fill="black", width=self.lw)
-                k += 1
-            done += n
+        done = [0.0]
+        for p, q in zip(r.points, r.points[1:]):
+            done.append(done[-1] + math.dist(p, q))
+        total = done[-1]
+
+        def at(length: float) -> Point:
+            i = min(bisect.bisect_right(done, length) - 1, len(done) - 2)
+            n = done[i + 1] - done[i]
+            t = 0.0 if n == 0 else (length - done[i]) / n
+            (x1, y1), (x2, y2) = r.points[i], r.points[i + 1]
+            return x1 + (x2 - x1) * t, y1 + (y2 - y1) * t
+
+        k = 0
+        while k * period < total:
+            a, b = k * period, min(k * period + on, total)
+            bends = [r.points[i] for i in range(1, len(done) - 1) if a < done[i] < b]
+            self._stroke([self._p(p) for p in [at(a), *bends, at(b)]])
+            k += 1
 
     def text(self, r: Text) -> None:
         # 조각째 그리면 이 크기에서 힌팅으로 반올림된 글자 폭이 쌓여 기록한 상자와 어긋난다. 글자를 잰 자리에 하나씩 놓는다.
-        placed = r.placed()
+        placed = r.placement
         for left, ch, korean in placed.glyphs:
             if not ch.isspace():
                 self.d.text(self._p((left, placed.baseline)), ch, fill="black",

@@ -125,9 +125,9 @@ def text_width(s: str, bold: bool = False) -> float:
 class Placement:
     """한 줄 글자를 놓은 자리(논리 좌표).
 
-    box는 줄 상자다: 폭은 text_width, 높이는 Liberation Sans의 ascent~descent(한글도 이 안에 든다).
-    glyphs는 글자마다 (왼쪽 x, 글자, Noto Sans KR로 그리는지)다. ink는 글자가 칠해지는 곳의 상자이고(가로는 글자
-    진행 폭을 덮는다), 공백뿐이면 None이다.
+    box는 줄 상자다: 폭은 text_width, 높이는 Liberation Sans의 ascent~descent(한글도 이 안에 든다)이고, 그 밖으로
+    칠해지는 글자(Ǻ·█ 등)가 있으면 거기까지 늘어나 ink를 늘 덮는다. glyphs는 글자마다 (왼쪽 x, 글자, Noto Sans KR로
+    그리는지)다. ink는 글자가 칠해지는 곳의 상자이고(가로는 글자 진행 폭을 덮는다), 공백뿐이면 None이다.
     """
 
     box: Box
@@ -145,6 +145,9 @@ def place(x: float, y: float, s: str, bold: bool = False, anchor: str = "lm") ->
     left = x - lay.width / 2 if anchor == "mm" else x
     baseline = y + (ASCENT - DESCENT) / 2
     half = (ASCENT + DESCENT) / 2
-    ink = None if lay.ink is None else (left + lay.ink[0], baseline + lay.ink[1], left + lay.ink[2], baseline + lay.ink[3])
-    return Placement((left, y - half, left + lay.width, y + half), baseline,
-                     tuple((left + gx, ch, korean) for gx, ch, korean in lay.glyphs), ink)
+    box = (left, y - half, left + lay.width, y + half)
+    ink = None
+    if lay.ink is not None:
+        ink = (left + lay.ink[0], baseline + lay.ink[1], left + lay.ink[2], baseline + lay.ink[3])
+        box = (min(box[0], ink[0]), min(box[1], ink[1]), max(box[2], ink[2]), max(box[3], ink[3]))
+    return Placement(box, baseline, tuple((left + gx, ch, korean) for gx, ch, korean in lay.glyphs), ink)
