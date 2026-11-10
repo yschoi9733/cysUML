@@ -655,31 +655,28 @@ has "residue: test/ 아래 중첩 고아" "orphan $C/test/62-old"
 hasnt "residue: test 폴더를 통째로 남의 고아로 내지 않는다" "other-orphan $C/test"
 rm -rf "$C/test"
 # 바로 안에 .git 이 있으면 타입 폴더가 아니라 그 이름으로 만든 체크아웃(EnterWorktree(name: test) 등)이다 — 그 폴더를
-# 한 줄로 내고 안에서는 이 이슈 이름인 것만 본다. 안의 다른 폴더(src)를 남의 고아로 내면 체크아웃 자체는 안 보이고
-# 조각들이 고아처럼 나오고, 안을 아예 안 보면 그 안에 남은 이 이슈의 옛 중첩 잔재를 놓친다(이전 셀프 리뷰 두 번).
+# 한 줄로 내고 안에서는 이 이슈 이름이면서 자기 .git 이 있는 것(그 안에 만든 옛 중첩 워크트리)만 본다. 안의 다른 폴더(src)를
+# 남의 고아로 내면 체크아웃 자체는 안 보이고 조각들이 고아처럼 나오고, 안을 아예 안 보면 그 안에 남은 이 이슈의 옛 중첩
+# 잔재를 놓치고, .git 없는 폴더까지 보면 이름이 맞는 그 체크아웃의 내용이 고아로 나온다(이전 셀프 리뷰 세 번).
 # 등록이 지워진 채 남은 모양으로 만든다.
-mkdir -p "$C/test/69-old" "$C/test/src"
+mkdir -p "$C/test/69-old" "$C/test/69-content" "$C/test/src"
 printf 'gitdir: %s\n' "$R/.git/worktrees/test" > "$C/test/.git"
+printf 'gitdir: %s\n' "$R/.git/worktrees/69-old" > "$C/test/69-old/.git"
 run "$R" "$S/residue.sh" 69
 check "residue: .git 이 든 test 체크아웃 안의 이 이슈 잔재" RESIDUE
-has "residue: 그 안의 이 이슈 폴더는 고아" "orphan $C/test/69-old"
+has "residue: 그 안의 이 이슈 워크트리는 고아" "orphan $C/test/69-old"
+hasnt "residue: .git 없는 폴더는 이름이 맞아도 그 체크아웃의 내용" "orphan $C/test/69-content"
 has "residue: 그 체크아웃은 한 줄로 남의 고아" "other-orphan $C/test"
 hasnt "residue: 그 안의 다른 폴더를 남의 고아로 내지 않는다" "other-orphan $C/test/src"
 run "$R" "$S/residue.sh" 99
 has "residue: 다른 이슈 조사에도 체크아웃은 한 줄" "other-orphan $C/test"
 hasnt "residue: 다른 이슈 조사에 그 안의 폴더를 내지 않는다" "other-orphan $C/test/69-old"
 rm -rf "$C/test"
-# 번호를 앞자리 0 째로 받던 옛 실행이 만든 이름도 이 이슈 것이다 — 지금은 0 을 떼고 부르므로 판별식이 0 을 허용한다.
-g branch fix/081-padded origin/main
-mkdir -p "$C/fix+0081-padded"
-run "$R" "$S/residue.sh" 81
-check "residue: 앞자리 0 이 든 옛 이름" RESIDUE
-has "residue: 그 브랜치" "branch fix/081-padded"
-has "residue: 그 고아" "orphan $C/fix+0081-padded"
+# 앞자리 0 이 든 이름은 잡지 않는다(알려진 한계) — 0 을 허용하면 docs/01-intro 같은 남의 이름이 1번 이슈 잔재가 된다.
+g branch docs/01-intro origin/main
 run "$R" "$S/residue.sh" 1
-hasnt "residue: 0 을 허용해도 81 은 1 이 아님" "branch fix/081-padded"
-g branch -D fix/081-padded
-rmdir "$C/fix+0081-padded"
+hasnt "residue: 앞자리 0 이 든 남의 이름은 잡지 않는다" "branch docs/01-intro"
+g branch -D docs/01-intro
 # 옛 중첩 디렉터리 안의 잔재가 링크여도 잡는다 — 바깥 스캔만 링크를 보면 CLEAN 이 된다(이전 codex 지적).
 mkdir -p "$T/linked-target2"
 ln -s "$T/linked-target2" "$C/fix/60-linked"
