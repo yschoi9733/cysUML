@@ -513,7 +513,7 @@ has_prefix "find: unsafe 경로는 escaped 로" "path-escaped "
 add "$CC/wip-it's" fix/26-quote
 run "$R" "$S/find.sh" "$SNAP" fix/26-quote
 check "find: 작은따옴표 경로" FOUND
-has "find: 작은따옴표도 unsafe(osascript 를 작은따옴표로 감싼다)" "unsafe yes"
+has "find: 작은따옴표도 unsafe(references/worktree.md 제거 절차 0번 ④)" "unsafe yes"
 run "$R" "$S/suffix.sh" "$SNAP" "$CC/wip-it's"
 check "suffix: 작은따옴표 경로" UNSAFE
 add "$CC/wip-back\\slash" fix/27-backslash
