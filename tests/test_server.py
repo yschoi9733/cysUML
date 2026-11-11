@@ -1,7 +1,9 @@
 import base64
 import io
 import json
+import re
 import sys
+from pathlib import Path
 
 import anyio
 import pytest
@@ -9,24 +11,39 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
-from cysuml import classcheck, server
+from cysuml import classcheck, sequencecheck, sequencediagram, server
 from cysuml.canvas import SCALE
+from cysuml.report import Finding
 
 ORDER = [{"name": "Order", "left": 0, "top": 0}, {"name": "Customer", "left": 200, "top": 0}]
 PLACES = [{"kind": "association", "from": "Order", "to": "Customer", "name": "places"}]
+CLASS = ("draw_class_diagram", {"file_name": "order", "classes": ORDER, "relations": PLACES})
+README = Path(__file__).resolve().parent.parent / "README.md"
+
+PEOPLE = [{"name": "Customer", "kind": "actor"}, {"name": "Shop"}, {"name": "Payment"}]
+TALKS = [{"from": "Customer", "to": "Shop", "name": "order()"},
+         {"from": "Shop", "to": "Payment", "name": "pay(amount)"},
+         {"from": "Payment", "to": "Shop", "kind": "reply", "name": "receipt"},
+         {"from": "Shop", "to": "Customer", "kind": "reply"}]
+CHECKS = [{"kind": "opt", "first": 1, "last": 2, "condition": "카드 결제"}]
+SEQUENCE = ("draw_sequence_diagram", {"file_name": "checkout", "participants": PEOPLE, "messages": TALKS})
 
 
 def run(target, *calls):
-    """target(서버 객체나 stdio 실행 정보)에 붙어 도구 목록과 calls(도구 인자)마다 결과를 받는다."""
+    """target(서버 객체나 stdio 실행 정보)에 붙어 안내문, 도구 목록과 calls((도구 이름, 인자))마다 결과를 받는다."""
     async def go():
         async with Client(target) as c:
-            tools = (await c.list_tools()).tools
-            return c.instructions, tools, [await c.call_tool("draw_class_diagram", a) for a in calls]
+            tools = {t.name: t for t in (await c.list_tools()).tools}
+            return c.instructions, tools, [await c.call_tool(name, a) for name, a in calls]
     return anyio.run(go)
 
 
 def draw(**args):
-    return run(server.mcp, args)[2][0]
+    return run(server.mcp, ("draw_class_diagram", args))[2][0]
+
+
+def draw_seq(**args):
+    return run(server.mcp, ("draw_sequence_diagram", args))[2][0]
 
 
 def text(result):
@@ -39,17 +56,41 @@ def image(result):
     return Image.open(io.BytesIO(base64.b64decode(block.data)))
 
 
-def test_lists_one_tool_with_flow_and_tips_in_its_description_and_the_instructions():
+def test_lists_the_class_and_sequence_tools_with_their_inputs():
+    _, tools, _ = run(server.mcp)
+    assert list(tools) == ["draw_class_diagram", "draw_sequence_diagram"]
+    for name, required, lists, strings in [
+        ("draw_class_diagram", ["file_name", "classes"], ("classes", "relations"), ()),
+        ("draw_sequence_diagram", ["file_name", "participants"], ("participants", "messages", "frames"), ("notes",)),
+    ]:
+        schema = tools[name].input_schema
+        assert schema["required"] == required
+        props = schema["properties"]
+        assert set(props) == {"file_name", *lists, *strings, "out_dir", "scale"}
+        for key in lists + strings:
+            assert props[key]["type"] == "array"
+            assert props[key]["items"] == {"type": "string" if key in strings else "object"}
+
+
+def test_each_tool_carries_its_flow_and_the_instructions_carry_both():
     instructions, tools, _ = run(server.mcp)
-    (tool,) = tools
-    assert tool.name == "draw_class_diagram"
-    assert tool.input_schema["required"] == ["file_name", "classes"]
-    props = tool.input_schema["properties"]
-    assert set(props) == {"file_name", "classes", "relations", "out_dir", "scale"}
-    for key in ("classes", "relations"):
-        assert props[key]["type"] == "array" and props[key]["items"] == {"type": "object"}
-    for part in (server.FLOW, server.TIPS):
-        assert part in tool.description and part in instructions
+    class_tool, seq_tool = tools["draw_class_diagram"].description, tools["draw_sequence_diagram"].description
+    for part in (server.CLASS_FLOW, server.CLASS_TIPS):
+        assert part in class_tool and part not in seq_tool
+    assert server.SEQUENCE_FLOW in seq_tool and server.SEQUENCE_FLOW not in class_tool
+    for part in (server.CLASS_FLOW, server.CLASS_TIPS, server.SEQUENCE_FLOW, *tools):
+        assert part in instructions
+
+
+def test_sequence_description_names_every_field_kind_and_limit_the_reader_takes():
+    S = sequencediagram
+    names = (S.DIAGRAM_FIELDS + S.PARTICIPANT_FIELDS + S.MESSAGE_FIELDS + S.ALL_FRAME_FIELDS + S.BRANCH_FIELDS)
+    for name in names:
+        assert name in server.SEQUENCE_TOOL, name
+    for kind in S.PARTICIPANT_KINDS + S.MESSAGE_KINDS + S.FRAME_KINDS:
+        assert f'"{kind}"' in server.SEQUENCE_TOOL, kind
+    for limit in (S.MAX_PARTICIPANTS, S.MAX_MESSAGES, S.MAX_FRAMES, S.MAX_NOTES):
+        assert f"{limit}개까지" in server.SEQUENCE_TOOL
 
 
 def test_description_names_every_failure_kind_in_check_order():
@@ -263,9 +304,165 @@ def test_calls_at_the_same_time_all_draw(tmp_path):
     assert len({(tmp_path / f"d{i}.png").read_bytes() for i in range(4)}) == 1
 
 
+def test_readme_examples_draw_and_pass(tmp_path):
+    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
+    examples = [b for b in blocks if "file_name" in b]
+    assert [b["file_name"] for b in examples] == ["order", "checkout"]
+    for b in examples:
+        tool = "draw_sequence_diagram" if "participants" in b else "draw_class_diagram"
+        (r,) = run(server.mcp, (tool, {**b, "out_dir": str(tmp_path)}))[2]
+        assert not r.is_error and text(r).startswith("합격"), text(r)
+
+
 def test_command_serves_over_stdio(tmp_path):
     params = StdioServerParameters(command=sys.executable, args=["-m", "cysuml"], cwd=str(tmp_path))
-    _, tools, (r,) = run(params, {"file_name": "order", "classes": ORDER, "relations": PLACES})
-    assert [t.name for t in tools] == ["draw_class_diagram"]
+    _, tools, results = run(params, CLASS, SEQUENCE)
+    assert list(tools) == ["draw_class_diagram", "draw_sequence_diagram"]
+    assert not any(r.is_error for r in results)
+    assert sorted(p.name for p in (tmp_path / "diagrams").iterdir()) == ["checkout.png", "order.png"]
+
+
+# ---------------------------------------------------------------- 교류도
+
+
+def test_draws_a_sequence_diagram_and_returns_the_check_and_the_image_without_box_places(tmp_path):
+    r = draw_seq(file_name="checkout", participants=PEOPLE, messages=TALKS, frames=CHECKS,
+                 notes=["결제는 카드만 받는다"], out_dir=str(tmp_path))
     assert not r.is_error
-    assert (tmp_path / "diagrams" / "order.png").exists()
+    lines = text(r).splitlines()
+    assert lines[0] == sequencecheck.Report.PASSED
+    assert lines[1].startswith("알림 — 그림 크기: 논리 좌표 ")
+    saved = tmp_path / "checkout.png"
+    with Image.open(saved) as f:
+        assert lines[2:] == [f"저장한 파일: {saved} ({f.width}×{f.height}px)"]
+        assert image(r).size == f.size
+
+
+def test_participants_alone_draw(tmp_path):
+    r = draw_seq(file_name="alone", participants=PEOPLE, out_dir=str(tmp_path))
+    assert not r.is_error
+    assert (tmp_path / "alone.png").exists()
+
+
+def test_null_sequence_lists_are_not_given(tmp_path):
+    r = draw_seq(file_name="checkout", participants=PEOPLE, messages=TALKS, frames=None, notes=None,
+                 out_dir=str(tmp_path))
+    assert not r.is_error
+
+
+def test_sequence_input_errors_come_back_with_their_place_and_nothing_is_written(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    r = draw_seq(file_name="docs/checkout", participants=PEOPLE,
+                 messages=[{"from": "Shop", "to": "Bank", "name": "pay()"},
+                           {"from": "Shop", "to": "Shop", "name": "log()"}],
+                 frames=[{"kind": "opt", "first": 0, "last": 5}], notes=[""])
+    assert r.is_error
+    lines = text(r).splitlines()
+    assert lines[0] == "입력 오류 — 5건"
+    assert lines[1].startswith("- file_name에 파일 이름으로 쓸 수 없는 글자가 있다: '/'")
+    assert lines[2] == "- messages[0].to: 이름이 'Bank'인 참여자가 없다(있는 참여자: 'Customer', 'Shop', 'Payment')"
+    assert lines[3].startswith("- messages[1]: 자기 자신('Shop')에게 보내는 메시지는 그리지 않는다")
+    assert lines[4] == "- frames[0].last: 0~1 사이여야 한다(받은 값 5)"
+    assert lines[5] == "- notes[0]: 비어 있다"
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("args, problem", [
+    ({"participants": "nope"}, "participants: 목록이어야 한다(받은 값 'nope')"),
+    ({"participants": None}, "participants: 목록이어야 한다(받은 값 None)"),
+    ({"participants": PEOPLE, "notes": "메모"}, "notes: 목록이어야 한다(받은 값 '메모')"),
+])
+def test_sequence_lists_of_the_wrong_shape_come_back_from_the_reader(tmp_path, args, problem):
+    r = draw_seq(**{"file_name": "checkout", "out_dir": str(tmp_path), **args})
+    assert r.is_error
+    assert text(r).splitlines() == ["입력 오류 — 1건", f"- {problem}"]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_sequence_lists_sent_as_json_strings_still_draw(tmp_path):
+    r = draw_seq(file_name="checkout", participants=json.dumps(PEOPLE), messages=json.dumps(TALKS),
+                 frames=json.dumps(CHECKS), notes=json.dumps(["메모"]), out_dir=str(tmp_path))
+    assert not r.is_error
+    assert (tmp_path / "checkout.png").exists()
+
+
+def test_a_failed_sequence_check_says_it_is_a_cysuml_bug_and_still_saves(tmp_path, monkeypatch):
+    finding = Finding("text_on_bar", ("messages[1]",), (0, 0, 10, 10), "글자가 막대를 가린다.", sequencecheck.TEXT_HINT)
+    monkeypatch.setattr(sequencecheck, "find", lambda layout: (finding,))
+    r = draw_seq(file_name="checkout", participants=PEOPLE, messages=TALKS, out_dir=str(tmp_path))
+    assert not r.is_error
+    lines = text(r).splitlines()
+    assert lines[0] == "불합격 — 1건" + sequencecheck.Report.FAILED
+    assert lines[1] == f"1. 글자가 막대를 가린다. {sequencecheck.TEXT_HINT}"
+    assert (tmp_path / "checkout.png").exists()
+
+
+def _layout_bug(diagram):
+    raise RuntimeError("배치 버그: 시험")
+
+
+def test_a_layout_bug_is_an_error_with_a_way_around_and_nothing_is_written(tmp_path, monkeypatch):
+    monkeypatch.setattr(sequencediagram, "layout", _layout_bug)
+    r = draw_seq(file_name="checkout", participants=PEOPLE, messages=TALKS, out_dir=str(tmp_path))
+    assert r.is_error
+    assert text(r).startswith("교류도를 배치하지 못했다(배치 버그: 시험). 파일은 저장하지 않았다.")
+    assert "참여자 순서나 메시지 차례를 바꾸거나, 글자를 줄이거나, 그림을 나눠 다시 그린다." in text(r)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_bad_file_name_is_told_before_a_layout_bug(tmp_path, monkeypatch):
+    monkeypatch.setattr(sequencediagram, "layout", _layout_bug)
+    r = draw_seq(file_name="", participants=PEOPLE, out_dir=str(tmp_path))
+    assert r.is_error
+    assert text(r).splitlines() == ["입력 오류 — 1건", "- file_name이 비어 있다"]
+
+
+def test_a_sequence_too_big_to_draw_is_an_error_with_the_check_and_nothing_is_saved(tmp_path):
+    r = draw_seq(file_name="huge", participants=PEOPLE, messages=TALKS, out_dir=str(tmp_path), scale=40)
+    assert r.is_error
+    lines = text(r).splitlines()
+    assert lines[0] == "그림이 너무 커서 PNG를 그리지 않았다(파일도 저장하지 않았다)."
+    assert lines[1] == sequencecheck.Report.PASSED
+    assert lines[2].endswith(f"배율 40로는 PNG로 그리기에 너무 크다 — {sequencecheck.Report.SHRINK}")
+    assert len(lines) == 3
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_sequence_that_cannot_be_saved_is_an_error_with_the_check(tmp_path):
+    blocker = tmp_path / "not-a-folder"
+    blocker.write_text("")
+    r = draw_seq(file_name="checkout", participants=PEOPLE, messages=TALKS, out_dir=str(blocker / "sub"))
+    assert r.is_error
+    lines = text(r).splitlines()
+    assert lines[0].startswith(f"그림을 저장하지 못했다 — out_dir {blocker / 'sub'}에")
+    assert lines[1:3] == ["", sequencecheck.Report.PASSED]
+    assert len(lines) == 4
+
+
+def test_a_long_sequence_is_shrunk_for_the_answer_but_saved_at_full_size(tmp_path):
+    talks = [{"from": "Customer", "to": "Shop", "name": f"step{i}()"} for i in range(40)]
+    r = draw_seq(file_name="long", participants=PEOPLE, messages=talks, out_dir=str(tmp_path))
+    assert not r.is_error
+    with Image.open(tmp_path / "long.png") as f:
+        full = f.size
+    assert full[1] > server.MAX_IMAGE_EDGE
+    assert image(r).height == server.MAX_IMAGE_EDGE
+    assert f"긴 변을 {server.MAX_IMAGE_EDGE}px로 줄였다" in text(r)
+
+
+def test_class_and_sequence_calls_at_the_same_time_all_draw(tmp_path):
+    async def go():
+        async with Client(server.mcp) as c:
+            results = {}
+
+            async def one(i):
+                name, args = (CLASS, SEQUENCE)[i % 2]
+                results[i] = await c.call_tool(name, {**args, "file_name": f"d{i}", "out_dir": str(tmp_path)})
+            async with anyio.create_task_group() as tg:
+                for i in range(6):
+                    tg.start_soon(one, i)
+            return results
+    results = anyio.run(go)
+    assert not any(r.is_error for r in results.values())
+    assert len({(tmp_path / f"d{i}.png").read_bytes() for i in range(0, 6, 2)}) == 1
+    assert len({(tmp_path / f"d{i}.png").read_bytes() for i in range(1, 6, 2)}) == 1
