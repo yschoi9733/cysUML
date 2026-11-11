@@ -239,11 +239,45 @@ def test_caller_of_an_actor_lasts_as_long_as_the_actors_bar():
     assert a.bottom >= v.bottom
 
 
-def test_called_actor_answers_from_its_lifeline_below_its_short_bar():
+def test_called_actor_answers_from_its_bar():
     lay = lay_of(life("A", "V", actor=("V",)), [call("A", "V", "ask()"), reply("V", "A", "ans")])
     (v,) = bars_of(lay, "V")
     m = lay.messages[1]
-    assert v.bottom == v.top + S.ACT_H and m.start == lay.participants[1].x and m.y >= v.bottom + S.CLEAR
+    assert v.bottom == m.y and m.start == v.rect[0]
+
+
+def test_actor_bar_lasts_until_it_answers_while_the_caller_works():
+    lay = lay_of(life("S", "U", "P", actor=("U",)),
+                 [call("S", "U", "confirm()"), call("S", "P", "prepare()"), reply("P", "S", "ready"), reply("U", "S", "yes")])
+    (u,) = bars_of(lay, "U")
+    yes = lay.messages[3]
+    assert u.top == lay.messages[0].y and u.bottom == yes.y and yes.start == u.rect[0]
+    assert rule_breaks(lay) == []
+
+
+def test_actor_call_without_an_answer_keeps_the_short_bar():
+    lay = lay_of(life("S", "U", actor=("U",)), [call("S", "U", "show()"), call("S", "U", "show(again)"), call("U", "S", "click()")])
+    first, second = bars_of(lay, "U")
+    assert first.bottom == first.top + S.ACT_H and second.bottom == second.top + S.ACT_H
+
+
+@pytest.mark.parametrize("yes_first", [True, False])
+def test_actor_answers_from_a_bar_in_every_alt_branch(yes_first):
+    answers = [reply("U", "S", "yes"), reply("U", "S", "no")]
+    lay = lay_of(life("S", "U", actor=("U",)), [call("S", "U", "confirm()"), *(answers if yes_first else answers[::-1])],
+                 frames=[{"kind": "alt", "branches": [{"condition": "a", "first": 1, "last": 1},
+                                                      {"condition": "b", "first": 2, "last": 2}]}])
+    for m in lay.messages[1:]:
+        assert any(b.owner == "U" and b.top <= m.y <= b.bottom and m.start == b.rect[0] for b in lay.bars), m.owner
+    assert rule_breaks(lay) == []
+
+
+def test_actor_called_inside_a_frame_and_answering_after_it_ends_with_the_frame():
+    lay = lay_of(life("S", "U", actor=("U",)), [call("S", "U", "confirm()"), reply("U", "S", "yes")],
+                 frames=[{"kind": "opt", "first": 0, "last": 0}])
+    (u,), f = bars_of(lay, "U"), lay.frames[0]
+    assert u.bottom < f.bottom and lay.messages[1].start == lay.participants[1].x
+    assert rule_breaks(lay) == []
 
 
 @pytest.mark.parametrize("frame", [

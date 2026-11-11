@@ -18,7 +18,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from . import text as T
 from .canvas import SCALE, Canvas
@@ -519,6 +519,7 @@ class _Bar:
     top: int
     terms: set = field(default_factory=set)
     protected: bool = False
+    sticky: bool = False  # 대답을 기다리는 액터 막대 — 다른 생명선이 보내는 메시지로는 닫히지 않는다
     top_off: float = 0.0  # 윗변 = top번째 일의 높이 + top_off(alt 칸 나눔선 아래에서 이어지는 막대만 0이 아니다)
     parent: Optional[_Bar] = None  # 이 막대를 연 호출을 보낸 막대 — 닫을 때 밑변을 넘겨받는다
     depth: int = 0
@@ -545,8 +546,9 @@ class _Activations:
       다른 막대를 닫지 않는다 — 받는 쪽이 기다리던 막대가 끊기지 않게.
     - 반환은 보내는 막대(와 그 위에 남은 막대)를 그 높이에서 닫는다. 받는 생명선에 열린 막대가 있으면 그 위를 닫고 잇고,
       없으면 그 자리에서 연다(다른 막대는 닫지 않는다).
-    - 액터가 받는 호출은 높이 ACT_H로 그리고 쌓지 않는다(액터는 막대 없이 생명선에서 보낸다). 만드는 메시지는 막대를
-      만들지 않는다.
+    - 액터가 받는 호출은, 그 액터가 다음에 보내는 메시지가 반환(대답)이면 대답할 때까지 잇는다(대답을 기다리는 막대 —
+      다른 생명선이 메시지를 보내도 닫히지 않는다). 아니면 높이 ACT_H로 그리고 쌓지 않는다. 액터는 대답할 때 그 막대에서,
+      그 밖에는 막대 없이 생명선에서 보낸다. 만드는 메시지는 막대를 만들지 않는다.
     닫는 막대의 밑변은 "윗변 + ACT_H"와 그 막대가 마지막으로 주고받은 높이 가운데 아래쪽이고, 그 막대가 부른 막대보다는
     아래다. 부른 막대가 메시지 높이에서 끝났으면 그보다 CLEAR만큼 더 잇는다 — 그 메시지 선이 이 막대 생명선을 지날 때 선이
     막대 밑변을 따라가지 않게(그 밑변은 메시지 높이와 같이 움직여 메시지를 내려서는 못 비킨다).
@@ -554,7 +556,7 @@ class _Activations:
     프레임 규칙: 칸마다 첫 메시지가 모두 닫을 막대는 프레임 앞에서 닫는다. 그때 남아 열려 있던 막대는 부른 쪽이 메시지를 보내도
     프레임 안에서 닫지 않고(protected) 프레임 밑변 아래까지 잇는다 — 그런 막대의 밑변은 막대 높이로만 정해져 프레임 윗변
     바로 밑에서 끝날 수 있어서다. 다만 그 생명선이 반환하면 그 높이에서 끝난다(프레임 윗변에서 FRAME_HEAD 넘게 아래다).
-    프레임 안에서 연 막대는 칸이 끝날 때 닫는다. alt의 칸은 서로 대신하는 갈래라 칸마다 프레임이 열릴 때의 막대에서 시작한다
+    프레임 안에서 연 막대(대답을 기다리는 액터 막대도)는 칸이 끝날 때 닫는다. alt의 칸은 서로 대신하는 갈래라 칸마다 프레임이 열릴 때의 막대에서 시작한다
     — 앞 칸에서 반환한 그런 막대는 거기서 끝나고, 다음 칸에서는 칸 나눔선 EDGE_CLEAR 아래에서 이어지는 막대를 새로 연다.
     어느 한 칸에서라도 반환한 막대는 alt와 함께 끝나고(이어 가던 막대는 밑변 EDGE_CLEAR 위에서 닫는다), 모든 칸에서 계속
     일한 막대만 프레임 밖으로 이어진다 — 칸 차례에 따라 그 뒤 그림이 달라지지 않게.
@@ -567,12 +569,12 @@ class _Activations:
         self.kept: list[_Bar] = []    # 지금 프레임이 열릴 때 열려 있던 막대(쌓인 차례대로, alt는 지금 칸에서 잇는 막대)
         self.ended: list[bool] = []   # kept 자리마다, 앞 칸에서 반환한 적이 있는지
 
-    def open(self, life: int, e: int, fixed: bool = False, parent: Optional[_Bar] = None) -> _Bar:
+    def open(self, life: int, e: int, fixed: bool = False, parent: Optional[_Bar] = None, sticky: bool = False) -> _Bar:
         """막대를 연다. fixed(액터가 받는 호출)면 높이 ACT_H로 끝나 쌓지 않고, 부른 막대를 그만큼 잇는다(부른 쪽이 먼저
-        끝나지 않게)."""
-        b = _Bar(life, e, {(e, ACT_H)}, parent=parent)
+        끝나지 않게). 다만 sticky(액터가 대답할 호출)면 쌓아 두고 대답할 때 닫는다."""
+        b = _Bar(life, e, {(e, ACT_H)}, parent=parent, sticky=sticky)
         self.bars.append(b)
-        if not fixed:
+        if not fixed or sticky:
             self.stack.append(b)
         elif parent is not None:
             parent.terms.add((e, ACT_H))
@@ -586,51 +588,63 @@ class _Activations:
         if b.parent is not None and b.parent in self.stack:
             b.parent.terms |= {(j, off or CLEAR) for j, off in b.terms}
 
+    @staticmethod
+    def _closable(x: _Bar, keep_sticky: bool) -> bool:
+        return not x.protected and not (keep_sticky and x.sticky)
+
     def close_above(self, b: _Bar) -> None:
         i = next(k for k, x in enumerate(self.stack) if x is b)
         for x in reversed(self.stack[i + 1:]):
-            if not x.protected:
+            if self._closable(x, True):
                 self._close(x)
 
-    def close_all(self) -> None:
+    def close_all(self, keep_sticky: bool = True) -> None:
+        """지킨 막대 밖의 열린 막대를 모두 닫는다. 대답을 기다리는 막대는 keep_sticky일 때 남긴다(메시지가 닫을 때) —
+        프레임·칸이 끝날 때와 그림 끝에서는 닫는다."""
         for x in reversed(list(self.stack)):
-            if not x.protected:
+            if self._closable(x, keep_sticky):
                 self._close(x)
 
-    def message(self, src: int, dst: int, kind: str, e: int, src_actor: bool, dst_actor: bool
+    def message(self, src: int, dst: int, kind: str, e: int, src_actor: bool, dst_actor: bool, sticky: bool = False
                 ) -> tuple[Optional[_Bar], Optional[_Bar]]:
-        """메시지 하나를 넣고 (선이 시작하는 막대, 화살촉이 닿는 막대)를 돌려준다. 막대가 없는 끝은 None이다."""
+        """메시지 하나를 넣고 (선이 시작하는 막대, 화살촉이 닿는 막대)를 돌려준다. 막대가 없는 끝은 None이다. sticky는
+        액터를 부르는 호출에 그 액터가 다음에 대답하는지다."""
         s = self.send_from(src, kind, src_actor)
         if s is None and not src_actor and kind != "reply":
             s = self.open(src, e)
         d = None
         if kind == "reply":
             if s is not None:
-                # 위에 남은 것은 프레임이 지키던 막대뿐이다(나머지는 send_from이 닫았다). 부른 쪽이 반환하면 함께 끝나고,
-                # 이 반환 선이 그 생명선을 지날 수 있어 선 아래로 CLEAR만큼 잇는다
+                # 위에 남은 것은 프레임이 지키던 막대와 대답을 기다리는 막대뿐이다(나머지는 send_from이 닫았다). 부른 쪽이
+                # 반환하면 함께 끝나고, 이 반환 선이 그 생명선을 지날 수 있어 선 아래로 CLEAR만큼 잇는다. 이 반환을 받는
+                # 생명선의 막대는 남겨 아래에서 반환에 잇는다
                 for x in reversed(self.stack[self.stack.index(s) + 1:]):
-                    self._close(x)
-                    x.terms.add((e, CLEAR))
+                    if x.life != dst:
+                        self._close(x)
+                        x.terms.add((e, CLEAR))
                 self._close(s)  # 반환 높이는 부모에게 넘기지 않는다 — 건너뛰는 반환이 사이 막대 끝을 선 위에 두지 않게
                 s.terms.add((e, 0))
-            if not dst_actor:
-                d = self.find(dst)
-                if d is not None:
-                    self.close_above(d)
-                    d.terms.add((e, 0))
-                else:
-                    d = self.open(dst, e)
+            d = self.find(dst)
+            if d is not None:
+                self.close_above(d)
+                d.terms.add((e, 0))
+            elif not dst_actor:
+                d = self.open(dst, e)
         else:
             if s is not None:
                 s.terms.add((e, 0))
             if kind == "call":
-                d = self.open(dst, e, fixed=dst_actor, parent=s)
+                d = self.open(dst, e, fixed=dst_actor, parent=s, sticky=dst_actor and sticky)
         return s, d
 
+    def _source(self, src: int, kind: str, src_actor: bool) -> Optional[_Bar]:
+        """메시지가 시작하는 막대. 액터는 대답(반환)할 때만 대답을 기다리던 막대에서 보낸다."""
+        return self.find(src) if not src_actor or kind == "reply" else None
+
     def send_from(self, src: int, kind: str, src_actor: bool) -> Optional[_Bar]:
-        """보내는 쪽 규칙: 보내는 생명선의 열린 막대를 찾아 그 위를 닫는다. 없으면(액터도) 반환이 아닌 한 열린 막대를 모두
-        닫는다. 찾은 막대를 돌려준다."""
-        s = None if src_actor else self.find(src)
+        """보내는 쪽 규칙: 보내는 막대를 찾아 그 위를 닫는다. 없으면 반환이 아닌 한 열린 막대를 모두 닫는다(대답을 기다리는
+        막대는 남긴다). 찾은 막대를 돌려준다."""
+        s = self._source(src, kind, src_actor)
         if s is not None:
             self.close_above(s)
         elif kind != "reply":
@@ -639,12 +653,12 @@ class _Activations:
 
     def _would_close(self, src: int, kind: str, src_actor: bool) -> set[int]:
         """send_from이 닫을 막대(id). 아무것도 바꾸지 않는다."""
-        s = None if src_actor else self.find(src)
+        s = self._source(src, kind, src_actor)
         if s is not None:
             above = self.stack[self.stack.index(s) + 1:]
         else:
             above = self.stack if kind != "reply" else []
-        return {id(x) for x in above if not x.protected}
+        return {id(x) for x in above if self._closable(x, True)}
 
     def frame_start(self, firsts: list[tuple[int, str, bool]]) -> None:
         """칸마다 첫 메시지(보내는 쪽, 종류, 액터인지)가 모두 닫을 막대는 프레임 앞에서 닫고, 남은 막대를 프레임 끝까지
@@ -658,22 +672,30 @@ class _Activations:
         self.kept = list(self.stack)
         self.ended = [False] * len(self.kept)
 
-    def branch(self, e: int) -> None:
+    def branch(self, e: int, answers: Callable[[int], bool]) -> None:
         """alt 칸 나눔: 앞 칸에서 연 막대를 닫고, 프레임이 열릴 때의 막대로 돌아간다. 앞 칸에서 반환해 끝난 막대는 이 칸에서
-        이어 가는 막대를 새로 연다."""
-        self.close_all()  # 남는 것은 지킨 막대뿐이고, 쌓인 차례는 kept와 같다
+        이어 가는 막대를 새로 연다. 대답을 기다리던 액터 막대는 그 액터가 이 칸에서 대답할 때만 잇는다(answers) — 대답
+        대신 다른 메시지를 보내면 그 선이 막대 가운데에서 나가게 된다."""
+        self.close_all(keep_sticky=False)  # 남는 것은 지킨 막대뿐이고, 쌓인 차례는 kept와 같다
         now: dict[int, _Bar] = {}  # 바꾼 막대 → 이 칸에서 잇는 막대
+        stack = []
         for i, b in enumerate(self.kept):
-            if b not in self.stack:
-                self.ended[i] = True
-                parent = now.get(id(b.parent), b.parent) if b.parent is not None else None
-                self.kept[i] = _Bar(b.life, e, {(e, EDGE_CLEAR)}, protected=True, top_off=EDGE_CLEAR, parent=parent)
-                self.bars.append(self.kept[i])
-                now[id(b)] = self.kept[i]
-        self.stack = list(self.kept)
+            if b in self.stack:
+                stack.append(b)
+                continue
+            self.ended[i] = True
+            if b.sticky and not answers(b.life):
+                continue
+            parent = now.get(id(b.parent), b.parent) if b.parent is not None else None
+            self.kept[i] = _Bar(b.life, e, {(e, EDGE_CLEAR)}, protected=True, sticky=b.sticky, top_off=EDGE_CLEAR,
+                                parent=parent)
+            self.bars.append(self.kept[i])
+            now[id(b)] = self.kept[i]
+            stack.append(self.kept[i])
+        self.stack = stack
 
     def frame_end(self, e: int) -> None:
-        self.close_all()
+        self.close_all(keep_sticky=False)
         for i in reversed(range(len(self.kept))):
             b = self.kept[i]
             b.protected = False
@@ -742,17 +764,34 @@ def _plan(d: Diagram) -> _Plan:
     acts = _Activations()
     attach: list = [(None, None)] * len(d.messages)
     at = [0] * len(d.messages)
+    def answers(name: str, start: int) -> bool:
+        """액터 name이 messages[start]부터 보는 다음 메시지가 반환(대답)인지. 그 전에 그 액터를 다시 부르면 대답은 나중
+        호출이 받으므로 아니다."""
+        for n in d.messages[start:]:
+            if n.source == name:
+                return n.kind == "reply"
+            if n.target == name and n.kind == "call":
+                return False
+        return False
+
+    def answered(k: int) -> bool:
+        """액터를 부르는 호출에 그 액터가 대답하는지 — 그러면 막대를 대답까지 잇는다."""
+        m = d.messages[k]
+        return m.kind == "call" and actor[index[m.target]] and answers(m.target, k + 1)
+
+    names = [p.name for p in d.participants]
     for e, ev in enumerate(events):
         if ev.kind == "message":
             m = d.messages[ev.item]
             s, t = index[m.source], index[m.target]
-            attach[ev.item] = acts.message(s, t, m.kind, e, actor[s], actor[t])
+            attach[ev.item] = acts.message(s, t, m.kind, e, actor[s], actor[t], answered(ev.item))
             at[ev.item] = e
         elif ev.kind == "start":
             firsts = [d.messages[b.first] for b in d.fragments[ev.item].branches]
             acts.frame_start([(index[m.source], m.kind, actor[index[m.source]]) for m in firsts])
         elif ev.kind == "branch":
-            acts.branch(e)
+            start = d.fragments[ev.item].branches[ev.branch].first
+            acts.branch(e, lambda life: answers(names[life], start))
         elif ev.kind == "end":
             acts.frame_end(e)
         else:
@@ -761,7 +800,7 @@ def _plan(d: Diagram) -> _Plan:
                 s = index[d.messages[before].source]
                 acts.send_from(s, d.messages[before].kind, actor[s])
             acts.ref(e)
-    acts.close_all()
+    acts.close_all(keep_sticky=False)
     bars = acts.bars
     # 깊이는 이 막대가 시작할 때 아직 열려 있는 같은 생명선 막대 가운데 가장 깊은 것 + 1이다 — 시간이 겹치는 막대끼리 깊이가
     # 늘 달라 옆으로 비켜 그려진다. 같은 칸 나눔에서 함께 이어 가는 막대는 높이가 같아, 먼저 연(아래에 쌓인) 막대를 앞으로 친다
