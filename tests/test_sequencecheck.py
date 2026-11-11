@@ -283,6 +283,21 @@ def test_bars_of_different_lifelines_overlapping_or_touching_are_caught(base, ga
     assert any(f.kind == "bar_overlap" and "다른 생명선" in f.problem for f in found)
 
 
+def test_bar_covering_another_lifeline_is_caught(base):
+    b = bar(base, "B")
+    found = SC.find(swap(base, "bars", b, replace(b, x=part(base, "U").x)))
+    assert any(f.kind == "bar_on_participant" and "생명선" in f.problem for f in found)
+
+
+def test_arrowhead_over_a_bar_of_another_lifeline_is_caught(base):
+    # find(id)의 화살촉(B 막대 왼쪽 변에서 ARROW만큼 뒤) 자리에 다른 생명선의 막대가 있다
+    m = base.messages[1]
+    tip = m.end
+    stray = replace(bar(base, "A"), owner="U", x=tip - 12, top=m.y - 10, bottom=m.y + 10)
+    found = SC.find(replace(base, bars=base.bars + (stray,)))
+    assert any(f.kind == "message_off_bar" and "화살촉이 받는 쪽이 아닌" in f.problem for f in found)
+
+
 def test_report_crossings_must_be_named():
     with pytest.raises(TypeError):
         K.Report((), (), (1, 1), (1, 1), 1.0)  # 옛 차례(failures, crossings, size, …)로 부르면 조용히 틀리는 대신 멈춘다

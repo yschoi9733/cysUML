@@ -45,11 +45,11 @@ MESSAGE_GAP = 2 * ARROW_HALF + PAD   # 가로로 겹쳐 지나는 두 메시지 
 
 KINDS = (  # 불합격 종류(이 차례로 낸다)
     "participant_overlap",       # 머리끼리 겹치거나 머리가 다른 생명선을 가린다
-    "bar_on_participant",        # 막대가 머리에 걸친다
+    "bar_on_participant",        # 막대가 머리에 걸치거나 다른 생명선을 덮는다
     "bar_overlap",               # 한 생명선의 같은 깊이 막대끼리 붙거나, 다른 생명선의 막대끼리 겹친다
     "bar_off_lifeline",          # 막대가 제 생명선(깊이만큼 비킨 자리)에 있지 않거나, 비킨 막대가 시작할 때 바깥 막대가 없다
     "bar_off_message",           # 막대 윗변이 여는 메시지에 맞지 않거나, 마지막 메시지 밑에 짧은 꼬리가 남는다
-    "message_off_bar",           # 메시지 선 끝이 막대 변(그 높이에 막대가 없으면 생명선)에 닿지 않는다
+    "message_off_bar",           # 메시지 선 끝이 막대 변(그 높이에 막대가 없으면 생명선)에 닿지 않거나 화살촉이 남의 막대에 겹친다
     "line_at_bar_end",           # 메시지 선이 건너는 막대의 윗변·밑변에 붙는다
     "line_overlap",              # 메시지 선끼리 붙어 한 선으로 보인다
     "line_through_participant",  # 메시지 선·화살촉이 머리를 지나거나 머리에 닿는다
@@ -247,11 +247,17 @@ class _Scene:
                                      f"{self.head(a)}.")
 
     def bars_on_participants(self) -> Iterator[Finding]:
+        """막대(흰 사각형)가 머리에 걸치거나, 다른 참여자의 생명선 점선을 덮거나 그 변이 PAD 안으로 붙는다."""
         for b in self.lay.bars:
             for i, p in enumerate(self.parts):
                 if _overlap(b.rect, p.head):
                     yield self.found("bar_on_participant", (self.who(b.owner), f"participants[{i}]"), between(b.rect, p.head),
                                      f"막대가 머리에 걸친다: {self.bar(b)}, {self.head(p)}.")
+                elif p.participant.name != b.owner and _crosses_v(p.x, p.dash_top, p.bottom, grow(b.rect, PAD)):
+                    yield self.found("bar_on_participant", (self.who(b.owner), f"participants[{i}]"),
+                                     (p.x, max(b.top, p.dash_top), p.x, min(b.bottom, p.bottom)),
+                                     f"막대가 다른 참여자 '{p.participant.name}'의 생명선(x {fmt_num(p.x)})을 덮거나 {PAD}px "
+                                     f"안으로 붙는다: {self.bar(b)}.")
 
     def bar_overlaps(self) -> Iterator[Finding]:
         groups: dict[tuple[str, int], list[PlacedBar]] = defaultdict(list)
@@ -359,6 +365,13 @@ class _Scene:
                     yield self.found("message_off_bar", (*elements, *(self.who(b.owner) for b in near)), where,
                                      f"{at}이 다른 생명선의 막대 안이나 변 바로 앞에서 멈춘다: "
                                      f"{', '.join(self.bar(b) for b in near)}.")
+                if which == "끝":  # 화살촉은 끝에서 ARROW만큼 뒤로 뻗는다 — 받는 쪽이 아닌 생명선의 막대에 겹치면 안 된다
+                    under = [b for b in self.lay.bars if b.owner != name and b not in near and _overlap(m.arrow, b.rect)]
+                    if under:
+                        yield self.found("message_off_bar", (*elements, *(self.who(b.owner) for b in under)),
+                                         between(m.arrow, under[0].rect),
+                                         f"{_message(m)}의 화살촉이 받는 쪽이 아닌 생명선의 막대에 겹친다: "
+                                         f"{', '.join(self.bar(b) for b in under)}.")
 
     def lines_at_bar_ends(self) -> Iterator[Finding]:
         for m in self.lay.messages:
