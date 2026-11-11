@@ -19,6 +19,9 @@ from typing import Any, Optional, Union
 from . import text as T
 from .canvas import BG_MARGIN, SCALE, Canvas, Line, Point, Polygon, Text
 from .geom import gap, grow, hits, meets, outline, span
+from .reading import InputError, Reader
+from .reading import at as _at
+from .reading import show as _show
 from .report import fmt_num, fmt_rect
 
 CLASS_KINDS = ("class", "abstract", "interface", "enum")
@@ -59,14 +62,6 @@ LABEL_CLEAR = BG_MARGIN + 1  # 선 글자의 흰 바탕이 선에 닿지 않게 
 MULT_ANGLES = (math.pi / 8, math.pi / 6, math.pi / 4, math.pi / 3)
 MULT_DISTANCES = (20, 25, 30, 35, 40, 50)
 MULT_ENOUGH = 20    # 상자와 이만큼 떨어지면 더 멀리 두지 않고 선 끝에 가까운 자리를 고른다
-
-
-class InputError(ValueError):
-    """틀린 입력. problems는 문제마다 한 줄이다."""
-
-    def __init__(self, problems):
-        self.problems = tuple(problems)
-        super().__init__("\n".join(self.problems))
 
 
 @dataclass(frozen=True)
@@ -191,59 +186,7 @@ class Drawing:
 # ---------------------------------------------------------------- 입력 읽기
 
 
-def _show(v: Any) -> str:
-    try:
-        s = repr(v)
-    except ValueError:  # 파이썬이 글자로 바꾸지 않는 아주 큰 정수(4300자리 넘게)
-        return "(아주 큰 정수)"
-    return s if len(s) <= 40 else s[:37] + "..."
-
-
-def _at(path: str, key) -> str:
-    return f"{path}[{key}]" if isinstance(key, int) else f"{path}.{key}" if path else str(key)
-
-
-class _Reader:
-    def __init__(self):
-        self.problems: list[str] = []
-
-    def fail(self, path: str, message: str) -> None:
-        self.problems.append(f"{path or '입력'}: {message}")
-
-    def obj(self, v, path: str, fields: tuple[str, ...], required: tuple[str, ...] = ()) -> Optional[dict]:
-        if not isinstance(v, dict):
-            self.fail(path, f"객체여야 한다(받은 값 {_show(v)})")
-            return None
-        for k in v:
-            if k not in fields:
-                self.fail(_at(path, k) if isinstance(k, str) else path,
-                          f"모르는 필드다{'' if isinstance(k, str) else f' {_show(k)}'}. 쓸 수 있는 필드: {', '.join(fields)}")
-        for k in required:
-            if k not in v:
-                self.fail(path, f"'{k}' 필드가 빠졌다")
-        return v
-
-    def items(self, v, path: str) -> list:
-        if not isinstance(v, (list, tuple)):
-            self.fail(path, f"목록이어야 한다(받은 값 {_show(v)})")
-            return []
-        return list(v)
-
-    def text(self, v, path: str, bold: bool = False, name: bool = False) -> Optional[str]:
-        """name이면 상자를 가리키는 이름이라 앞뒤 공백을 뗀다("A "와 "A"를 같은 상자로)."""
-        if not isinstance(v, str):
-            self.fail(path, f"문자열이어야 한다(받은 값 {_show(v)})")
-            return None
-        if not v.strip():
-            self.fail(path, "비어 있다")
-            return None
-        try:
-            T.text_width(v, bold)
-        except ValueError as e:
-            self.fail(path, str(e))
-            return None
-        return T.normalize(v).strip() if name else T.normalize(v)
-
+class _Reader(Reader):
     def number(self, v, path: str, least: float = -COORD_LIMIT) -> Optional[float]:
         try:
             f = float(v) if isinstance(v, numbers.Real) and not isinstance(v, bool) else math.nan
@@ -256,12 +199,6 @@ class _Reader:
             self.fail(path, f"{fmt_num(least)}~{fmt_num(COORD_LIMIT)} 사이여야 한다(받은 값 {_show(v)})")
             return None
         return f
-
-    def choice(self, v, path: str, options: tuple[str, ...]) -> Optional[str]:
-        if not isinstance(v, str) or v not in options:
-            self.fail(path, f"{' · '.join(repr(o) for o in options)} 가운데 하나여야 한다(받은 값 {_show(v)})")
-            return None
-        return v
 
     def flag(self, v, path: str) -> bool:
         if not isinstance(v, bool):

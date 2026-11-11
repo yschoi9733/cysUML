@@ -22,8 +22,10 @@ from typing import Any, Optional
 
 from . import text as T
 from .canvas import SCALE, Canvas
-from .classdiagram import InputError, _at, _Reader, _show
 from .geom import overlap
+from .reading import InputError, Reader
+from .reading import at as _at
+from .reading import show as _show
 
 __all__ = ["InputError", "parse", "layout", "draw", "render"]
 
@@ -360,7 +362,7 @@ def _wrapped(s: str) -> bool:
     return False
 
 
-class _SeqReader(_Reader):
+class _SeqReader(Reader):
     def position(self, v, path: str, upper: int) -> Optional[int]:
         """messages 안의 자리(0~upper의 정수)."""
         if not isinstance(v, int) or isinstance(v, bool):
