@@ -1,4 +1,5 @@
 import copy
+from dataclasses import replace
 
 import pytest
 from PIL import Image
@@ -608,6 +609,22 @@ def test_notes_are_collected_below_the_lifelines():
     bottom = max(p.bottom for p in lay.participants)
     assert [n.top for n in lay.notes] == [bottom + S.NOTE_GAP, bottom + S.NOTE_GAP + S.NOTE_STEP]
     assert all(n.left == S.LEFT for n in lay.notes)
+
+
+def test_measured_boxes_follow_a_replaced_layout():
+    # 꼬리표·글자·머리·화살촉은 처음 읽을 때 한 번 재 두고, replace로 옮긴 것은 새로 잰다(검사 테스트가 이렇게 옮긴다)
+    lay = lay_of(life("U", "A", actor=("U",)), [call("U", "A")],
+                 [{"kind": "loop", "first": 0, "last": 0, "condition": "c"}, {"kind": "ref", "name": "R", "before": 1}], ["n"])
+    (f,), (r,), (n,), (m,), u = lay.frames, lay.refs, lay.notes, lay.messages, lay.participants[0]
+    assert f.tag is f.tag and f.conditions[0].placed is f.conditions[0].placed and n.label is n.label
+    assert (f.kind, r.kind, f.covers, r.covers, r.dividers) == ("loop", "ref", False, True, ())
+    shift = lambda box: (box[0] + 5, box[1] + 7, box[2] + 5, box[3] + 7)  # noqa: E731
+    assert replace(f, left=f.left + 5, top=f.top + 7).tag == shift(f.tag)
+    assert replace(r, left=r.left + 5, top=r.top + 7).tag == shift(r.tag)
+    assert replace(r.name, x=r.name.x + 5, y=r.name.y + 7).box == shift(r.name.box)
+    assert replace(n, left=n.left + 5, top=n.top + 7).label.box == shift(n.label.box)
+    assert replace(u, x=u.x + 5, top=u.top + 7).head == shift(u.head)
+    assert replace(m, end=m.end + 5, y=m.y + 7).arrow == (m.arrow[0] + 5, m.arrow[1] + 7, m.arrow[2] + 5, m.arrow[3] + 7)
 
 
 def test_reply_without_name_has_no_label():

@@ -107,6 +107,16 @@ def test_each_kind_is_caught(base, kind):
     assert kinds(found) == sorted(kinds(found), key=SC.KINDS.index)
 
 
+def test_rules_run_in_kind_order_one_kind_each(base):
+    kinds_of = [set() for _ in SC._Scene.RULES]  # 규칙마다 CASES 배치에서 낸 종류
+    for change in CASES.values():
+        scene = SC._Scene(change(base))
+        for i, rule in enumerate(scene.RULES):
+            kinds_of[i] |= {f.kind for f in rule(scene)}
+    assert [len(k) for k in kinds_of] == [1] * len(SC.KINDS)
+    assert [k for ks in kinds_of for k in ks] == list(SC.KINDS)
+
+
 @pytest.mark.parametrize("change", [
     lambda lay: swap(lay, "refs", lay.refs[0], moved(lay.refs[0], part(lay, "C").top + 5)),  # ref 상자가 머리를 가린다
 ])
