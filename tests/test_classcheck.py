@@ -69,6 +69,32 @@ def test_line_closer_than_the_clearance_counts_as_passing_the_box(p_top, passed,
         assert phrase in r.failures[0].problem
 
 
+@pytest.mark.parametrize("via_y, passed", [(-2, False), (-4, False), (-4.5, True), (-10, True)])
+def test_line_running_along_its_own_end_box_fails(via_y, passed):
+    # A→B가 A 위 변 바로 위(via_y)를 x 10~90 동안 따라간다 — A의 윗테두리가 두 겹으로 보인다
+    r = report([box("A", 0, 0), box("B", 300, 0)],
+               [rel("association", "A", "B", via=[[10, via_y], [200, via_y], [200, 24]])])
+    assert r.passed is passed
+    if not passed:
+        (f,) = r.failures
+        assert f.kind == "line_through_box" and f.elements == ("A->B", "A")
+        assert "제 끝 상자 변에 4px 안으로 붙어 간다" in f.problem and "상자 A(0, 0, 90×48)" in f.problem
+
+
+def test_end_segment_leaving_its_box_at_a_shallow_angle_passes():
+    # 넓은 A(300×48) 위 변을 9°쯤으로 비스듬히 나가는 끝 구간은 처음 20여 px가 변에 붙어 있지만, 끝 구간이라 보지 않는다
+    r = report([box("A", 0, 0, width=300), box("B", 600, -200)],
+               [rel("association", "A", "B", via=[[290, -6], [645, -6]])])
+    assert r.passed
+
+
+def test_self_relation_loop_hugging_its_box_fails():
+    # 자기 관계의 고리 가운데 구간이 A 위 변 2px 위를 지난다(처음·마지막 구간만 A에 닿는 끝 구간이다)
+    hug = report([box("A", 0, 0)], [rel("association", "A", "A", via=[[20, -30], [20, -2], [70, -2], [70, -30], [140, -30], [140, 24]])])
+    assert [(f.kind, f.elements) for f in hug.failures] == [("line_through_box", ("A->A", "A"))]
+    assert report([box("A", 0, 0)], [rel("association", "A", "A", via=[[45, -40], [140, -40], [140, 24]])]).passed
+
+
 def test_moving_the_box_off_the_line_passes():
     assert line_past(200).passed
 
@@ -329,7 +355,9 @@ def test_line_coming_back_over_its_own_triangle_fails():
     # 끝 구간 (370, 24)→(400, 24) 바로 앞 구간이 B 앞 빈 삼각형(x 382~400) 위로 되돌아 지나간다
     r = report([box("A", 0, 0), box("B", 400, 0)],
                [rel("generalization", "A", "B", via=[[200, 100], [398, 30], [370, 24]])])
-    assert [(f.kind, f.elements) for f in r.failures] == [("line_through_head", ("A->B",))]
+    # 앞 구간이 지나는 꺾는 점 (398, 30)은 B 왼쪽 변에서 2px이라 B 변에 붙어 가는 것도 함께 걸린다
+    assert [(f.kind, f.elements) for f in r.failures] == [("line_through_box", ("A->B", "B")),
+                                                          ("line_through_head", ("A->B",))]
 
 
 def test_own_end_shape_on_its_own_end_segments_is_fine():
