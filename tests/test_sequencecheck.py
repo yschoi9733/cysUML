@@ -238,13 +238,22 @@ def test_messages_meeting_end_to_end_at_one_height_are_caught(callback):
     # A→B와 B→C가 거의 같은 높이면 B의 막대를 사이에 두고 한 선(A→C)처럼 보인다
     m0, m1 = callback.messages[:2]
     found = SC.find(swap(callback, "messages", m1, replace(m1, y=m0.y + 1)))
-    assert any(f.kind == "line_overlap" and f.elements[:2] == ("messages[0]", "messages[1]") for f in found)
+    (f,) = [f for f in found if f.kind == "line_overlap" and f.elements[:2] == ("messages[0]", "messages[1]")]
+    assert f.where[0] <= f.where[2] and f.where[1] <= f.where[3]  # 가로로 안 겹쳐도 자리는 올바른 상자(두 끝 사이 틈)
 
 
-def test_frame_side_along_a_lifeline_is_caught(base):
-    f = base.frames[0]
-    found = SC.find(swap(base, "frames", f, replace(f, right=part(base, "B").x + 1)))
+@pytest.mark.parametrize("field", ["frames", "refs"])
+def test_frame_or_ref_side_along_a_lifeline_is_caught(base, field):
+    f = getattr(base, field)[0]
+    found = SC.find(swap(base, field, f, replace(f, right=part(base, "B").x + 1)))
     assert any(x.kind == "frame_on_participant" and "생명선" in x.problem for x in found)
+
+
+def test_tag_side_along_a_lifeline_is_caught(base):
+    f = base.frames[0]
+    u = part(base, "U")
+    found = SC.find(swap(base, "frames", f, replace(f, left=u.x - (f.tag[2] - f.tag[0]))))  # 꼬리표 오른쪽 변이 U의 생명선 위
+    assert "tag_on_lifeline" in kinds(found)
 
 
 def test_lowered_head_covering_another_lifeline_is_caught(base):

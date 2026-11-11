@@ -31,7 +31,7 @@ from typing import Iterator, Union
 
 from . import text as T
 from .canvas import background
-from .geom import Box, between, overlap, span
+from .geom import Box, between, grow, overlap, span
 from .report import Finding, fmt_num, fmt_rect
 from .report import Report as _Report
 from .sequencediagram import (ACT_W, ARROW_HALF, BAR_GAP, CLEAR, EDGE_CLEAR, EPS, FRAME_GAP, NEST, NOTE_FOLD, PAD,
@@ -276,8 +276,10 @@ class _Scene:
                                      f"다른 생명선의 막대끼리 겹친다: {self.bar(a)}, {self.bar(b)}.")
 
     def continues(self, b: PlacedBar) -> bool:
-        """alt 앞 칸에서 반환해 끝난 막대를 이어 가는 막대(PlacedBar.continued)이고, 그 윗변이 alt 칸 나눔선 EDGE_CLEAR 아래인지."""
-        return b.continued and any(_on(b.top, d + EDGE_CLEAR) for f in self.lay.frames for d in f.dividers)
+        """alt 앞 칸에서 반환해 끝난 막대를 이어 가는 막대(PlacedBar.continued)이고, 그 윗변이 그 막대가 든 alt의 칸 나눔선
+        EDGE_CLEAR 아래인지."""
+        return b.continued and any(f.top < b.top < f.bottom and _on(b.top, d + EDGE_CLEAR)
+                                   for f in self.lay.frames for d in f.dividers)
 
     def bars_off_lifelines(self) -> Iterator[Finding]:
         """막대 가운데는 생명선에서 깊이 × NEST만큼 오른쪽이고, 깊이 d(>0) 막대가 시작할 때는 같은 생명선에 깊이 d-1 막대가
@@ -381,7 +383,7 @@ class _Scene:
                     break
                 b0, b1 = sorted((b.start, b.end))
                 if a0 < b1 + ACT_W + PAD and b0 < a1 + ACT_W + PAD:
-                    yield self.found("line_overlap", (a.owner, b.owner), (max(a0, b0), a.y, min(a1, b1), b.y),
+                    yield self.found("line_overlap", (a.owner, b.owner), between((a0, a.y, a1, a.y), (b0, b.y, b1, b.y)),
                                      f"메시지 선끼리 {fmt_num(b.y - a.y)}px로 붙어 한 선으로 보인다({MESSAGE_GAP}px 이상 떨어져야 "
                                      f"한다): {_message(a)}(y {fmt_num(a.y)}), {_message(b)}(y {fmt_num(b.y)}).")
 
@@ -400,10 +402,13 @@ class _Scene:
     # -------- 프레임·ref
 
     @staticmethod
+    def dividers(f: Framed) -> tuple[float, ...]:
+        return f.dividers if isinstance(f, PlacedFrame) else ()
+
+    @staticmethod
     def edges(f: Framed) -> list[tuple[float, str]]:
         """가로 선(높이, 이름) — 모두 f.left~f.right에 걸친다."""
-        dividers = f.dividers if isinstance(f, PlacedFrame) else ()
-        return [(f.top, "윗변"), (f.bottom, "밑변"), *((y, "칸 나눔선") for y in dividers)]
+        return [(f.top, "윗변"), (f.bottom, "밑변"), *((y, "칸 나눔선") for y in _Scene.dividers(f))]
 
     @staticmethod
     def sides(f: Framed) -> list[tuple[float, str]]:
@@ -411,19 +416,23 @@ class _Scene:
         return [(f.left, "왼쪽 변"), (f.right, "오른쪽 변")]
 
     def returns_in(self, f: Framed, b: PlacedBar) -> bool:
-        """막대가 프레임 안 메시지에서 끝나는지: 밑변을 정한 메시지(PlacedBar.closer)가 프레임 안이고, 밑변이 그 높이나 CLEAR
-        아래다(그 메시지에서 이 막대나 이 막대가 부른 막대가 끝났다)."""
+        """막대가 프레임 안 메시지에서 끝나는지: 밑변을 정한 메시지(PlacedBar.closer)가 프레임 안이고, 그 메시지가 이 막대에
+        닿으며 밑변이 그 높이이거나, 그 메시지에 닿는 다른 막대(이 막대가 부른 막대 등)가 그 높이에서 끝나고 이 막대는 CLEAR
+        아래에서 끝난다 — 배치가 알려 준 메시지를 좌표로도 확인한다."""
         if b.closer is None:
             return False
-        y = self.lay.messages[b.closer].y
-        return f.top < y < f.bottom and (_on(b.bottom, y) or _on(b.bottom, y + CLEAR))
+        m = self.lay.messages[b.closer]
+        if not f.top < m.y < f.bottom:
+            return False
+        if _on(b.bottom, m.y):
+            return _attached(m, b)
+        return _on(b.bottom, m.y + CLEAR) and any(c is not b and _on(c.bottom, m.y) and _attached(m, c) for c in self.lay.bars)
 
     def frames_cutting_bars(self) -> Iterator[Finding]:
         """막대 끝이 프레임 가로 선에 붙거나, 막대가 프레임 윗변·밑변 하나만 건너거나, alt 칸 안에서 시작한 막대가 칸 나눔선을
         건넌다(앞 칸에서 반환한 생명선의 막대를 나눔선 EDGE_CLEAR 아래에서 이어 가는 것은 빼고)."""
         for f in self.framed:
-            edges = self.edges(f)
-            dividers = f.dividers if isinstance(f, PlacedFrame) else ()
+            edges, dividers = self.edges(f), self.dividers(f)
             for b in self.lay.bars:
                 elements = (f.owner, self.who(b.owner))
                 for y, edge in edges:
@@ -441,8 +450,8 @@ class _Scene:
                 if over_bottom and not over_top:
                     yield self.found("frame_cuts_bar", elements, between(b.rect, f.rect),
                                      f"막대가 {_frame(f)} 안에서 시작해 밑변을 건넌다(잘린 것처럼 보인다): {self.bar(b)}.")
-                if f.top + EPS < b.top and not self.continues(b):
-                    for d in dividers:
+                if f.top + EPS < b.top and not (b.continued and any(_on(b.top, d + EDGE_CLEAR) for d in dividers)):
+                    for d in dividers:  # 이어 가는 막대는 이 alt의 칸 나눔선 아래에서 시작할 때만 봐준다
                         if b.top + EPS < d < b.bottom - EPS:
                             yield self.found("frame_cuts_bar", elements, (b.rect[0], d, b.rect[2], d),
                                              f"막대가 {_frame(f)}의 한 칸에서 시작해 칸 나눔선(y {fmt_num(d)})을 건넌다(칸 안에서 "
@@ -496,30 +505,31 @@ class _Scene:
             for i, p in enumerate(self.parts):
                 elements = (f.owner, f"participants[{i}]")
                 if isinstance(f, PlacedRef):
-                    box = f.rect
-                    if _overlap(box, p.head):
-                        yield self.found("frame_on_participant", elements, between(box, p.head),
+                    if _overlap(f.rect, p.head):
+                        yield self.found("frame_on_participant", elements, between(f.rect, p.head),
                                          f"{_frame(f)} 상자가 머리를 가린다: {self.head(p)}.")
-                    continue
-                for y, edge in self.edges(f):
-                    if _crosses(y, f.left, f.right, p.head):
-                        yield self.found("frame_on_participant", elements, (p.head[0], y, p.head[2], y),
-                                         f"{_frame(f)}의 {edge}(y {fmt_num(y)})이 머리를 지난다: {self.head(p)}.")
-                for x, side in self.sides(f):
-                    if _crosses_v(x, f.top, f.bottom, p.head):
-                        yield self.found("frame_on_participant", elements, (x, p.head[1], x, p.head[3]),
-                                         f"{_frame(f)}의 {side}(x {fmt_num(x)})이 머리를 지난다: {self.head(p)}.")
-                    elif abs(x - p.x) < PAD - EPS and f.top < p.bottom and p.dash_top < f.bottom:
+                else:
+                    for y, edge in self.edges(f):
+                        if _crosses(y, f.left, f.right, p.head):
+                            yield self.found("frame_on_participant", elements, (p.head[0], y, p.head[2], y),
+                                             f"{_frame(f)}의 {edge}(y {fmt_num(y)})이 머리를 지난다: {self.head(p)}.")
+                    for x, side in self.sides(f):
+                        if _crosses_v(x, f.top, f.bottom, p.head):
+                            yield self.found("frame_on_participant", elements, (x, p.head[1], x, p.head[3]),
+                                             f"{_frame(f)}의 {side}(x {fmt_num(x)})이 머리를 지난다: {self.head(p)}.")
+                for x, side in self.sides(f):  # ref 상자 옆 변도 그 밖의 생명선과 한 선으로 보일 수 있다
+                    if abs(x - p.x) < PAD - EPS and f.top < p.bottom and p.dash_top < f.bottom:
                         yield self.found("frame_on_participant", elements, (x, max(f.top, p.dash_top), x, min(f.bottom, p.bottom)),
                                          f"{_frame(f)}의 {side}(x {fmt_num(x)})이 참여자 '{p.participant.name}'의 생명선"
                                          f"(x {fmt_num(p.x)})에 {PAD}px 안으로 붙어 한 선으로 보인다.")
 
     def tags_on_lifelines(self) -> Iterator[Finding]:
-        """프레임 꼬리표만 본다 — ref 꼬리표는 흰 ref 상자 안이라 그 밑 생명선은 상자가 이미 덮는다."""
+        """프레임 꼬리표가 생명선 점선을 덮거나 그 변이 PAD 안으로 붙는다(머리는 text_on_participant가 본다). 프레임 꼬리표만
+        본다 — ref 꼬리표는 흰 ref 상자 안이라 그 밑 생명선은 상자가 이미 덮는다."""
         for f in self.lay.frames:
             tag = f.tag
             for i, p in enumerate(self.parts):
-                if _crosses_v(p.x, p.top, p.bottom, tag):
+                if _crosses_v(p.x, p.dash_top, p.bottom, grow(tag, PAD)):
                     yield self.found("tag_on_lifeline", (f.owner, f"participants[{i}]"), (p.x, tag[1], p.x, tag[3]),
                                      f"{_frame(f)}의 꼬리표(자리 {fmt_rect(tag)})가 참여자 '{p.participant.name}'의 "
                                      f"생명선(x {fmt_num(p.x)})을 가린다.")
