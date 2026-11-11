@@ -220,6 +220,33 @@ def test_bar_at_a_divider_that_continues_nothing_is_caught(alt):
     assert any(f.kind == "bar_off_message" and "여는 메시지가 없다" in f.problem for f in found)
 
 
+def test_layout_tells_which_bars_continue_and_where_bars_end(base):
+    # 배치가 아는 막대의 시작·끝을 검사가 좌표로 짐작하지 않게 싣는다
+    assert bar(base, "B").closer == 2 and not bar(base, "B").continued  # B는 반환 item에서 끝난다
+    lay = S.render({"participants": life("A", "B", "C"),
+                    "messages": [call("A", "B"), reply("B", "A", "ok"), call("A", "C", "log()"), reply("B", "A", "late")],
+                    "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 1},
+                                                            {"condition": "else", "first": 2, "last": 2}]}]}).layout
+    first, goes_on = sorted((b for b in lay.bars if b.owner == "B"), key=lambda b: b.top)
+    assert goes_on.continued and goes_on.closer is None and not first.continued
+    assert SC.find(lay) == ()
+    found = SC.find(swap(lay, "bars", goes_on, replace(goes_on, top=goes_on.top + 2, bottom=goes_on.bottom)))
+    assert any(f.kind == "bar_off_message" and "이어 가는 막대" in f.problem for f in found)
+
+
+def test_messages_meeting_end_to_end_at_one_height_are_caught(callback):
+    # A→B와 B→C가 거의 같은 높이면 B의 막대를 사이에 두고 한 선(A→C)처럼 보인다
+    m0, m1 = callback.messages[:2]
+    found = SC.find(swap(callback, "messages", m1, replace(m1, y=m0.y + 1)))
+    assert any(f.kind == "line_overlap" and f.elements[:2] == ("messages[0]", "messages[1]") for f in found)
+
+
+def test_frame_side_along_a_lifeline_is_caught(base):
+    f = base.frames[0]
+    found = SC.find(swap(base, "frames", f, replace(f, right=part(base, "B").x + 1)))
+    assert any(x.kind == "frame_on_participant" and "생명선" in x.problem for x in found)
+
+
 def test_lowered_head_covering_another_lifeline_is_caught(base):
     # 만들어지는 C의 머리는 내려와 있어 B의 머리와는 안 겹치지만, 넓으면 B의 생명선을 가린다
     c = part(base, "C")

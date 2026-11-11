@@ -230,13 +230,18 @@ def _extent(lines: list[str]) -> tuple[float, float]:
 
 @dataclass(frozen=True)
 class PlacedBar:
-    """활성 막대. x는 가운데이고, depth는 같은 생명선에서 이 막대를 감싼 막대 수다(그만큼 오른쪽으로 비킨다)."""
+    """활성 막대. x는 가운데이고, depth는 같은 생명선에서 이 막대를 감싼 막대 수다(그만큼 오른쪽으로 비킨다). continued는 alt
+    앞 칸에서 반환해 끝난 막대를 다음 칸 나눔선 EDGE_CLEAR 아래에서 이어 가는 막대인지, closer는 밑변을 정한 메시지 자리다 —
+    밑변이 그 메시지 높이이거나 CLEAR 아래일 때만 있고(그 메시지에서 이 막대나 이 막대가 부른 막대가 끝났다), 막대 높이·프레임·
+    ref로 정해졌으면 None이다. 검사(sequencecheck)가 막대가 어디서 열리고 끝나는지 좌표로 짐작하지 않게 싣는다."""
 
     owner: str
     x: float
     top: float
     bottom: float
     depth: int
+    continued: bool = False
+    closer: Optional[int] = None
 
     @property
     def rect(self) -> Box:
@@ -1234,9 +1239,13 @@ class _Placer:
     def _finish(self) -> Layout:
         d, c, done = self.d, self.cols, len(self.plan.events)
         bars = []
+        events = self.plan.events
         for b in self.plan.bars:
-            bars.append(PlacedBar(d.participants[b.life].name, self._bar_x(b), self.ys[b.top] + b.top_off,
-                                  self._bottom(b, done), b.depth))
+            bottom = self._bottom(b, done)
+            closer = next((events[j].item for j, off in sorted(b.terms) if events[j].kind == "message" and off in (0, CLEAR)
+                           and self.ys[j] + off == bottom), None)
+            bars.append(PlacedBar(d.participants[b.life].name, self._bar_x(b), self.ys[b.top] + b.top_off, bottom, b.depth,
+                                  b.top_off != 0, closer))
         life_end = max([self.floor] + [b.bottom for b in bars]) + LIFE_TAIL
         participants = []
         for i, p in enumerate(d.participants):
