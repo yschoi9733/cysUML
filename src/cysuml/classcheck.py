@@ -59,7 +59,7 @@ class Report(_Report):
     """report.Report에 선끼리 엇갈린 곳(crossings, 알림)을 더한다. Finding의 elements는 상자 이름이나 관계 기록의 owner이고,
     불합격 종류는 KINDS, 알림 종류는 crossing이다."""
 
-    crossings: tuple[Finding, ...] = ()
+    crossings: tuple[Finding, ...]
 
     PASSED = "합격 — 선이 상자·글자를 지나거나 겹친 곳이 없다."
     SHRINK = "상자를 가까이 모으거나 배율을 낮춘다"

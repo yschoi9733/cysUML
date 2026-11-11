@@ -6,7 +6,8 @@
 그리기(draw)는 배치 결과를 그대로 옮겨 그리므로 배치 결과(Drawing.layout)로 본다. 불합격 종류는 KINDS에 낸 차례대로 있고,
 그림 크기는 알림으로만 준다. 종류 이름은 뜻이 다르면 클래스도 검사(classcheck.KINDS)와 겹치지 않게 짓는다.
 
-글자는 줄 상자와, 흰 바탕을 까는 글자(메시지 글자·조건)면 그 바탕이 지우는 곳(잉크 둘레 BG_MARGIN)까지 차지한 것으로 본다. 메시지
+글자는 줄 상자와, 흰 바탕을 까는 글자(Label.bg — 메시지 글자·조건)면 그 바탕이 지우는 곳(Canvas.text처럼 잉크 둘레 BG_MARGIN)까지
+차지한 것으로 본다. 메시지
 선이 사이 생명선의 점선을 건너는 것은 UML 그대로라 걸지 않는다. 메시지 글자도 그 메시지가 건너는 생명선은 가려도 되고(글자 밑 점선을
 지운다), 그 밖의 생명선을 가리면 건다. 프레임 조건 글자는 프레임 윗변·칸 나눔선 바로 밑, 꼬리표 오른쪽에 쓰는 자리라 생명선 점선을
 지우며 건너도 된다 — 막대·머리만 비킨다.
@@ -14,6 +15,10 @@
 "프레임이 막대를 자르지 않는다"는 막대 끝이 프레임 가로 선에 붙지 않는다는 것과, 막대가 프레임 윗변·밑변 가운데 하나만 건너 프레임
 안에서 끝나거나 시작하지 않는다는 것으로 본다. 다만 프레임 안 메시지에서 끝나는 막대는 윗변만 건너도 된다 — 그 메시지가 막대에
 닿거나, 그 메시지에서 끝난 막대(이 막대가 부른 막대 등)보다 CLEAR 아래에서 끝난 것이다.
+
+막대 모양 가운데 교류도 배치 규칙(#8)이 정한 것은 걸지 않는다: alt 앞 칸에서 반환한 생명선의 막대는 다음 칸 나눔선 아래에서 이어
+가다 alt 밑변 EDGE_CLEAR 위에서 메시지 없이 끝나고, 옆으로 비킨(깊이가 다른) 막대는 바깥 막대보다 길게 갈 수 있다. 막대끼리 겹치는
+것은 같은 깊이끼리, 그리고 다른 생명선끼리만 본다.
 
 요소 이름(Finding.elements)은 입력 안의 자리다 — participants[i]·messages[k]·frames[i]·notes[j]. 막대는 그 생명선의 참여자로
 가리킨다.
@@ -29,18 +34,18 @@ from .canvas import BG_MARGIN
 from .geom import Box, between, grow
 from .report import Finding, fmt_num, fmt_rect
 from .report import Report as _Report
-from .sequencediagram import (ARROW_HALF, BAR_GAP, CLEAR, EDGE_CLEAR, EPS, NOTE_FOLD, PAD, Drawing, Label, Layout,
-                              PlacedBar, PlacedFrame, PlacedMessage, PlacedParticipant, PlacedRef)
+from .sequencediagram import (ARROW_HALF, BAR_GAP, CLEAR, EDGE_CLEAR, EPS, FRAME_GAP, NOTE_FOLD, PAD, Drawing, Label,
+                              Layout, PlacedBar, PlacedFrame, PlacedMessage, PlacedParticipant, PlacedRef)
 
 TEXT_BAR_GAP = 1  # 글자가 차지한 곳과 막대 사이가 이만큼 안이면 글자가 막대를 가린 것으로 본다
 END_SNAP = 0.6    # 메시지 선 끝이 막대 변에서 이만큼 안이면 그 막대에 닿으려던 끝으로 본다(변에 딱 맞아야 한다)
-FRAME_LINE_CLEAR = ARROW_HALF + PAD  # 메시지 선과 프레임 가로 선 사이 — 화살촉도 프레임 선에서 PAD 넘게 떨어진다
-MESSAGE_GAP = 2 * ARROW_HALF + PAD   # 가로로 겹쳐 지나는 두 메시지 선 사이 — 화살촉끼리도 PAD 넘게 떨어진다
+FRAME_LINE_CLEAR = ARROW_HALF + PAD  # 메시지 선과 프레임 가로 선 사이 — 화살촉도 프레임 선에서 PAD 이상 떨어진다
+MESSAGE_GAP = 2 * ARROW_HALF + PAD   # 가로로 겹쳐 지나는 두 메시지 선 사이 — 화살촉끼리도 PAD 이상 떨어진다
 
 KINDS = (  # 불합격 종류(이 차례로 낸다)
     "participant_overlap",       # 머리끼리 겹친다
     "bar_on_participant",        # 막대가 머리에 걸친다
-    "bar_overlap",               # 한 생명선의 막대끼리 겹치거나 붙는다
+    "bar_overlap",               # 한 생명선의 같은 깊이 막대끼리 붙거나, 다른 생명선의 막대끼리 겹친다
     "message_off_bar",           # 메시지 선 끝이 막대 변(그 높이에 막대가 없으면 생명선)에 닿지 않는다
     "line_at_bar_end",           # 메시지 선이 건너는 막대의 윗변·밑변에 붙는다
     "line_overlap",              # 메시지 선끼리 붙어 한 선으로 보인다
@@ -169,11 +174,11 @@ def _frame(f: Framed) -> str:
     return f"ref {f.owner}" if isinstance(f, PlacedRef) else f"프레임 {f.owner}({f.fragment.kind})"
 
 
-def _label(element: str, what: str, lab: Label, bg: bool, over_bars: bool, message: int = -1) -> _Text:
-    """bg면 Canvas.text처럼 잉크 둘레 BG_MARGIN을 흰 바탕으로 지운 글자다."""
+def _label(element: str, what: str, lab: Label, over_bars: bool, message: int = -1) -> _Text:
+    """lab.bg면 Canvas.text처럼 잉크 둘레 BG_MARGIN을 흰 바탕으로 지운 글자다."""
     p = T.place(lab.x, lab.y, lab.text, False, lab.anchor)
     ink = p.ink or p.box
-    area = _hull(p.box, grow(p.ink, BG_MARGIN)) if bg and p.ink else p.box
+    area = _hull(p.box, grow(p.ink, BG_MARGIN)) if lab.bg and p.ink else p.box
     return _Text(element, f"{what} '{lab.text}'(자리 {fmt_rect(p.box)})", p.box, ink, area, over_bars, message)
 
 
@@ -189,13 +194,13 @@ class _Scene:
         self.framed: list[Framed] = sorted([*lay.frames, *lay.refs], key=lambda f: f.top)
         texts = []
         for k, m in enumerate(lay.messages):
-            texts += [_label(m.owner, f"{_message(m)}의 글자", lab, True, True, k) for lab in m.labels]
+            texts += [_label(m.owner, f"{_message(m)}의 글자", lab, True, k) for lab in m.labels]
         for f in lay.frames:
             texts.append(_tag(f, True))
-            texts += [_label(f.owner, f"{_frame(f)}의 조건", lab, True, True) for lab in f.conditions]
+            texts += [_label(f.owner, f"{_frame(f)}의 조건", lab, True) for lab in f.conditions]
         for r in lay.refs:
-            texts += [_tag(r, False), _label(r.owner, f"{_frame(r)}의 이름", r.name, False, False)]
-        texts += [_label(n.owner, f"노트 {n.owner}의 글자", n.label, False, True) for n in lay.notes]
+            texts += [_tag(r, False), _label(r.owner, f"{_frame(r)}의 이름", r.name, False)]
+        texts += [_label(n.owner, f"노트 {n.owner}의 글자", n.label, True) for n in lay.notes]
         self.texts = texts
 
     # -------- 이름
@@ -243,7 +248,7 @@ class _Scene:
                         what = ("겹친다" if b.top < a.bottom - EPS else "맞닿았다" if b.top <= a.bottom + EPS
                                 else f"{fmt_num(b.top - a.bottom)}px밖에 떨어지지 않았다")
                         yield self.found("bar_overlap", (self.who(owner),), between(a.rect, b.rect),
-                                         f"한 생명선의 막대끼리 {what}(같은 깊이는 {BAR_GAP}px 넘게 떨어져야 한다): "
+                                         f"한 생명선의 막대끼리 {what}(같은 깊이는 {BAR_GAP}px 이상 떨어져야 한다): "
                                          f"{self.bar(a)}, {self.bar(b)}.")
         bars = self.lay.bars
         for i, a in enumerate(bars):
@@ -299,7 +304,7 @@ class _Scene:
                         yield self.found("line_at_bar_end", (m.owner, self.who(b.owner)),
                                          (b.rect[0], min(m.y, end), b.rect[2], max(m.y, end)),
                                          f"{_message(m)}의 선(y {fmt_num(m.y)})이 건너는 막대의 {edge}에 "
-                                         f"{fmt_num(abs(m.y - end))}px로 붙는다({CLEAR}px 넘게 떨어져야 한다): {self.bar(b)}.")
+                                         f"{fmt_num(abs(m.y - end))}px로 붙는다({CLEAR}px 이상 떨어져야 한다): {self.bar(b)}.")
 
     def line_overlaps(self) -> Iterator[Finding]:
         ms = sorted(self.lay.messages, key=lambda m: m.y)
@@ -311,7 +316,7 @@ class _Scene:
                 b0, b1 = sorted((b.start, b.end))
                 if a0 < b1 - EPS and b0 < a1 - EPS:
                     yield self.found("line_overlap", (a.owner, b.owner), (max(a0, b0), a.y, min(a1, b1), b.y),
-                                     f"메시지 선끼리 {fmt_num(b.y - a.y)}px로 붙어 한 선으로 보인다({MESSAGE_GAP}px 넘게 떨어져야 "
+                                     f"메시지 선끼리 {fmt_num(b.y - a.y)}px로 붙어 한 선으로 보인다({MESSAGE_GAP}px 이상 떨어져야 "
                                      f"한다): {_message(a)}(y {fmt_num(a.y)}), {_message(b)}(y {fmt_num(b.y)}).")
 
     def lines_through_participants(self) -> Iterator[Finding]:
@@ -359,7 +364,7 @@ class _Scene:
                     for end, side in ((b.top, "윗변"), (b.bottom, "밑변")):
                         if abs(y - end) < EDGE_CLEAR - EPS:
                             yield self.found("frame_cuts_bar", elements, (b.rect[0], min(y, end), b.rect[2], max(y, end)),
-                                             f"{_frame(f)}의 {edge}(y {fmt_num(y)})이 막대 {side}에 붙는다({EDGE_CLEAR}px 넘게 "
+                                             f"{_frame(f)}의 {edge}(y {fmt_num(y)})이 막대 {side}에 붙는다({EDGE_CLEAR}px 이상 "
                                              f"떨어져야 한다): {self.bar(b)}.")
                 over_top = b.top + EPS < f.top < b.bottom - EPS
                 over_bottom = b.top + EPS < f.bottom < b.bottom - EPS
@@ -382,11 +387,12 @@ class _Scene:
     def frame_overlaps(self) -> Iterator[Finding]:
         for i, a in enumerate(self.framed):
             for b in self.framed[i + 1:]:
-                if b.top <= a.bottom + EPS:
+                if b.top < a.bottom + FRAME_GAP - EPS:
+                    what = "겹친다" if b.top < a.bottom - EPS else f"{fmt_num(b.top - a.bottom)}px로 붙는다"
                     yield self.found("frame_overlap", (a.owner, b.owner), between((a.left, a.top, a.right, a.bottom),
                                                                                   (b.left, b.top, b.right, b.bottom)),
-                                     f"프레임끼리 겹치거나 붙는다: {_frame(a)}(y {fmt_num(a.top)}~{fmt_num(a.bottom)}), "
-                                     f"{_frame(b)}(y {fmt_num(b.top)}~{fmt_num(b.bottom)}).")
+                                     f"프레임끼리 {what}({FRAME_GAP}px 이상 떨어져야 한다): {_frame(a)}(y {fmt_num(a.top)}~"
+                                     f"{fmt_num(a.bottom)}), {_frame(b)}(y {fmt_num(b.top)}~{fmt_num(b.bottom)}).")
 
     def messages_in_refs(self) -> Iterator[Finding]:
         for r in self.lay.refs:
@@ -407,7 +413,7 @@ class _Scene:
                         yield self.found("line_on_frame", (m.owner, f.owner), (max(x0, f.left), min(y, m.y),
                                                                               min(x1, f.right), max(y, m.y)),
                                          f"{_message(m)}의 선(y {fmt_num(m.y)})이 {_frame(f)}의 {edge}(y {fmt_num(y)})에 "
-                                         f"{fmt_num(abs(m.y - y))}px로 붙는다({FRAME_LINE_CLEAR}px 넘게 떨어져야 한다).")
+                                         f"{fmt_num(abs(m.y - y))}px로 붙는다({FRAME_LINE_CLEAR}px 이상 떨어져야 한다).")
                 for x, side in self.sides(f):
                     if _crosses_v(x, f.top, f.bottom, (x0, m.y, x1, m.y)) or _crosses_v(x, f.top, f.bottom, m.arrow):
                         yield self.found("line_on_frame", (m.owner, f.owner), (x, m.y, x, m.y),
@@ -474,7 +480,7 @@ class _Scene:
             for b in self.lay.bars:
                 if _overlap(t.area, b.rect, TEXT_BAR_GAP):
                     yield self.found("text_on_bar", (t.element, self.who(b.owner)), between(t.area, b.rect),
-                                     f"글자가 막대를 가린다(막대와 {TEXT_BAR_GAP}px 넘게 떨어져야 한다): {t.title}, {self.bar(b)}.")
+                                     f"글자가 막대를 가린다(막대와 {TEXT_BAR_GAP}px 이상 떨어져야 한다): {t.title}, {self.bar(b)}.")
             for i, p in enumerate(self.parts):
                 if _overlap(t.area, p.head):
                     yield self.found("text_on_participant", (t.element, f"participants[{i}]"), between(t.area, p.head),

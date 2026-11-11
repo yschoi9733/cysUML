@@ -182,12 +182,14 @@ class Diagram:
 
 @dataclass(frozen=True)
 class Label:
-    """한 줄 글자. anchor "mm"이면 (x, y)가 가운데, "lm"이면 x가 왼쪽 끝이다."""
+    """한 줄 글자. anchor "mm"이면 (x, y)가 가운데, "lm"이면 x가 왼쪽 끝이다. bg면 글자 밑에 흰 바탕을 깔아 그 밑 점선을
+    지운다(메시지 글자·조건)."""
 
     text: str
     x: float
     y: float
     anchor: str = "mm"
+    bg: bool = False
 
     @property
     def box(self) -> Box:
@@ -1043,7 +1045,7 @@ class _Placer:
         s = f"[{text}]"
         rel = T.place(0, y + COND_Y, s, False, "lm").box
         left = self._free_x(e, start, rel[2] - rel[0], (rel[1] - PAD, rel[3] + PAD))
-        label = Label(s, left - rel[0], y + COND_Y, "lm")
+        label = Label(s, left - rel[0], y + COND_Y, "lm", bg=True)
         self._add(label.box)
         return label
 
@@ -1164,7 +1166,7 @@ class _Placer:
         if m.kind == "create":
             self.heads[t] = y - HEAD_H / 2
         self.messages.append(PlacedMessage(m, f"messages[{k}]", y, x1, x2,
-                                           tuple(Label(text, x, y + dy) for text, x, dy in labels_rel)))
+                                           tuple(Label(text, x, y + dy, bg=True) for text, x, dy in labels_rel)))
 
     def _edge(self, e: int) -> float:
         """프레임·칸·ref의 가로 선 높이. 맨 처음 일이어도 그 안 첫 메시지가 FIRST보다 위로 가지 않게 한다."""
@@ -1298,7 +1300,7 @@ def _draw_message(c: Canvas, m: PlacedMessage) -> None:
         c.line([(m.start, y), (m.end, y)], dash=REPLY_DASH, owner=o)
         c.open_arrow((m.end, y), (m.start, y), size=ARROW, owner=o)
     for lab in m.labels:
-        c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=True, owner=o)
+        c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=lab.bg, owner=o)
 
 
 def _draw_note(c: Canvas, n: PlacedNote) -> None:
@@ -1306,7 +1308,7 @@ def _draw_note(c: Canvas, n: PlacedNote) -> None:
     c.poly([(l, t), (l + w - f, t), (l + w, t + f), (l + w, t + h), (l, t + h)], owner=n.owner)
     c.line([(l + w - f, t), (l + w - f, t + f), (l + w, t + f)], owner=n.owner)
     lab = n.label
-    c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, owner=n.owner)
+    c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=lab.bg, owner=n.owner)
 
 
 def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
@@ -1325,11 +1327,11 @@ def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
     for r in lay.refs:
         c.rect(r.left, r.top, r.right - r.left, r.bottom - r.top, owner=r.owner)
         _draw_tag(c, r.tag, "ref", r.owner)
-        c.text(r.name.x, r.name.y, r.name.text, anchor=r.name.anchor, owner=r.owner)
+        c.text(r.name.x, r.name.y, r.name.text, anchor=r.name.anchor, bg=r.name.bg, owner=r.owner)
     for f in lay.frames:
         _draw_tag(c, f.tag, f.fragment.kind, f.owner)
         for lab in f.conditions:
-            c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=True, owner=f.owner)
+            c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=lab.bg, owner=f.owner)
     for m in lay.messages:
         _draw_message(c, m)
     for n in lay.notes:

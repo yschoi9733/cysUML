@@ -151,6 +151,12 @@ def test_arrowhead_touching_a_head_is_caught(base):
     assert any(f.kind == "line_through_participant" and "화살촉" in f.problem for f in SC.find(moved_head))
 
 
+def test_frame_lines_too_close_are_caught(base):
+    # 프레임 밑변과 ref 윗변이 0.5px — 겹치지 않아도 한 굵은 선으로 보인다
+    found = SC.find(swap(base, "refs", base.refs[0], moved(base.refs[0], base.frames[0].bottom + 0.5)))
+    assert any(f.kind == "frame_overlap" and "0.5px로 붙는다" in f.problem for f in found)
+
+
 def test_bars_of_different_lifelines_overlapping_are_caught(base):
     b, a = bar(base, "B"), bar(base, "A")
     found = SC.find(swap(base, "bars", b, replace(b, x=a.x + 5)))
