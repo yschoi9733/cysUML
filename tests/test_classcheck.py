@@ -88,6 +88,26 @@ def test_end_segment_leaving_its_box_at_a_shallow_angle_passes():
     assert r.passed
 
 
+def test_bend_just_outside_its_own_box_that_leaves_at_once_passes():
+    # 꺾는 점 (93, 24)는 A 오른쪽 변에서 3px이지만, 다음 구간이 곧바로 비스듬히 멀어져 변을 따라가지 않는다
+    r = report([box("A", 0, 0), box("B", 400, 200)],
+               [rel("association", "A", "B", navigable="none", via=[[93, 24], [300, 100]])])
+    assert r.passed
+
+
+@pytest.mark.parametrize("width, b_left, b_top, passed", [(300, 1105, -300, False), (300, 700, -300, True),
+                                                         (90, 435, -264, True)])
+def test_end_shape_hidden_under_its_own_box(width, b_left, b_top, passed):
+    # 넓은 A(300×48) 위 변을 17°로 나가면 마름모 꼭짓점이 A 안으로 3.2px 들어가 가려진다. 27°면 1.3px, 보통 상자(90×48)를
+    # 31°로 나가면 0.5px로, 꼭짓점이 상자 테두리에 겹치는 정도라 합격이다
+    r = report([box("A", 0, 0, width=width), box("B", b_left, b_top)], [rel("aggregation", "A", "B")])
+    assert r.passed is passed
+    if not passed:
+        (f,) = r.failures
+        assert f.kind == "line_through_box" and f.elements == ("A->B", "A")
+        assert "선 끝 모양이 제 끝 상자에 가려진다" in f.problem and "마름모" in f.problem
+
+
 def test_self_relation_loop_hugging_its_box_fails():
     # 자기 관계의 고리 가운데 구간이 A 위 변 2px 위를 지난다(처음·마지막 구간만 A에 닿는 끝 구간이다)
     hug = report([box("A", 0, 0)], [rel("association", "A", "A", via=[[20, -30], [20, -2], [70, -2], [70, -30], [140, -30], [140, 24]])])

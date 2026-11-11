@@ -1,7 +1,7 @@
 """클래스도 검사: 그린 결과(classdiagram.Drawing)를 읽어 합격·불합격과 알림을 낸다.
 
 불합격은 문서에 못 넣는 그림이다. 관계선(화살촉·삼각형·마름모 포함)이 양 끝이 아닌 상자나 선 글자(관계 이름·다중도)를 지날 때,
-관계선이 제 끝 상자 변에 붙어 갈 때(그 상자에 닿는 끝 구간은 빼고), 관계선이 다른 관계선과 포개지거나 선 끝 모양에 닿을 때, 선 끝 모양끼리 겹칠 때, 상자끼리 겹칠 때, 선 글자끼리 또는 선 글자와
+관계선이 제 끝 상자 변에 붙어 가거나 선 끝 모양이 제 끝 상자에 가려질 때, 관계선이 다른 관계선과 포개지거나 선 끝 모양에 닿을 때, 선 끝 모양끼리 겹칠 때, 상자끼리 겹칠 때, 선 글자끼리 또는 선 글자와
 상자가 겹칠 때다. 선끼리 엇갈린 곳과 그림 크기는 알림으로만 준다. 상속·실체화에서 자식 여럿의 선이 한 줄기로 부모의 한 삼각형에
 모이는 것(공유 줄기)은 포개짐으로도, 선 끝 모양에 닿는 것으로도 치지 않는다. 공유 줄기처럼 여러 선이 한 자리에 겹쳐 그려진 곳이
 걸리면 한 항목으로 묶어 알린다.
@@ -24,9 +24,10 @@ from .geom import (Box, alongside, axis_gap, between, clip, crossings, distance,
 BOX_CLEARANCE = 4  # 상자를 사방으로 이만큼 넓힌 곳에 선이나 다른 상자가 닿으면 지나간·겹친 것으로 본다
 TEXT_CLEARANCE = LABEL_CLEAR  # 선 글자 상자를 넓히는 폭. 글자 자리를 고를 때와 같아야 도구가 빈 자리로 고른 글자가 합격한다
 OVERLAP_GAP = 2  # 나란한 두 선의 가운데가 이만큼 안이면 한 선으로 보인다
-OVERLAP_MIN = 4  # 그렇게 붙어 가는 길이가 이보다 길면 포개진 것으로 본다
+OVERLAP_MIN = 4  # 그렇게 붙어 가는 길이가 이보다 길면 포개진 것으로 본다(선이 제 끝 상자 변 BOX_CLEARANCE 안을 가는 길이도)
 PARALLEL_SIN = 0.05  # 두 선분 사이 각의 사인이 이 안이면(약 3°) 나란하다고 본다
 LINE_EPS = 1e-6  # 점이 선에서 이 안이면 선 위로 본다(엇갈림이 아니라 맞닿음)
+HEAD_HIDE = 2  # 선 끝 모양이 제 끝 상자 안으로 이만큼 넘게 들어가면 가려진 것으로 본다(살짝 들어가는 건 상자 변 밑으로 일부러 넣은 것)
 OWN_MARGIN = 0.5  # 선이 제 삼각형·마름모는 그 안쪽으로 이만큼 넘게 들어가야 지난 것으로 본다(테두리에 닿거나 따라가면 이어진 것)
 PLACE_EPS = 1e-3  # 여러 선이 걸린 자리가 이 안으로 같으면 한 자리로 묶는다
 
@@ -43,7 +44,7 @@ class Finding:
     """검사 항목 하나. kind는 종류, elements는 걸린 요소의 이름(상자 이름이나 관계 기록의 owner), where는 걸린 자리(논리 좌표
     왼, 위, 오른, 아래 — 엇갈린 곳은 넓이가 없다), problem은 무엇이 걸렸는지, hint는 고치는 법이다.
 
-    불합격 종류(이 차례로 낸다): box_overlap(상자끼리) · line_through_box(선이 상자를, 또는 제 끝 상자 변에 붙어) · line_overlap(선끼리 포개짐, 한 선의
+    불합격 종류(이 차례로 낸다): box_overlap(상자끼리) · line_through_box(선이 상자를, 제 끝 상자 변에 붙어, 선 끝 모양이 제 상자에 가려져) · line_overlap(선끼리 포개짐, 한 선의
     되짚음) · line_through_head(선이 선 끝 모양에) · head_overlap(선 끝 모양끼리) · line_through_text(선이 선 글자를) ·
     text_on_box(선 글자가 상자에) · text_overlap(선 글자끼리). 알림 종류: crossing.
     """
@@ -142,6 +143,7 @@ class _Head:
 class _Relation:
     index: int
     placed: PlacedRelation
+    points: tuple[Point, ...]  # 그린 선의 점
     heads: tuple[_Head, ...]
     path: tuple[Segment, ...]  # 선만(선 끝 모양 빼고)
     segments: tuple[Segment, ...]  # 선과 선 끝 모양의 테두리
@@ -151,10 +153,6 @@ class _Relation:
     @property
     def owner(self) -> str:
         return self.placed.owner
-
-    @property
-    def points(self) -> tuple[Point, ...]:
-        return self.placed.points
 
     @property
     def via(self) -> bool:
@@ -168,16 +166,23 @@ class _Relation:
     def title(self) -> str:
         return f"선 {self.name}"
 
+    def _ends_at(self, box: str) -> list[int]:
+        """제 끝 상자 box에 닿는 끝(points의 처음 0, 마지막 -1)."""
+        rel = self.placed.relation
+        return [i for i, name in ((0, rel.source), (-1, rel.target)) if name == box]
+
+    def heads_at(self, box: str) -> list[_Head]:
+        """제 끝 상자 box에 닿는 끝에 얹힌 선 끝 모양."""
+        tips = [self.points[i] for i in self._ends_at(box)]
+        return [h for h in self.heads if any(math.dist(h.tip, t) <= LINE_EPS for t in tips)]
+
     def away_from(self, box: str) -> tuple[Segment, ...]:
         """제 끝 상자 box에 붙어 가는지 볼 구간. 그 상자에 닿는 끝 구간과 그 끝에 얹힌 선 끝 모양은 뺀다 — 끝 구간은 상자 가운데를
         향해 나가므로, 넓은 상자 변을 비스듬히 나가는 평범한 선도 처음 몇 px는 변에 붙어 있다."""
-        rel = self.placed.relation
-        ends = [i for i, name in ((0, rel.source), (len(self.points) - 1, rel.target)) if name == box]
-        tips = [self.points[i] for i in ends]
-        drop = {min(i, len(self.path) - 1) for i in ends}
+        drop = {0 if i == 0 else len(self.path) - 1 for i in self._ends_at(box)}
         path = tuple(s for i, s in enumerate(self.path) if i not in drop)
-        heads = [h for h in self.heads if not any(math.dist(h.tip, t) <= LINE_EPS for t in tips)]
-        return path + tuple(e for h in heads for e in h.edges)
+        attached = self.heads_at(box)
+        return path + tuple(e for h in self.heads if h not in attached for e in h.edges)
 
     def over_own(self, head: _Head) -> list[Segment]:
         """이 선이 제 선 끝 모양 head를 지나는 구간들. 그 모양이 얹힌 끝 구간은 빼고, 삼각형·마름모는 안쪽으로 OWN_MARGIN 넘게
@@ -212,7 +217,8 @@ def check(drawing: Drawing) -> Report:
              if meets(grow(r.bounds, OVERLAP_GAP), o.bounds)]  # 서로 닿을 수 있는 두 선(앞 선, 뒤 선)
     retraces, overlaps = _line_overlaps(relations, pairs)
     near = _overlap_pieces(overlaps)
-    failures = [*_box_overlaps(boxes), *_lines_through_boxes(relations, boxes), *retraces, *_merged_overlaps(overlaps),
+    failures = [*_box_overlaps(boxes), *_lines_through_boxes(relations, boxes), *_heads_under_own_box(relations, boxes),
+                *retraces, *_merged_overlaps(overlaps),
                 *_lines_through_heads(relations, pairs, near), *_head_overlaps(relations, pairs, near),
                 *_lines_through_labels(relations, labels), *_labels_on_boxes(labels, boxes), *_label_overlaps(labels)]
     measured = drawing.canvas.measure()
@@ -226,11 +232,12 @@ def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:
     boxes = [_Box(p.box.name, p.rect) for p in drawing.layout.boxes]
     relations, labels = [], []
     for i, (p, d) in enumerate(zip(drawing.layout.relations, drawing.drawn, strict=True)):
+        points = d.line.points
         heads = tuple(_Head.of(h) for h in d.heads)
-        path = tuple(zip(p.points, p.points[1:]))
+        path = tuple(zip(points, points[1:]))
         segments = path + tuple(e for h in heads for e in h.edges)
-        end = next((h for h in heads if h.closed and math.dist(h.tip, p.points[-1]) <= LINE_EPS), None)
-        rel = _Relation(i, p, heads, path, segments, _cover(segments), end)
+        end = next((h for h in heads if h.closed and math.dist(h.tip, points[-1]) <= LINE_EPS), None)
+        rel = _Relation(i, p, points, heads, path, segments, _cover(segments), end)
         relations.append(rel)
         labels += [_Label(rel, lab.role, t.text, t.box) for lab, t in zip(p.labels, d.labels, strict=True)]
     return boxes, relations, labels
@@ -313,6 +320,8 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box]) -> Itera
                 continue
             own = b.name in (r.placed.relation.source, r.placed.relation.target)
             parts = _parts(r.away_from(b.name) if own else r.segments, wide)
+            if own and sum(math.dist(p, q) for p, q in parts) <= OVERLAP_MIN:
+                continue  # 제 끝 상자 띠를 잠깐 스치는 꺾음은 변을 따라가는 게 아니다
             if parts:
                 where = _cover(parts)
                 entry = found.get((b.name, own, where), lambda: [b, where, False, [], own])
@@ -329,6 +338,26 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box]) -> Itera
         fix = "꺾는 점(via)을 고쳐" if vias == {True} else "선에 꺾는 점(via)을 주어" if vias == {False} else "꺾는 점(via)을 주거나 고쳐"
         yield Finding("line_through_box", (*_owners(rels), b.name), where, f"{what}: {_titles(rels)}, {b.title}.",
                       f"그 상자를 옮기거나, {fix} 그 상자를 비켜 가게 한다.")
+
+
+def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box]) -> Iterator[Finding]:
+    """선 끝 모양이 제 끝 상자 안으로 HEAD_HIDE 넘게 들어가 상자에 가려진다(상자를 선 위에 그린다). 선이 넓은 상자 변을 아주
+    비스듬히 나가면 마름모·삼각형 꼭짓점이나 화살촉 갈래가 상자 밑으로 들어간다. 같은 모양(공유 줄기의 삼각형)은 한 항목으로 묶는다."""
+    found = _Places()
+    for b in boxes:
+        inner = grow(b.rect, -HEAD_HIDE)
+        if inner[0] >= inner[2] or inner[1] >= inner[3]:
+            continue
+        for r in relations:
+            for h in r.heads_at(b.name):
+                corners = h.points if h.closed else (h.points[0], h.points[-1])
+                if any(inner[0] < x < inner[2] and inner[1] < y < inner[3] for x, y in corners):
+                    _add(found.get((b.name, h.points), lambda: (b, h, []))[2], r)
+    for b, h, rels in found.values():
+        whose = "·".join(f"관계 {r.name}" for r in sorted(rels, key=_index))
+        yield Finding("line_through_box", (*_owners(rels), b.name), span(h.points),
+                      f"선 끝 모양이 제 끝 상자에 가려진다: {whose}의 {h.name}(자리 {fmt_rect(span(h.points))}), {b.title}.",
+                      "선이 상자 변을 너무 비스듬히 나간다 — 상자를 옮기거나 꺾는 점(via)을 주어 변에서 곧게 나가게 한다.")
 
 
 def _trunk(a: _Relation, b: _Relation) -> bool:

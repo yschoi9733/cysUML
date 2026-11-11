@@ -9,9 +9,7 @@ import bisect
 import math
 from typing import Iterable, Optional
 
-from .canvas import Line, Point, Polygon, Record
-
-Box = tuple[float, float, float, float]
+from .canvas import Box, Line, Point, Polygon, Record
 
 
 def grow(rect: Box, m: float) -> Box:
@@ -31,7 +29,6 @@ def axis_gap(a: Box, b: Box) -> float:
 
 
 def meets(a: Box, b: Box) -> bool:
-    """두 상자가 겹치거나 맞닿는지."""
     return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
 
 
@@ -67,7 +64,6 @@ def hits(p: Point, q: Point, rect: Box) -> bool:
 
 
 def span(points: Iterable[Point]) -> Box:
-    """점들을 덮는 가장 작은 상자."""
     xs, ys = zip(*points)
     return min(xs), min(ys), max(xs), max(ys)
 
@@ -309,7 +305,6 @@ def alongside(s: tuple[Point, Point], t: tuple[Point, Point], width: float, leas
 
 
 def lerp(p: Point, q: Point, t: float) -> Point:
-    """p에서 q로 가는 선분의 t 자리(0이면 p, 1이면 q)."""
     return p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t
 
 

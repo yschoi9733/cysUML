@@ -523,7 +523,7 @@ class _Spots:
     def pick(self, text: str, candidates: list[Point]) -> Point:
         boxes = [T.place(x, y, text, False, "mm").box for x, y in candidates]
         wides = [grow(b, LABEL_CLEAR) for b in boxes]
-        region = (min(w[0] for w in wides), min(w[1] for w in wides), max(w[2] for w in wides), max(w[3] for w in wides))
+        region = span(pt for w in wides for pt in (w[:2], w[2:]))
         # 후보들이 닿을 수 있는 것만 먼저 거른다. 상자는 MULT_ENOUGH 밖이면 점수가 같아 거리를 잴 필요가 없다.
         near_boxes = [b for b in self.boxes if meets(b, grow(region, MULT_ENOUGH))]
         near_segments = [(p, q) for p, q, bb in self.segments if meets(bb, region)]
