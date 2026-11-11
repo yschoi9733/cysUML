@@ -261,8 +261,8 @@ def _draw(file_name: str, render: Callable[[], D], check: Callable[[D], Report],
             problems += e.problems
         except LayoutError as e:  # file_name 문제가 함께 있으면 그것부터 알린다
             if not problems:
-                return _error(f"교류도를 배치하지 못했다({e}). 파일은 저장하지 않았다. 교류도는 cysUML이 배치하므로 cysUML의 "
-                              f"버그다 — {SEQUENCE_WAY_AROUND}.")
+                return _error(f"교류도를 배치하지 못했다 — {e}. 파일은 저장하지 않았다. 입력은 맞는데 cysUML이 자리를 찾지 "
+                              f"못한 것이라, 비켜 가려면 {SEQUENCE_WAY_AROUND}.")
         if problems:
             return _error(f"입력 오류 — {len(problems)}건\n" + "\n".join(f"- {p}" for p in problems))
         report = check(drawing)

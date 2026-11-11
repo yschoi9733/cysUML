@@ -85,8 +85,8 @@ def test_each_tool_carries_its_flow_and_the_instructions_carry_both():
 def test_sequence_description_names_every_field_kind_and_limit_the_reader_takes():
     S = sequencediagram
     names = (S.DIAGRAM_FIELDS + S.PARTICIPANT_FIELDS + S.MESSAGE_FIELDS + S.ALL_FRAME_FIELDS + S.BRANCH_FIELDS)
-    for name in names:
-        assert name in server.SEQUENCE_TOOL, name
+    for name in names:  # 필드는 "name(필수)"·"kind:"·"from·to"처럼 바로 뒤에 괄호·쌍점·가운뎃점이 붙어 나온다
+        assert re.search(rf"(?<![A-Za-z_]){name}[(:·]", server.SEQUENCE_TOOL), name
     for kind in S.PARTICIPANT_KINDS + S.MESSAGE_KINDS + S.FRAME_KINDS:
         assert f'"{kind}"' in server.SEQUENCE_TOOL, kind
     for limit in (S.MAX_PARTICIPANTS, S.MAX_MESSAGES, S.MAX_FRAMES, S.MAX_NOTES):
@@ -406,8 +406,8 @@ def test_a_layout_bug_is_an_error_with_a_way_around_and_nothing_is_written(tmp_p
     monkeypatch.setattr(sequencediagram, "layout", _layout_bug)
     r = draw_seq(file_name="checkout", participants=PEOPLE, messages=TALKS, out_dir=str(tmp_path))
     assert r.is_error
-    assert text(r) == ("교류도를 배치하지 못했다(배치 버그: 시험). 파일은 저장하지 않았다. 교류도는 cysUML이 배치하므로 "
-                       f"cysUML의 버그다 — {server.SEQUENCE_WAY_AROUND}.")
+    assert text(r) == ("교류도를 배치하지 못했다 — 배치 버그: 시험. 파일은 저장하지 않았다. 입력은 맞는데 cysUML이 자리를 "
+                       f"찾지 못한 것이라, 비켜 가려면 {server.SEQUENCE_WAY_AROUND}.")
     assert server.SEQUENCE_WAY_AROUND in server.SEQUENCE_FLOW
     assert list(tmp_path.iterdir()) == []
 

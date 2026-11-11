@@ -73,8 +73,8 @@ overlap. Crossing lines and the picture size are reported but don't fail.
 ### Sequence diagrams
 
 The tool is `draw_sequence_diagram`. The assistant sends no coordinates: only the participants, the messages in
-order, and frames (`loop`, `opt`, `alt`, `ref`) that cover a range of messages. cysUML spaces the lifelines to fit
-the text and draws the activation bars:
+order, frames (`loop`, `opt`, `alt`) that cover a range of messages, and `ref` boxes placed before a message.
+cysUML spaces the lifelines to fit the text and draws the activation bars:
 
 ```json
 {
@@ -154,7 +154,7 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   검사 결과, 상자마다 그린 자리와 크기, 저장한 파일 경로, 그림을 돌려준다. 상자끼리 겹치거나, 선이 상자·글자·다른 선의 화살촉을
   지나거나, 글자끼리 겹치면 불합격이다. 선끼리 엇갈린 곳과 그림 크기는 알려 주기만 하고 불합격이 아니다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
-  프레임(`loop`·`opt`·`alt`·`ref`)만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
+  프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
   파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면
   비켜 가는지(참여자·메시지 차례, 프레임이 덮는 범위, 글자 줄이기, 그림 나누기) 알려 준다.
 - 입력 형식 전체는 도구 설명에 있어 클라이언트가 어시스턴트에게 넘긴다.
