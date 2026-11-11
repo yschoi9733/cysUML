@@ -78,7 +78,8 @@ def test_line_running_along_its_own_end_box_fails(via_y, passed):
     if not passed:
         (f,) = r.failures
         assert f.kind == "line_through_box" and f.elements == ("A->B", "A")
-        assert "제 끝 상자 변에 4px 안으로 붙어 간다" in f.problem and "상자 A(0, 0, 90×48)" in f.problem
+        assert "제 끝 상자에 4px 안으로 붙어 간다" in f.problem and "상자 A(0, 0, 90×48)" in f.problem
+        assert "테두리가 두 겹" in f.hint
 
 
 def test_end_segment_leaving_its_box_at_a_shallow_angle_passes():
@@ -173,6 +174,12 @@ def test_boxes_closer_than_the_clearance_fail(b_left, passed, phrase):
 def test_boxes_touching_through_float_error_are_called_touching():
     # A의 오른쪽 -89.9 + 90은 실수로 0.09999999999999432라 B의 왼쪽 0.1과 6e-15 떨어진다
     (f,) = report([box("A", -89.9, 0), box("B", 0.1, 0)]).failures
+    assert "맞닿았다" in f.problem
+
+
+def test_boxes_a_hair_apart_are_called_touching():
+    # 틈 0.02px는 소수 한 자리로 0이라 "0px밖에 떨어지지 않았다"가 아니라 맞닿았다고 적는다
+    (f,) = report([box("A", 0, 0, width=90.03), box("B", 90.05, 0)]).failures
     assert "맞닿았다" in f.problem
 
 
@@ -425,8 +432,10 @@ def test_arrowhead_inside_another_relations_triangle_fails(via_y, passed):
                [rel("generalization", "A", "B", via=[[300, 200]]), rel("dependency", "Cc", "B", via=[[300, via_y]])])
     assert r.passed is passed
     if not passed:
-        (f,) = r.failures
-        assert f.kind == "head_overlap" and f.elements == ("A->B", "Cc->B")
+        # 의존선도 삼각형 아래 모서리 (382, 209)에서 0.4px 옆을 지나 그 삼각형에 붙는다
+        assert kinds(r) == ["line_through_head", "head_overlap"]
+        f = r.failures[1]
+        assert f.elements == ("A->B", "Cc->B")
         assert "관계 A->B(relations[0])의 삼각형" in f.problem and "관계 Cc->B(relations[1])의 화살촉" in f.problem
 
 
@@ -482,6 +491,17 @@ def test_drawing_records_must_match_the_layout():
     d = C.render({"classes": [box("A", 0, 0), box("B", 300, 0)], "relations": [rel("association", "A", "B")]})
     with pytest.raises(ValueError):
         K.check(dataclasses.replace(d, drawn=()))
+
+
+@pytest.mark.parametrize("x, passed", [(281, False), (270, True)])
+def test_line_running_just_beside_another_relations_triangle_fails(x, passed):
+    # A→B 상속 삼각형의 밑변은 x=282(y 15~33)다. X→Y 세로선이 그 1px 옆을 나란히 가면 밑변과 한 선으로 보인다
+    r = report([box("A", 0, 0), box("B", 300, 0), box("X", x - 45, 300), box("Y", x - 45, -300)],
+               [rel("generalization", "A", "B"), rel("association", "X", "Y", navigable="none")])
+    assert r.passed is passed and len(r.crossings) == 1
+    if not passed:
+        (f,) = r.failures
+        assert f.kind == "line_through_head" and f.elements == ("X->Y", "A->B") and "삼각형" in f.problem
 
 
 def test_diamond_counts_as_an_end_shape():

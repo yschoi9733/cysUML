@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+import operator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
@@ -135,8 +136,14 @@ class _Head:
         segments = tuple(segments)
         return any(touches(s, e, LINE_EPS) for s in segments for e in self.edges) or self.holds(segments)
 
+    def near(self, segments: Iterable[Segment]) -> bool:
+        """선분들이 이 모양 테두리에서 OVERLAP_GAP 안으로 다가오거나 안에 드는지 — 그만큼 붙으면 모양과 선이 한데 붙어 보인다."""
+        segments = tuple(segments)
+        return (any(distance(s, e, LINE_EPS) <= OVERLAP_GAP for s in segments for e in self.edges)
+                or self.holds(segments))
+
     def meets(self, other: _Head) -> bool:
-        return self.touches(other.edges) or other.touches(self.edges)
+        return self.near(other.edges) or other.near(self.edges)
 
 
 @dataclass(frozen=True, eq=False)
@@ -278,8 +285,7 @@ class _Places:
         return [v for _, v in self.items]
 
 
-def _index(r: _Relation) -> int:
-    return r.index
+_index = operator.attrgetter("index")
 
 
 def _add(found: list[_Relation], *rels: _Relation) -> None:
@@ -302,7 +308,7 @@ def _box_overlaps(boxes: list[_Box]) -> Iterator[Finding]:
             g = axis_gap(a.rect, b.rect)
             if g > BOX_CLEARANCE:
                 continue
-            what = ("상자끼리 겹친다" if g < -LINE_EPS else "상자끼리 맞닿았다" if g <= LINE_EPS
+            what = ("상자끼리 겹친다" if g < -LINE_EPS else "상자끼리 맞닿았다" if round1(g) == 0
                     else f"상자끼리 {fmt_num(g)}px밖에 떨어지지 않았다")
             yield Finding("box_overlap", (a.name, b.name), between(a.rect, b.rect), f"{what}: {a.title}, {b.title}.",
                           f"한쪽을 옮겨 가로나 세로로 {BOX_CLEARANCE}px 넘게 띄운다. 상자 크기는 글자에 맞춰 늘어난 값이니 "
@@ -312,7 +318,8 @@ def _box_overlaps(boxes: list[_Box]) -> Iterator[Finding]:
 @dataclass(eq=False)
 class _BoxHit:
     """상자 하나에 같은 자리로 걸린 선들. own이면 그 상자가 선들의 끝 상자다. inside는 묶인 선 가운데 하나라도 상자 안을 지나는지,
-    along은 (끝 상자일 때) 선 구간이 변을 따라가는지다 — 아니면 반대쪽 끝의 선 끝 모양만 그 상자 변에 붙었다."""
+    along은 (끝 상자일 때) 선 구간이 그 상자 둘레 BOX_CLEARANCE 안을 OVERLAP_MIN 넘게 가는지다 — 아니면 반대쪽 끝의 선 끝 모양만
+    그 상자 변에 붙었다."""
 
     box: _Box
     where: Box
@@ -327,7 +334,7 @@ def _length(parts: Iterable[Segment]) -> float:
 
 
 def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box]) -> Iterator[Finding]:
-    """선이 양 끝이 아닌 상자를 지나거나, 제 끝 상자 변에 붙어 간다(상자 테두리가 두 겹으로 보인다). 같은 상자를 같은 자리에서
+    """선이 양 끝이 아닌 상자를 지나거나, 제 끝 상자에 붙어 간다(변을 따라가면 테두리가 두 겹으로 보인다). 같은 상자를 같은 자리에서
     지나는 선들(공유 줄기)은 한 항목으로 묶는다."""
     found = _Places()
     for b in boxes:
@@ -347,15 +354,16 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box]) -> Itera
             if parts:
                 where = _cover(parts)
                 hit = found.get((b.name, own, where), lambda: _BoxHit(b, where, own))
-                hit.inside = hit.inside or any(hits(p, q, b.rect) for p, q in parts)
+                hit.inside = hit.inside or (not own and any(hits(p, q, b.rect) for p, q in parts))
                 hit.along = hit.along or _length(on_path) > OVERLAP_MIN
                 _add(hit.rels, r)
     for hit in found.values():
         b, rels, vias = hit.box, hit.rels, {r.via for r in hit.rels}
         if hit.own and hit.along:
             yield Finding("line_through_box", (*_owners(rels), b.name), hit.where,
-                          f"선이 제 끝 상자 변에 {BOX_CLEARANCE}px 안으로 붙어 간다: {_titles(rels)}, {b.title}.",
-                          f"상자 테두리가 두 겹으로 보인다 — 꺾는 점(via)을 고쳐 그 상자 변에서 {BOX_CLEARANCE}px 넘게 띄운다.")
+                          f"선이 제 끝 상자에 {BOX_CLEARANCE}px 안으로 붙어 간다: {_titles(rels)}, {b.title}.",
+                          f"선이 상자 테두리에 붙어 보인다(변을 따라가면 테두리가 두 겹으로 보인다) — 꺾는 점(via)을 고쳐 그 상자에서 "
+                          f"{BOX_CLEARANCE}px 넘게 띄운다.")
         elif hit.own:
             fix = ("두 상자를 더 떼어 놓는다" if vias == {False}
                    else "꺾는 점(via)을 고치거나 두 상자를 더 떼어 놓는다")
@@ -469,7 +477,7 @@ def _lines_through_heads(relations: list[_Relation], pairs: Pairs,
             continue
         for r, o in ((a, b), (b, a)):
             for h in o.heads:
-                if (hit := [s for s in r.path if h.touches([s])]) and not _by_overlap(near, r, o, h):
+                if (hit := [s for s in r.path if h.near([s])]) and not _by_overlap(near, r, o, h):
                     note(r, o, h, hit)
     for own, h, passers, owners in found.values():
         where = span(h.points)
