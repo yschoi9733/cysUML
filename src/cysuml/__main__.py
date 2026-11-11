@@ -1,10 +1,12 @@
-"""`cysuml` 명령. 이름만 잡아 두었고 MCP 서버는 아직 없다."""
+"""`cysuml` 명령: MCP 서버를 stdio로 띄운다."""
 import sys
+
+from cysuml.server import mcp
 
 
 def main() -> int:
-    print("cysuml: the MCP server is not implemented yet.", file=sys.stderr)
-    return 1
+    mcp.run("stdio")
+    return 0
 
 
 if __name__ == "__main__":
