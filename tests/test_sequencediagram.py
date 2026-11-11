@@ -1,11 +1,10 @@
 import copy
-import random
 
 import pytest
 from PIL import Image
 
+from cysuml import sequencecheck as SC
 from cysuml import sequencediagram as S
-from cysuml import text as T
 from cysuml.canvas import Line, Mask, Polygon, Rect, Text
 
 
@@ -183,6 +182,11 @@ def test_parse_does_not_change_input():
 def lay_of(participants, messages, frames=(), notes=()):
     return S.render({"participants": participants, "messages": messages, "frames": list(frames),
                      "notes": list(notes)}).layout
+
+
+def rule_breaks(lay):
+    """교류도 검사(sequencecheck)에 걸린 것을 글로."""
+    return [f.problem for f in SC.find(lay)]
 
 
 def test_bar_lasts_until_that_lifeline_replies():
@@ -629,177 +633,3 @@ def test_png_comes_out():
     d = S.render({"participants": life("A", "가나다 서비스"), "messages": [call("A", "가나다 서비스", "조회(아이디)")]})
     img = d.canvas.to_image()
     assert isinstance(img, Image.Image) and img.size[0] > 100 and img.size[1] > 100
-
-
-# ---------------------------------------------------------------- 여러 입력으로 배치 규칙 확인
-
-NAMES = ["A", "Customer", ": Service", ": 주문 서비스", ": VeryLongRepositoryName", "UI", ": Db"]
-WORDS = ["get", "save(order)", "find(id)", "check()", "send(phoneNumbers, message)", "조회", "결제 승인(금액)",
-         "processPaymentWithRetry(orderId, amount, currency)", "ok", "x", "목록", "ƴƴƴƴƴ", "Ȉ(ƴ)"]  # ƴ·Ȉ는 진행 폭 밖으로 칠해진다
-
-
-def random_diagram(seed):
-    rnd = random.Random(seed)
-    word = lambda: rnd.choice(WORDS)  # noqa: E731
-    parts = []
-    for i in range(rnd.randint(1, 6)):
-        parts.append({"name": f"{rnd.choice(NAMES)}{i}", "kind": "actor" if rnd.random() < 0.2 else "lifeline"})
-    lifelines = [p["name"] for p in parts if p["kind"] == "lifeline"]
-    later = set(rnd.sample(lifelines, min(len(lifelines), rnd.randint(0, 2))))
-    alive = [p["name"] for p in parts if p["name"] not in later]
-    messages = []
-    for _ in range(rnd.randint(0, 16)):
-        pending = [n for n in lifelines if n in later and n not in alive]
-        if alive and pending and (len(alive) < 2 or rnd.random() < 0.2):
-            dst = rnd.choice(pending)
-            messages.append({"from": rnd.choice(alive), "to": dst, "kind": "create",
-                             **({"name": word()} if rnd.random() < 0.6 else {})})
-            alive.append(dst)
-            continue
-        if len(alive) < 2:
-            break
-        src, dst = rnd.sample(alive, 2)
-        if rnd.random() < 0.4:
-            messages.append({"from": src, "to": dst, "kind": "reply", **({"name": word()} if rnd.random() < 0.8 else {})})
-        else:
-            messages.append(call(src, dst, word()))
-    frames, k, n = [], 0, len(messages)
-    while k < n:
-        if rnd.random() < 0.35:
-            length = rnd.randint(1, min(5, n - k))
-            kind = rnd.choice(["loop", "opt", "alt"] if length >= 2 else ["loop", "opt"])
-            if kind == "alt":
-                cuts = sorted(rnd.sample(range(k + 1, k + length), min(length - 1, rnd.randint(1, 2))))
-                starts = [k, *cuts]
-                ends = [c - 1 for c in cuts] + [k + length - 1]
-                branches = [{"condition": word(), "first": a, "last": b} for a, b in zip(starts, ends)]
-                if rnd.random() < 0.5:
-                    branches[-1]["condition"] = "else"
-                frames.append({"kind": "alt", "branches": branches})
-            else:
-                frames.append({"kind": kind, "first": k, "last": k + length - 1,
-                               **({"condition": word()} if rnd.random() < 0.7 else {})})
-            k += length
-        else:
-            if rnd.random() < 0.15:
-                frames.append({"kind": "ref", "name": word(), "before": k})
-            k += 1
-    if rnd.random() < 0.2:
-        frames.append({"kind": "ref", "name": word(), "before": n})
-    rnd.shuffle(frames)
-    return {"participants": parts, "messages": messages, "frames": frames,
-            "notes": [word() for _ in range(rnd.randint(0, 2))]}
-
-
-def arrow_box(m):
-    sign = 1 if m.end > m.start else -1
-    return min(m.end, m.end - sign * S.ARROW), m.y - S.ARROW_HALF, max(m.end, m.end - sign * S.ARROW), m.y + S.ARROW_HALF
-
-
-def crosses(y0, y1, x0, x1, box):
-    """가로 선분이 상자 안을 지나는지(변에 닿는 것은 치지 않는다)."""
-    return box[1] < y0 < box[3] and x0 < box[2] and box[0] < x1
-
-
-def attached(m, b, x):
-    return abs(x - b.rect[0]) < 1e-6 or abs(x - b.rect[2]) < 1e-6
-
-
-def rule_breaks(lay):
-    """교류도 배치 규칙(설계 #1 "검사"의 교류도 항목과 그 밖의 겹침)을 배치 결과로 본다. 걸린 것을 글로 돌려준다."""
-    out = []
-    labels = [(m.owner, lab.box) for m in lay.messages for lab in m.labels]
-    conds = [(f.owner, lab.box) for f in lay.frames for lab in f.conditions]
-    texts = labels + conds + [(r.owner, r.name.box) for r in lay.refs]
-    heads = [(p.participant.name, p.head) for p in lay.participants]
-    edges = [(f.owner, y) for f in lay.frames for y in (f.top, f.bottom, *f.dividers)] + \
-        [(r.owner, y) for r in lay.refs for y in (r.top, r.bottom)]
-    right = max([f.right for f in lay.frames] + [r.right for r in lay.refs], default=None)
-    for o, box in labels + conds:
-        out += [f"{o} 글자가 {b.owner} 막대에 닿는다" for b in lay.bars if overlap(box, b.rect, 1)]
-        out += [f"{o} 글자가 {h} 머리에 닿는다" for h, hb in heads if overlap(box, hb)]
-    for i, (o, a) in enumerate(texts):
-        out += [f"{o}·{p} 글자가 겹친다" for p, b in texts[i + 1:] if overlap(a, b)]
-    for m in lay.messages:
-        x0, x1 = sorted((m.start, m.end))
-        out += [f"{m.owner} 선이 {o} 글자를 지난다" for o, box in texts if crosses(m.y, m.y, x0, x1, box)]
-        out += [f"{m.owner} 선이 {h} 머리를 지난다" for h, hb in heads if crosses(m.y, m.y, x0, x1, hb)]
-        out += [f"{m.owner} 화살촉이 {o} 글자에 닿는다" for o, box in labels if o != m.owner and overlap(arrow_box(m), box)]
-        for b in lay.bars:
-            if b.rect[0] < x1 and x0 < b.rect[2] and not (b.top <= m.y <= b.bottom and attached(m, b, m.start)) \
-                    and not (b.top <= m.y <= b.bottom and attached(m, b, m.end)):
-                out += [f"{m.owner} 선이 {b.owner} 막대 끝을 지난다" for end in (b.top, b.bottom) if abs(m.y - end) < S.CLEAR - 1e-6]
-        for x in (m.start, m.end):
-            inside = [b for b in lay.bars if b.top <= m.y <= b.bottom and b.rect[0] - 0.6 <= x <= b.rect[2] + 0.6]
-            if inside and not any(attached(m, b, x) for b in inside):
-                out.append(f"{m.owner} 선 끝 {x}가 막대 변에 닿지 않는다")
-    for o, y in edges:
-        out += [f"{o} 가로 선이 글자 {t}를 지난다" for t, box in texts if t != o and crosses(y, y, -1e9, 1e9, box)]
-        out += [f"{o} 가로 선이 {h} 머리를 지난다" for h, hb in heads if crosses(y, y, -1e9, 1e9, hb)]
-        for b in lay.bars:
-            out += [f"{o} 가로 선이 {b.owner} 막대 끝에 붙었다" for end in (b.top, b.bottom) if abs(y - end) < S.EDGE_CLEAR - 1e-6]
-    for f in [*lay.frames, *lay.refs]:
-        for b in lay.bars:
-            over_top, over_bottom = b.top < f.top < b.bottom, b.top < f.bottom < b.bottom
-            # 프레임 안 메시지에서 끝나는 막대(그 생명선이나 부른 쪽이 반환했다)는 윗변을 건너도 짧게 잘린 꼴이 아니다
-            returns = any(f.top < m.y < f.bottom and 0 <= b.bottom - m.y <= S.CLEAR for m in lay.messages)
-            goes_on = any(b.top == y + S.EDGE_CLEAR for y in getattr(f, "dividers", ()))  # 앞 칸에서 반환한 막대를 이어 간다
-            if over_bottom and not over_top and not goes_on or over_top and not over_bottom and not returns:
-                out.append(f"{f.owner}가 {b.owner} 막대를 자른다")
-            if not (f.left < b.rect[0] and b.rect[2] < f.right):
-                out.append(f"{b.owner} 막대가 {f.owner} 옆 변 밖으로 나간다")
-        tag = S._tag_width(f.fragment.kind if isinstance(f, S.PlacedFrame) else "ref")
-        out += [f"{f.owner} 꼬리표 밑으로 {p.participant.name} 생명선이 지난다"
-                for p in lay.participants if f.left <= p.x <= f.left + tag]
-    for r in lay.refs:
-        out += [f"{m.owner}가 {r.owner} 상자 안에 있다" for m in lay.messages if r.top - S.PAD < m.y < r.bottom + S.PAD]
-        box = r.name.box
-        if not (r.left + S._tag_width("ref") < box[0] and box[2] < r.right and r.top < box[1] and box[3] < r.bottom):
-            out.append(f"{r.owner} 이름이 상자 밖이나 꼬리표에 닿는다")
-    for o, box in conds:
-        if right is not None and box[2] > right:
-            out.append(f"{o} 조건 글자가 프레임 밖으로 나간다")
-    for n in lay.notes:
-        box = T.place(n.left + S.NOTE_TEXT_X, n.top + n.height / 2, n.text).box
-        if box[2] > n.left + n.width - S.NOTE_FOLD or box[1] < n.top or box[3] > n.top + n.height:
-            out.append(f"{n.owner} 글자가 노트 밖으로 나간다")
-    by_life = {}
-    for b in lay.bars:
-        by_life.setdefault((b.owner, b.depth), []).append(b)
-    for (owner, _), bs in by_life.items():
-        bs.sort(key=lambda b: b.top)
-        out += [f"{owner} 막대가 붙거나 겹친다" for a, b in zip(bs, bs[1:]) if b.top < a.bottom + S.BAR_GAP - 1e-6]
-    for i, (h, a) in enumerate(heads):
-        out += [f"{h}·{g} 머리가 겹친다" for g, b in heads[i + 1:] if overlap(a, b)]
-    return out
-
-
-@pytest.mark.parametrize("seed", range(400))
-def test_random_inputs_keep_the_layout_rules(seed):
-    data = random_diagram(seed)
-    lay = S.layout(S.parse(data))
-    assert rule_breaks(lay) == [], data
-
-
-@pytest.mark.parametrize("seed", [1422, 2819, 6427])
-def test_random_inputs_that_once_broke_the_rules(seed):
-    # 400 밖에서 겹친 막대 깊이가 같게 나오던 입력(alt 칸에서 이어 가는 막대·반환으로 연 막대가 겹친다)
-    assert rule_breaks(S.layout(S.parse(random_diagram(seed)))) == []
-
-
-def test_random_inputs_cover_the_interesting_cases():
-    seen = set()
-    for seed in range(400):
-        lay = S.layout(S.parse(random_diagram(seed)))
-        seen |= {f.fragment.kind for f in lay.frames} | ({"ref"} if lay.refs else set())
-        seen |= {"nested"} if any(b.depth for b in lay.bars) else set()
-        seen |= {"create"} if any(m.message.kind == "create" for m in lay.messages) else set()
-        seen |= {"crossing"} if any(lab.text for m in lay.messages for lab in m.labels
-                                    for p in lay.participants if lab.box[0] < p.x < lab.box[2]) else set()
-    assert seen >= {"loop", "opt", "alt", "ref", "nested", "create", "crossing"}
-
-
-@pytest.mark.parametrize("seed", range(0, 400, 40))
-def test_random_inputs_draw(seed):
-    d = S.render(random_diagram(seed), scale=0.5)
-    assert d.canvas.to_image().size[0] > 0

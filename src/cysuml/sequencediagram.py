@@ -23,6 +23,7 @@ from typing import Any, Optional
 from . import text as T
 from .canvas import SCALE, Canvas
 from .classdiagram import InputError, _at, _Reader, _show
+from .geom import overlap
 
 __all__ = ["InputError", "parse", "layout", "draw", "render"]
 
@@ -182,12 +183,14 @@ class Diagram:
 
 @dataclass(frozen=True)
 class Label:
-    """한 줄 글자. anchor "mm"이면 (x, y)가 가운데, "lm"이면 x가 왼쪽 끝이다."""
+    """한 줄 글자. anchor "mm"이면 (x, y)가 가운데, "lm"이면 x가 왼쪽 끝이다. bg면 글자 밑에 흰 바탕을 깔아 그 밑 점선을
+    지운다(메시지 글자·조건)."""
 
     text: str
     x: float
     y: float
     anchor: str = "mm"
+    bg: bool = False
 
     @property
     def box(self) -> Box:
@@ -227,13 +230,18 @@ def _extent(lines: list[str]) -> tuple[float, float]:
 
 @dataclass(frozen=True)
 class PlacedBar:
-    """활성 막대. x는 가운데이고, depth는 같은 생명선에서 이 막대를 감싼 막대 수다(그만큼 오른쪽으로 비킨다)."""
+    """활성 막대. x는 가운데이고, depth는 같은 생명선에서 이 막대를 감싼 막대 수다(그만큼 오른쪽으로 비킨다). continued는 alt
+    앞 칸에서 반환해 끝난 막대를 다음 칸 나눔선 EDGE_CLEAR 아래에서 이어 가는 막대인지, closer는 밑변을 정한 메시지 자리다 —
+    밑변이 그 메시지 높이이거나 CLEAR 아래일 때만 있고(그 메시지에서 이 막대나 이 막대가 부른 막대가 끝났다), 막대 높이·프레임·
+    ref로 정해졌으면 None이다. 검사(sequencecheck)가 막대가 어디서 열리고 끝나는지 좌표로 짐작하지 않게 싣는다."""
 
     owner: str
     x: float
     top: float
     bottom: float
     depth: int
+    continued: bool = False
+    closer: Optional[int] = None
 
     @property
     def rect(self) -> Box:
@@ -251,6 +259,16 @@ class PlacedMessage:
     end: float
     labels: tuple[Label, ...]
 
+    @property
+    def arrow(self) -> Box:
+        """화살촉이 차지하는 상자."""
+        return _arrow_box(self.end, 1 if self.end > self.start else -1, self.y)
+
+
+def _arrow_box(end: float, sign: int, y: float) -> Box:
+    """끝이 end이고 sign 쪽(1이면 오른쪽)으로 가는 메시지 선의 화살촉 상자."""
+    return min(end, end - sign * ARROW), y - ARROW_HALF, max(end, end - sign * ARROW), y + ARROW_HALF
+
 
 @dataclass(frozen=True)
 class PlacedFrame:
@@ -265,6 +283,14 @@ class PlacedFrame:
     dividers: tuple[float, ...]
     conditions: tuple[Label, ...]
 
+    @property
+    def tag(self) -> Box:
+        return _tag_box(self.left, self.top, self.fragment.kind)
+
+    @property
+    def rect(self) -> Box:
+        return self.left, self.top, self.right, self.bottom
+
 
 @dataclass(frozen=True)
 class PlacedRef:
@@ -276,6 +302,14 @@ class PlacedRef:
     bottom: float
     name: Label
 
+    @property
+    def tag(self) -> Box:
+        return _tag_box(self.left, self.top, "ref")
+
+    @property
+    def rect(self) -> Box:
+        return self.left, self.top, self.right, self.bottom
+
 
 @dataclass(frozen=True)
 class PlacedNote:
@@ -285,6 +319,14 @@ class PlacedNote:
     top: float
     width: float
     height: float
+
+    @property
+    def label(self) -> Label:
+        return Label(self.text, self.left + NOTE_TEXT_X, self.top + self.height / 2, "lm")
+
+    @property
+    def rect(self) -> Box:
+        return self.left, self.top, self.left + self.width, self.top + self.height
 
 
 @dataclass(frozen=True)
@@ -859,6 +901,10 @@ def _tag_width(op: str) -> float:
     return max(TAG_MIN_W, T.text_width(op, True) + TAG_PAD)
 
 
+def _tag_box(left: float, top: float, op: str) -> Box:
+    return left, top, left + _tag_width(op), top + TAG_H
+
+
 def _label_lines(m: Message) -> list[str]:
     if m.kind == "create":
         return [CREATE_LABEL] + ([m.name] if m.name else [])
@@ -938,10 +984,6 @@ def _columns(d: Diagram, plan: _Plan) -> _Columns:
 # ---------------------------------------------------------------- 3. 세로
 
 
-def _overlap(a: Box, b: Box, pad: float) -> bool:
-    return a[0] - pad < b[2] and b[0] < a[2] + pad and a[1] - pad < b[3] and b[1] < a[3] + pad
-
-
 @dataclass
 class _FrameParts:
     """놓는 동안 모으는 loop·opt·alt 프레임의 높이와 조건 글자."""
@@ -1017,7 +1059,7 @@ class _Placer:
         s = f"[{text}]"
         rel = T.place(0, y + COND_Y, s, False, "lm").box
         left = self._free_x(e, start, rel[2] - rel[0], (rel[1] - PAD, rel[3] + PAD))
-        label = Label(s, left - rel[0], y + COND_Y, "lm")
+        label = Label(s, left - rel[0], y + COND_Y, "lm", bg=True)
         self._add(label.box)
         return label
 
@@ -1035,11 +1077,11 @@ class _Placer:
             for (x0, dy0, x1, dy1), avoid_bars in pieces:
                 box = (x0, y + dy0, x1, y + dy1)
                 for o in near:
-                    if _overlap(box, o, PAD):
+                    if overlap(box, o, PAD):
                         need = max(need, o[3] + PAD - dy0 + EPS)
                 if avoid_bars:
                     for b, bx in bars:
-                        if b not in attached and _overlap(box, bx, PAD):
+                        if b not in attached and overlap(box, bx, PAD):
                             if bx[3] == INF:
                                 raise RuntimeError(f"배치 버그: 끝나지 않은 막대에 걸려 내릴 수 없다({box} / {bx})")
                             need = max(need, bx[3] + PAD - dy0 + EPS)
@@ -1053,7 +1095,7 @@ class _Placer:
                 x = self._bar_x(nb)
                 box = (x - ACT_W / 2, y, x + ACT_W / 2, y + ACT_H)
                 for o in near:
-                    if _overlap(box, o, PAD):
+                    if overlap(box, o, PAD):
                         need = max(need, o[3] + PAD + EPS)
                 for b, bx in bars:
                     if b.life == nb.life and b.depth == nb.depth and bx[3] != INF and bx[3] > y - BAR_GAP:
@@ -1118,9 +1160,7 @@ class _Placer:
             x2 = c.x[t]
         lines = _label_lines(m)
         below = _label_below(m, right) if lines else None
-        pieces: list[tuple[Box, bool]] = [((min(x1, x2), 0.0, max(x1, x2), 0.0), False),
-                                          ((min(x2, x2 - sign * ARROW), -ARROW_HALF, max(x2, x2 - sign * ARROW), ARROW_HALF),
-                                           False)]
+        pieces: list[tuple[Box, bool]] = [((min(x1, x2), 0.0, max(x1, x2), 0.0), False), (_arrow_box(x2, sign, 0.0), False)]
         labels_rel = []
         if lines:
             x = self._label_x(k, lines, (c.x[s] + x2) / 2 if m.kind == "create" else (c.x[s] + c.x[t]) / 2)
@@ -1140,7 +1180,7 @@ class _Placer:
         if m.kind == "create":
             self.heads[t] = y - HEAD_H / 2
         self.messages.append(PlacedMessage(m, f"messages[{k}]", y, x1, x2,
-                                           tuple(Label(text, x, y + dy) for text, x, dy in labels_rel)))
+                                           tuple(Label(text, x, y + dy, bg=True) for text, x, dy in labels_rel)))
 
     def _edge(self, e: int) -> float:
         """프레임·칸·ref의 가로 선 높이. 맨 처음 일이어도 그 안 첫 메시지가 FIRST보다 위로 가지 않게 한다."""
@@ -1157,10 +1197,10 @@ class _Placer:
         y = self._box_top(e)
         self.ys.append(y)
         self._add((LEFT, y, INF, y))
-        tag = _tag_width(f.kind)
-        self._add((LEFT, y, LEFT + tag, y + TAG_H))
+        tag = _tag_box(LEFT, y, f.kind)
+        self._add(tag)
         cond = f.branches[0].condition
-        self.frames[f.index] = _FrameParts(y, [self._condition(e, y, LEFT + tag + COND_GAP, cond)] if cond else [])
+        self.frames[f.index] = _FrameParts(y, [self._condition(e, y, tag[2] + COND_GAP, cond)] if cond else [])
 
     def branch(self, e: int, f: Fragment, j: int) -> None:
         y = self._box_top(e)
@@ -1199,9 +1239,13 @@ class _Placer:
     def _finish(self) -> Layout:
         d, c, done = self.d, self.cols, len(self.plan.events)
         bars = []
+        events = self.plan.events
         for b in self.plan.bars:
-            bars.append(PlacedBar(d.participants[b.life].name, self._bar_x(b), self.ys[b.top] + b.top_off,
-                                  self._bottom(b, done), b.depth))
+            bottom = self._bottom(b, done)
+            closer = next((events[j].item for j, off in sorted(b.terms) if events[j].kind == "message" and off in (0, CLEAR)
+                           and self.ys[j] + off == bottom), None)
+            bars.append(PlacedBar(d.participants[b.life].name, self._bar_x(b), self.ys[b.top] + b.top_off, bottom, b.depth,
+                                  b.top_off != 0, closer))
         life_end = max([self.floor] + [b.bottom for b in bars]) + LIFE_TAIL
         participants = []
         for i, p in enumerate(d.participants):
@@ -1244,10 +1288,9 @@ def layout(diagram: Diagram) -> Layout:
 # ---------------------------------------------------------------- 그리기
 
 
-def _draw_tag(c: Canvas, left: float, top: float, op: str, owner: str) -> None:
-    w = _tag_width(op)
-    c.poly([(left, top), (left + w, top), (left + w, top + TAG_SIDE), (left + w - TAG_CUT, top + TAG_H), (left, top + TAG_H)],
-           owner=owner)
+def _draw_tag(c: Canvas, tag: Box, op: str, owner: str) -> None:
+    left, top, right, bottom = tag
+    c.poly([(left, top), (right, top), (right, top + TAG_SIDE), (right - TAG_CUT, bottom), (left, bottom)], owner=owner)
     c.text(left + TAG_TEXT[0], top + TAG_TEXT[1], op, bold=True, owner=owner)
 
 
@@ -1275,14 +1318,15 @@ def _draw_message(c: Canvas, m: PlacedMessage) -> None:
         c.line([(m.start, y), (m.end, y)], dash=REPLY_DASH, owner=o)
         c.open_arrow((m.end, y), (m.start, y), size=ARROW, owner=o)
     for lab in m.labels:
-        c.text(lab.x, lab.y, lab.text, anchor="mm", bg=True, owner=o)
+        c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=lab.bg, owner=o)
 
 
 def _draw_note(c: Canvas, n: PlacedNote) -> None:
     l, t, w, h, f = n.left, n.top, n.width, n.height, NOTE_FOLD
     c.poly([(l, t), (l + w - f, t), (l + w, t + f), (l + w, t + h), (l, t + h)], owner=n.owner)
     c.line([(l + w - f, t), (l + w - f, t + f), (l + w, t + f)], owner=n.owner)
-    c.text(l + NOTE_TEXT_X, t + h / 2, n.text, owner=n.owner)
+    lab = n.label
+    c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=lab.bg, owner=n.owner)
 
 
 def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
@@ -1300,12 +1344,12 @@ def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
         c.rect(b.x - ACT_W / 2, b.top, ACT_W, b.bottom - b.top, owner=b.owner)
     for r in lay.refs:
         c.rect(r.left, r.top, r.right - r.left, r.bottom - r.top, owner=r.owner)
-        _draw_tag(c, r.left, r.top, "ref", r.owner)
-        c.text(r.name.x, r.name.y, r.name.text, anchor="mm", owner=r.owner)
+        _draw_tag(c, r.tag, "ref", r.owner)
+        c.text(r.name.x, r.name.y, r.name.text, anchor=r.name.anchor, bg=r.name.bg, owner=r.owner)
     for f in lay.frames:
-        _draw_tag(c, f.left, f.top, f.fragment.kind, f.owner)
+        _draw_tag(c, f.tag, f.fragment.kind, f.owner)
         for lab in f.conditions:
-            c.text(lab.x, lab.y, lab.text, anchor="lm", bg=True, owner=f.owner)
+            c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=lab.bg, owner=f.owner)
     for m in lay.messages:
         _draw_message(c, m)
     for n in lay.notes:
