@@ -77,7 +77,7 @@ def test_line_running_along_its_own_end_box_fails(via_y, passed):
     assert r.passed is passed
     if not passed:
         (f,) = r.failures
-        assert f.kind == "line_through_box" and f.elements == ("A->B", "A")
+        assert f.kind == "line_along_own_box" and f.elements == ("A->B", "A")
         assert "제 끝 상자에 4px 안으로 붙어 간다" in f.problem and "상자 A(0, 0, 90×48)" in f.problem
         assert "테두리가 두 겹" in f.hint
 
@@ -96,7 +96,7 @@ def test_end_shape_reaching_the_other_end_box_hints_to_space_the_boxes(b_top, pa
     assert r.passed is passed
     if not passed:
         (f,) = r.failures
-        assert f.kind == "line_through_box" and f.elements == ("A->B", "A")
+        assert f.kind == "head_near_own_box" and f.elements == ("A->B", "A")
         assert "선 끝 모양이 제 끝 상자 변에 4px 안으로 붙는다" in f.problem
         assert f.hint.endswith("두 상자를 더 떼어 놓는다.") and "via" not in f.hint
 
@@ -117,14 +117,14 @@ def test_end_shape_hidden_under_its_own_box(width, b_left, b_top, passed):
     assert r.passed is passed
     if not passed:
         (f,) = r.failures
-        assert f.kind == "line_through_box" and f.elements == ("A->B", "A")
+        assert f.kind == "head_under_own_box" and f.elements == ("A->B", "A")
         assert "선 끝 모양이 제 끝 상자에 가려진다" in f.problem and "마름모" in f.problem
 
 
 def test_self_relation_loop_hugging_its_box_fails():
     # 자기 관계의 고리 가운데 구간이 A 위 변 2px 위를 지난다(처음·마지막 구간만 A에 닿는 끝 구간이다)
     hug = report([box("A", 0, 0)], [rel("association", "A", "A", via=[[20, -30], [20, -2], [70, -2], [70, -30], [140, -30], [140, 24]])])
-    assert [(f.kind, f.elements) for f in hug.failures] == [("line_through_box", ("A->A", "A"))]
+    assert [(f.kind, f.elements) for f in hug.failures] == [("line_along_own_box", ("A->A", "A"))]
     assert report([box("A", 0, 0)], [rel("association", "A", "A", via=[[45, -40], [140, -40], [140, 24]])]).passed
 
 
@@ -395,7 +395,7 @@ def test_line_coming_back_over_its_own_triangle_fails():
     r = report([box("A", 0, 0), box("B", 400, 0)],
                [rel("generalization", "A", "B", via=[[200, 100], [398, 30], [370, 24]])])
     # 앞 구간이 지나는 꺾는 점 (398, 30)은 B 왼쪽 변에서 2px이라 B 변에 붙어 가는 것도 함께 걸린다
-    assert [(f.kind, f.elements) for f in r.failures] == [("line_through_box", ("A->B", "B")),
+    assert [(f.kind, f.elements) for f in r.failures] == [("line_along_own_box", ("A->B", "B")),
                                                           ("line_through_head", ("A->B",))]
 
 
@@ -650,10 +650,8 @@ def test_summary_lists_failures_then_notices():
 def test_findings_come_boxes_first_then_lines_then_labels():
     r = report([box("A", 0, 0), box("B", 300, 0), box("P", 150, 0), box("Q", 160, 10)],
                [rel("association", "A", "B", name="n"), rel("dependency", "B", "A")])
-    order = ["box_overlap", "line_through_box", "line_overlap", "line_through_head", "line_through_text", "text_on_box",
-             "text_overlap"]
     found = kinds(r)
-    assert found == sorted(found, key=order.index)
+    assert found == sorted(found, key=K.KINDS.index)
     assert {"box_overlap", "line_through_box", "line_overlap"} <= set(found)
 
 

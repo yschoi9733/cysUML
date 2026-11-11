@@ -11,7 +11,7 @@ import bisect
 import math
 import numbers
 from dataclasses import dataclass, field, replace
-from typing import Iterable, Optional, TypeVar, Union
+from typing import Iterable, NamedTuple, Optional, TypeVar, Union
 
 from PIL import Image, ImageColor, ImageDraw
 
@@ -184,6 +184,14 @@ def _collinear(pts: tuple[Point, ...]) -> bool:
     return all((far[0] - x0) * (y - y0) == (far[1] - y0) * (x - x0) for x, y in others)
 
 
+class Measure(NamedTuple):
+    """size는 그린 것의 범위에 둘레 PAD를 둔 논리 좌표 폭·높이, png는 to_image가 낼 PNG의 픽셀 크기다. PNG는 오른쪽·아래를 픽셀에
+    맞춰 늘려 size보다 1/배율 안쪽으로 조금 더 덮는다(frame). png는 그림이 너무 커(MAX_PIXELS) 그릴 수 없으면 None이다."""
+
+    size: tuple[float, float]
+    png: Optional[tuple[int, int]]
+
+
 class Canvas:
     def __init__(self, scale: float = SCALE):
         (scale,) = _nums(scale)
@@ -306,15 +314,13 @@ class Canvas:
             raise ValueError(f"그림이 너무 크다: 논리 {b[2] - b[0]:g}×{b[3] - b[1]:g}, 배율 {self.scale:g}")
         return fit
 
-    def measure(self) -> Optional[tuple[tuple[float, float], Optional[tuple[int, int]]]]:
-        """(그린 것의 범위에 둘레 PAD를 둔 논리 좌표 폭·높이, to_image가 낼 PNG의 픽셀 크기). PNG는 오른쪽·아래를 픽셀에 맞춰
-        늘려 이보다 1/배율 안쪽으로 조금 더 덮는다(frame). 픽셀 크기는 그림이 너무 커(MAX_PIXELS) 그릴 수 없으면 None이다.
-        그린 것이 없으면 통째로 None."""
+    def measure(self) -> Optional[Measure]:
+        """그림 크기. 그린 것이 없으면 None."""
         b = self.bounds()
         if b is None:
             return None
         fit = self._fit(b)
-        return (b[2] - b[0] + 2 * PAD, b[3] - b[1] + 2 * PAD), None if fit is None else (fit[2], fit[3])
+        return Measure((b[2] - b[0] + 2 * PAD, b[3] - b[1] + 2 * PAD), None if fit is None else (fit[2], fit[3]))
 
     def frame(self) -> Box:
         """결과 PNG가 덮는 논리 좌표 범위: 그린 것의 범위에 PAD만큼 여백을 두고, 오른쪽·아래를 출력 픽셀에 맞춰 늘린다.

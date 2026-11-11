@@ -1,10 +1,9 @@
 """클래스도 검사: 그린 결과(classdiagram.Drawing)를 읽어 합격·불합격과 알림을 낸다.
 
-불합격은 문서에 못 넣는 그림이다. 관계선(화살촉·삼각형·마름모 포함)이 양 끝이 아닌 상자나 선 글자(관계 이름·다중도)를 지날 때,
-관계선이 제 끝 상자 변에 붙어 가거나 선 끝 모양이 제 끝 상자에 가려질 때, 관계선이 다른 관계선과 포개지거나 선 끝 모양에 닿을 때, 선 끝 모양끼리 겹칠 때, 상자끼리 겹칠 때, 선 글자끼리 또는 선 글자와
-상자가 겹칠 때다. 선끼리 엇갈린 곳과 그림 크기는 알림으로만 준다. 상속·실체화에서 자식 여럿의 선이 한 줄기로 부모의 한 삼각형에
-모이는 것(공유 줄기)은 포개짐으로도, 선 끝 모양에 닿는 것으로도 치지 않는다. 공유 줄기처럼 여러 선이 한 자리에 겹쳐 그려진 곳이
-걸리면 한 항목으로 묶어 알린다.
+불합격은 문서에 못 넣는 그림이다 — 선(화살촉·삼각형·마름모 포함)이 상자·글자·다른 선을 가로지르거나 그것들에 붙어 한데
+보이는 것, 상자나 글자끼리 겹치는 것이다. 종류는 KINDS에 낸 차례대로 있다. 선끼리 엇갈린 곳과 그림 크기는 알림으로만 준다.
+상속·실체화에서 자식 여럿의 선이 한 줄기로 부모의 한 삼각형에 모이는 것(공유 줄기)은 포개짐으로도, 선 끝 모양에 닿는 것으로도
+치지 않는다. 공유 줄기처럼 여러 선이 한 자리에 겹쳐 그려진 곳이 걸리면 한 항목으로 묶어 알린다.
 
 관계선은 상자 밑에 그리므로 끝 상자 안으로 들어간 부분은 가려 보이지 않고, 상자 안 글자에 닿는 선은 그 상자를 먼저 지난다. 그래서
 상자 안 글자를 지나는 선은 "선이 상자를 지난다" 한 항목으로 알린다.
@@ -36,6 +35,19 @@ TRUNK_KINDS = ("generalization", "realization")
 ROLES = {"name": "이름", "from_multiplicity": "from 쪽 다중도", "to_multiplicity": "to 쪽 다중도"}
 LABEL_HINT = "선 글자 자리는 도구가 선 둘레의 빈 곳에서 고르는데 빈 곳이 없었다 — 상자를 떼어 놓거나, 꺾는 점(via)을 주어 선 둘레를 비운다."
 CROSSING_HINT = "엇갈림을 줄이려면 상자 순서·자리를 바꾸거나, 꺾는 점(via)을 주어 돌아가게 한다."
+KINDS = (  # 불합격 종류(이 차례로 낸다)
+    "box_overlap",  # 상자끼리 겹치거나 붙었다
+    "line_through_box",  # 선이 양 끝이 아닌 상자를 지나거나 붙어 지나간다
+    "line_along_own_box",  # 선이 제 끝 상자에 붙어 간다(그 상자에 닿는 끝 구간은 빼고)
+    "head_near_own_box",  # 반대쪽 끝의 선 끝 모양이 제 끝 상자 변에 붙는다
+    "head_under_own_box",  # 선 끝 모양이 제 끝 상자 안으로 들어가 가려진다
+    "line_overlap",  # 선끼리 포개지거나 한 선이 왔던 길을 되짚는다
+    "line_through_head",  # 선이 선 끝 모양에 닿는다
+    "head_overlap",  # 선 끝 모양끼리 겹친다
+    "line_through_text",  # 선이 선 글자를 지난다
+    "text_on_box",  # 선 글자가 상자에 겹친다
+    "text_overlap",  # 선 글자끼리 겹친다
+)
 
 Segment = tuple[Point, Point]
 
@@ -45,9 +57,7 @@ class Finding:
     """검사 항목 하나. kind는 종류, elements는 걸린 요소의 이름(상자 이름이나 관계 기록의 owner), where는 걸린 자리(논리 좌표
     왼, 위, 오른, 아래 — 엇갈린 곳은 넓이가 없다), problem은 무엇이 걸렸는지, hint는 고치는 법이다.
 
-    불합격 종류(이 차례로 낸다): box_overlap(상자끼리) · line_through_box(선이 상자를, 제 끝 상자 변에 붙어, 선 끝 모양이 제 상자에 가려져) · line_overlap(선끼리 포개짐, 한 선의
-    되짚음) · line_through_head(선이 선 끝 모양에) · head_overlap(선 끝 모양끼리) · line_through_text(선이 선 글자를) ·
-    text_on_box(선 글자가 상자에) · text_overlap(선 글자끼리). 알림 종류: crossing.
+    불합격 종류는 KINDS, 알림 종류는 crossing이다.
     """
 
     kind: str
@@ -228,10 +238,11 @@ def check(drawing: Drawing) -> Report:
                 *retraces, *_merged_overlaps(overlaps),
                 *_lines_through_heads(relations, pairs, near), *_head_overlaps(relations, pairs, near),
                 *_lines_through_labels(relations, labels), *_labels_on_boxes(labels, boxes), *_label_overlaps(labels)]
+    failures.sort(key=lambda f: KINDS.index(f.kind))
     measured = drawing.canvas.measure()
     if measured is None:
         raise ValueError("그린 것이 없다")
-    return Report(tuple(failures), tuple(_crossings(relations, pairs)), *measured, drawing.canvas.scale)
+    return Report(tuple(failures), tuple(_crossings(relations, pairs)), measured.size, measured.png, drawing.canvas.scale)
 
 
 def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:
@@ -353,21 +364,21 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box]) -> Itera
                 on_path, parts = [], _parts(r.segments, wide)
             if parts:
                 where = _cover(parts)
-                hit = found.get((b.name, own, where), lambda: _BoxHit(b, where, own))
+                along = own and _length(on_path) > OVERLAP_MIN
+                hit = found.get((b.name, own, along, where), lambda: _BoxHit(b, where, own, along=along))
                 hit.inside = hit.inside or (not own and any(hits(p, q, b.rect) for p, q in parts))
-                hit.along = hit.along or _length(on_path) > OVERLAP_MIN
                 _add(hit.rels, r)
     for hit in found.values():
         b, rels, vias = hit.box, hit.rels, {r.via for r in hit.rels}
         if hit.own and hit.along:
-            yield Finding("line_through_box", (*_owners(rels), b.name), hit.where,
+            yield Finding("line_along_own_box", (*_owners(rels), b.name), hit.where,
                           f"선이 제 끝 상자에 {BOX_CLEARANCE}px 안으로 붙어 간다: {_titles(rels)}, {b.title}.",
                           f"선이 상자 테두리에 붙어 보인다(변을 따라가면 테두리가 두 겹으로 보인다) — 꺾는 점(via)을 고쳐 그 상자에서 "
                           f"{BOX_CLEARANCE}px 넘게 띄운다.")
         elif hit.own:
             fix = ("두 상자를 더 떼어 놓는다" if vias == {False}
                    else "꺾는 점(via)을 고치거나 두 상자를 더 떼어 놓는다")
-            yield Finding("line_through_box", (*_owners(rels), b.name), hit.where,
+            yield Finding("head_near_own_box", (*_owners(rels), b.name), hit.where,
                           f"선 끝 모양이 제 끝 상자 변에 {BOX_CLEARANCE}px 안으로 붙는다: {_titles(rels)}, {b.title}.",
                           f"반대쪽 끝의 화살촉·삼각형·마름모가 이 상자 변에 닿아 보인다 — {fix}.")
         else:
@@ -393,7 +404,7 @@ def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box]) -> Itera
                     _add(found.get((b.name, h.points), lambda: (b, h, []))[2], r)
     for b, h, rels in found.values():
         whose = "·".join(f"관계 {r.name}" for r in sorted(rels, key=_index))
-        yield Finding("line_through_box", (*_owners(rels), b.name), span(h.points),
+        yield Finding("head_under_own_box", (*_owners(rels), b.name), span(h.points),
                       f"선 끝 모양이 제 끝 상자에 가려진다: {whose}의 {h.name}(자리 {fmt_rect(span(h.points))}), {b.title}.",
                       "선이 상자 변을 너무 비스듬히 나간다 — 상자를 옮기거나 꺾는 점(via)을 주어 변에서 곧게 나가게 한다.")
 
