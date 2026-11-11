@@ -255,6 +255,23 @@ def test_actor_bar_lasts_until_it_answers_while_the_caller_works():
     assert rule_breaks(lay) == []
 
 
+def test_caller_waiting_for_an_actor_is_not_cut_by_other_lifelines():
+    # 막대 없는 C가 보내면 열린 막대를 모두 닫지만, U의 대답을 기다리는 A는 남는다
+    lay = lay_of(life("U", "A", "C", "D", actor=("U",)), [call("A", "U", "ask()"), call("C", "D", "tick()"), reply("U", "A", "ok")])
+    (a,), (u,) = bars_of(lay, "A"), bars_of(lay, "U")
+    ok = lay.messages[2]
+    assert a.top == lay.messages[0].y and a.bottom >= ok.y and ok.start == u.rect[2]
+    assert rule_breaks(lay) == []
+
+
+def test_actor_answers_from_its_bar_even_if_the_caller_returned_first():
+    lay = lay_of(life("Z", "A", "U", actor=("U",)), [call("Z", "A", "f()"), call("A", "U", "ask()"), reply("A", "Z"), reply("U", "A", "ok")])
+    u = bars_of(lay, "U")[0]
+    ok = lay.messages[3]
+    assert u.bottom == ok.y and ok.start == u.rect[0]
+    assert rule_breaks(lay) == []
+
+
 def test_actor_call_without_an_answer_keeps_the_short_bar():
     lay = lay_of(life("S", "U", actor=("U",)), [call("S", "U", "show()"), call("S", "U", "show(again)"), call("U", "S", "click()")])
     first, second = bars_of(lay, "U")

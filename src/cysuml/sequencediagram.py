@@ -547,7 +547,8 @@ class _Activations:
     - 반환은 보내는 막대(와 그 위에 남은 막대)를 그 높이에서 닫는다. 받는 생명선에 열린 막대가 있으면 그 위를 닫고 잇고,
       없으면 그 자리에서 연다(다른 막대는 닫지 않는다).
     - 액터가 받는 호출은, 그 액터가 다음에 보내는 메시지가 반환(대답)이고 그 사이에 프레임 선이 없으면 대답할 때까지
-      잇는다(대답을 기다리는 막대 — 다른 생명선이 메시지를 보내도 닫히지 않는다). 아니면 높이 ACT_H로 그리고 쌓지 않는다.
+      잇는다(대답을 기다리는 막대 — 그 막대와 그 막대를 부른 막대들은 다른 생명선이 메시지를 보내도 닫히지 않고, 부른
+      쪽이 먼저 반환해도 그 막대는 대답까지 남는다). 아니면 높이 ACT_H로 그리고 쌓지 않는다.
       액터는 대답할 때 그 막대에서, 그 밖에는 막대 없이 생명선에서 보낸다. 만드는 메시지는 막대를 만들지 않는다.
     닫는 막대의 밑변은 "윗변 + ACT_H"와 그 막대가 마지막으로 주고받은 높이 가운데 아래쪽이고, 그 막대가 부른 막대보다는
     아래다. 부른 막대가 메시지 높이에서 끝났으면 그보다 CLEAR만큼 더 잇는다 — 그 메시지 선이 이 막대 생명선을 지날 때 선이
@@ -588,22 +589,31 @@ class _Activations:
         if b.parent is not None and b.parent in self.stack:
             b.parent.terms |= {(j, off or CLEAR) for j, off in b.terms}
 
-    @staticmethod
-    def _closable(x: _Bar, keep_sticky: bool) -> bool:
-        return not x.protected and not (keep_sticky and x.sticky)
+    def _held(self) -> set[int]:
+        """다른 생명선이 보내는 메시지로는 닫지 않는 막대(id): 대답을 기다리는 액터 막대와, 그 막대를 부른 막대들 — 부른
+        쪽이 대답을 기다리는 동안 끊기지 않게."""
+        held: set[int] = set()
+        for x in self.stack:
+            p: Optional[_Bar] = x if x.sticky else None
+            while p is not None and p in self.stack and id(p) not in held:
+                held.add(id(p))
+                p = p.parent
+        return held
+
+    def _closing(self, above: list[_Bar], keep_sticky: bool = True) -> list[_Bar]:
+        """above 가운데 닫을 막대(아래부터). 지킨 막대와, keep_sticky면 대답을 기다리는 막대와 그 부른 막대들은 뺀다."""
+        held = self._held() if keep_sticky else set()
+        return [x for x in above if not x.protected and id(x) not in held]
 
     def close_above(self, b: _Bar) -> None:
-        i = next(k for k, x in enumerate(self.stack) if x is b)
-        for x in reversed(self.stack[i + 1:]):
-            if self._closable(x, True):
-                self._close(x)
+        for x in reversed(self._closing(self.stack[self.stack.index(b) + 1:])):
+            self._close(x)
 
     def close_all(self, keep_sticky: bool = True) -> None:
-        """지킨 막대 밖의 열린 막대를 모두 닫는다. 대답을 기다리는 막대는 keep_sticky일 때 남긴다(메시지가 닫을 때) —
-        프레임·칸이 끝날 때와 그림 끝에서는 닫는다."""
-        for x in reversed(list(self.stack)):
-            if self._closable(x, keep_sticky):
-                self._close(x)
+        """지킨 막대 밖의 열린 막대를 모두 닫는다. 대답을 기다리는 막대와 그 부른 막대들은 keep_sticky일 때 남긴다(메시지가
+        닫을 때) — 프레임·칸이 끝날 때와 그림 끝에서는 닫는다."""
+        for x in reversed(self._closing(list(self.stack), keep_sticky)):
+            self._close(x)
 
     def message(self, src: int, dst: int, kind: str, e: int, src_actor: bool, dst_actor: bool, sticky: bool = False
                 ) -> tuple[Optional[_Bar], Optional[_Bar]]:
@@ -615,11 +625,12 @@ class _Activations:
         d = None
         if kind == "reply":
             if s is not None:
-                # 위에 남은 것은 프레임이 지키던 막대와 대답을 기다리는 막대뿐이다(나머지는 send_from이 닫았다). 부른 쪽이
-                # 반환하면 함께 끝나고, 이 반환 선이 그 생명선을 지날 수 있어 선 아래로 CLEAR만큼 잇는다. 이 반환을 받는
-                # 생명선의 막대는 남겨 아래에서 반환에 잇는다
+                # 위에 남은 것은 프레임이 지키던 막대와 대답을 기다리는 막대(와 그 부른 막대)뿐이다(나머지는 send_from이
+                # 닫았다). 부른 쪽이 반환하면 함께 끝나고, 이 반환 선이 그 생명선을 지날 수 있어 선 아래로 CLEAR만큼 잇는다.
+                # 이 반환을 받는 생명선의 막대는 남겨 아래에서 반환에 잇고, 대답을 기다리는 액터 막대는 남겨 그 대답이
+                # 막대에서 나가게 한다
                 for x in reversed(self.stack[self.stack.index(s) + 1:]):
-                    if x.life != dst:
+                    if x.life != dst and not x.sticky:
                         self._close(x)
                         x.terms.add((e, CLEAR))
                 self._close(s)  # 반환 높이는 부모에게 넘기지 않는다 — 건너뛰는 반환이 사이 막대 끝을 선 위에 두지 않게
@@ -641,24 +652,23 @@ class _Activations:
         """메시지가 시작하는 막대. 액터는 대답(반환)할 때만 대답을 기다리던 막대에서 보낸다."""
         return self.find(src) if not src_actor or kind == "reply" else None
 
-    def send_from(self, src: int, kind: str, src_actor: bool) -> Optional[_Bar]:
-        """보내는 쪽 규칙: 보내는 막대를 찾아 그 위를 닫는다. 없으면 반환이 아닌 한 열린 막대를 모두 닫는다(대답을 기다리는
-        막대는 남긴다). 찾은 막대를 돌려준다."""
-        s = self._source(src, kind, src_actor)
+    def _send_closing(self, s: Optional[_Bar], kind: str) -> list[_Bar]:
+        """보내는 쪽 규칙이 닫을 막대: 보내는 막대 s가 있으면 그 위, 없으면 반환이 아닌 한 모두(_closing이 뺄 것은 빼고)."""
         if s is not None:
-            self.close_above(s)
-        elif kind != "reply":
-            self.close_all()
+            return self._closing(self.stack[self.stack.index(s) + 1:])
+        return self._closing(list(self.stack)) if kind != "reply" else []
+
+    def send_from(self, src: int, kind: str, src_actor: bool) -> Optional[_Bar]:
+        """보내는 쪽 규칙: 보내는 막대를 찾아 그 위를 닫는다. 없으면 반환이 아닌 한 열린 막대를 모두 닫는다. 찾은 막대를
+        돌려준다."""
+        s = self._source(src, kind, src_actor)
+        for x in reversed(self._send_closing(s, kind)):
+            self._close(x)
         return s
 
     def _would_close(self, src: int, kind: str, src_actor: bool) -> set[int]:
         """send_from이 닫을 막대(id). 아무것도 바꾸지 않는다."""
-        s = self._source(src, kind, src_actor)
-        if s is not None:
-            above = self.stack[self.stack.index(s) + 1:]
-        else:
-            above = self.stack if kind != "reply" else []
-        return {id(x) for x in above if self._closable(x, True)}
+        return {id(x) for x in self._send_closing(self._source(src, kind, src_actor), kind)}
 
     def preclose(self, firsts: list[tuple[int, str, bool]]) -> None:
         """다음에 올 메시지들(보내는 쪽, 종류, 액터인지 — alt면 칸마다 첫 메시지)이 모두 닫을 막대를 지금 닫는다. 프레임·ref
