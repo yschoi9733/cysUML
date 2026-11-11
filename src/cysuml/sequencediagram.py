@@ -92,6 +92,7 @@ MAX_PUSH = 10_000
 FRAME_INSET = 10   # 프레임 왼쪽 변에서 첫 머리까지
 FRAME_RIGHT = 15   # 마지막 머리에서 프레임 오른쪽 변까지
 FRAME_GAP = 6      # 앞서 그린 것과 프레임·칸·ref 가로 선 사이
+FRAME_BEFORE = 20  # 앞 메시지 선에서 프레임·칸·ref 가로 선까지 최소
 FRAME_HEAD = 32    # 프레임·칸 윗변에서 첫 메시지까지 최소
 FRAME_FOOT = 34    # 마지막 메시지에서 프레임 밑변까지 최소
 FRAME_AFTER = 18   # 프레임 밑변에서 다음 메시지까지 최소
@@ -627,10 +628,11 @@ class _Activations:
             if s is not None:
                 # 위에 남은 것은 프레임이 지키던 막대와 대답을 기다리는 막대(와 그 부른 막대)뿐이다(나머지는 send_from이
                 # 닫았다). 부른 쪽이 반환하면 함께 끝나고, 이 반환 선이 그 생명선을 지날 수 있어 선 아래로 CLEAR만큼 잇는다.
-                # 이 반환을 받는 생명선의 막대는 남겨 아래에서 반환에 잇고, 대답을 기다리는 액터 막대는 남겨 그 대답이
-                # 막대에서 나가게 한다
+                # 이 반환을 받는 생명선의 막대는 남겨 아래에서 반환에 잇고, 대답을 기다리는 액터 막대와 그 부른 막대들은
+                # 남겨 그 대답이 막대에서 나가 기다리던 막대에 닿게 한다
+                held = self._held()
                 for x in reversed(self.stack[self.stack.index(s) + 1:]):
-                    if x.life != dst and not x.sticky:
+                    if x.life != dst and id(x) not in held:
                         self._close(x)
                         x.terms.add((e, CLEAR))
                 self._close(s)  # 반환 높이는 부모에게 넘기지 않는다 — 건너뛰는 반환이 사이 막대 끝을 선 위에 두지 않게
@@ -1136,11 +1138,11 @@ class _Placer:
         return max(self.floor + FRAME_GAP, self._closed_bottom(e) + EDGE_CLEAR, FIRST - FRAME_HEAD)
 
     def _box_top(self, e: int) -> float:
-        """프레임·ref 윗변 높이. 바로 앞이 프레임 밑변이나 ref면 메시지처럼 띄운다 — 두 상자가 붙어 하나로 읽히지 않게."""
+        """프레임·칸·ref 가로 선 높이. 바로 앞이 메시지면 그 선에서 FRAME_BEFORE, 프레임 밑변이나 ref면 메시지처럼 띄운다
+        — 화살촉에 붙거나 두 상자가 붙어 하나로 읽히지 않게."""
         prev = self.plan.events[e - 1] if e else None
-        after = (self.ys[e - 1] + FRAME_AFTER if prev is not None and prev.kind == "end" else
-                 self.ys[e - 1] + REF_H + REF_AFTER if prev is not None and prev.kind == "ref" else -INF)
-        return max(self._edge(e), after)
+        gap = {"message": FRAME_BEFORE, "end": FRAME_AFTER, "ref": REF_H + REF_AFTER}.get(prev.kind) if prev else None
+        return max(self._edge(e), self.ys[e - 1] + gap if gap is not None else -INF)
 
     def start(self, e: int, f: Fragment) -> None:
         y = self._box_top(e)
@@ -1152,7 +1154,7 @@ class _Placer:
         self.frames[f.index] = _FrameParts(y, [self._condition(e, y, LEFT + tag + COND_GAP, cond)] if cond else [])
 
     def branch(self, e: int, f: Fragment, j: int) -> None:
-        y = self._edge(e)
+        y = self._box_top(e)
         self.ys.append(y)
         self._add((LEFT, y, INF, y))
         part = self.frames[f.index]

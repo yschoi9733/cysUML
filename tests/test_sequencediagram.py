@@ -272,6 +272,21 @@ def test_actor_answers_from_its_bar_even_if_the_caller_returned_first():
     assert rule_breaks(lay) == []
 
 
+def test_caller_waiting_for_an_actor_survives_its_own_callers_return():
+    lay = lay_of(life("X", "S", "A", "U", actor=("U",)),
+                 [call("X", "S", "f()"), call("S", "A", "g()"), call("A", "U", "ask()"), reply("S", "X"), reply("U", "A", "ok")])
+    (a,) = bars_of(lay, "A")
+    ok = lay.messages[4]
+    assert a.bottom >= ok.y and ok.end == a.rect[2]
+    assert rule_breaks(lay) == []
+
+
+def test_frame_or_ref_right_after_a_message_keeps_away_from_its_line():
+    lay = lay_of(life("A", "U", actor=("U",)), [call("A", "U", "ask()"), reply("U", "A", "ok")],
+                 frames=[{"kind": "ref", "name": "R", "before": 1}])
+    assert lay.refs[0].top - lay.messages[0].y >= S.FRAME_BEFORE
+
+
 def test_actor_call_without_an_answer_keeps_the_short_bar():
     lay = lay_of(life("S", "U", actor=("U",)), [call("S", "U", "show()"), call("S", "U", "show(again)"), call("U", "S", "click()")])
     first, second = bars_of(lay, "U")
