@@ -282,6 +282,10 @@ class PlacedFrame:
     def tag(self) -> Box:
         return _tag_box(self.left, self.top, self.fragment.kind)
 
+    @property
+    def rect(self) -> Box:
+        return self.left, self.top, self.right, self.bottom
+
 
 @dataclass(frozen=True)
 class PlacedRef:
@@ -297,6 +301,10 @@ class PlacedRef:
     def tag(self) -> Box:
         return _tag_box(self.left, self.top, "ref")
 
+    @property
+    def rect(self) -> Box:
+        return self.left, self.top, self.right, self.bottom
+
 
 @dataclass(frozen=True)
 class PlacedNote:
@@ -310,6 +318,10 @@ class PlacedNote:
     @property
     def label(self) -> Label:
         return Label(self.text, self.left + NOTE_TEXT_X, self.top + self.height / 2, "lm")
+
+    @property
+    def rect(self) -> Box:
+        return self.left, self.top, self.left + self.width, self.top + self.height
 
 
 @dataclass(frozen=True)

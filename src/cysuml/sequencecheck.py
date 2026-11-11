@@ -46,6 +46,7 @@ KINDS = (  # 불합격 종류(이 차례로 낸다)
     "participant_overlap",       # 머리끼리 겹친다
     "bar_on_participant",        # 막대가 머리에 걸친다
     "bar_overlap",               # 한 생명선의 같은 깊이 막대끼리 붙거나, 다른 생명선의 막대끼리 겹친다
+    "bar_off_message",           # 막대 윗변이 여는 메시지에 맞지 않거나, 마지막 메시지 밑에 짧은 꼬리가 남는다
     "message_off_bar",           # 메시지 선 끝이 막대 변(그 높이에 막대가 없으면 생명선)에 닿지 않는다
     "line_at_bar_end",           # 메시지 선이 건너는 막대의 윗변·밑변에 붙는다
     "line_overlap",              # 메시지 선끼리 붙어 한 선으로 보인다
@@ -62,6 +63,7 @@ KINDS = (  # 불합격 종류(이 차례로 낸다)
     "text_on_participant",       # 글자가 머리에 겹친다
     "text_on_lifeline",          # 메시지 글자가 그 메시지가 건너지 않는 생명선을 가린다
     "text_overlap",              # 글자끼리 겹치거나 한 글자의 흰 바탕이 다른 글자를 지운다
+    "note_covers",               # 노트(흰 상자)가 다른 것을 덮는다
     "text_outside",              # 조건·ref 이름·노트 글자가 제 프레임·상자·노트 밖으로 나간다
 )
 
@@ -71,6 +73,7 @@ HINTS = {
     "participant_overlap": "참여자 이름을 줄인다.",
     "bar_on_participant": "참여자 순서를 바꾸거나, 만드는 메시지(create)의 차례를 바꾼다.",
     "bar_overlap": "그 생명선을 부르는 메시지의 차례를 바꾸거나 그림을 나눈다.",
+    "bar_off_message": "그 생명선을 부르고 돌려주는 메시지의 차례를 바꾸거나 그림을 나눈다.",
     "message_off_bar": "메시지 차례를 바꾸거나 그림을 나눈다.",
     "line_at_bar_end": "참여자 순서를 바꿔 이 메시지가 건너는 생명선을 줄이거나, 메시지 차례를 바꾼다.",
     "line_overlap": "메시지 차례를 바꾸거나 그림을 나눈다.",
@@ -87,6 +90,7 @@ HINTS = {
     "text_on_participant": TEXT_HINT,
     "text_on_lifeline": TEXT_HINT,
     "text_overlap": TEXT_HINT,
+    "note_covers": "노트를 빼거나 글자를 줄인다.",
     "text_outside": "그 글자를 줄인다(노트는 둘로 나눠도 된다).",
 }
 
@@ -261,6 +265,21 @@ class _Scene:
                     yield self.found("bar_overlap", (self.who(a.owner), self.who(b.owner)), between(a.rect, b.rect),
                                      f"다른 생명선의 막대끼리 겹친다: {self.bar(a)}, {self.bar(b)}.")
 
+    def bar_ends(self) -> Iterator[Finding]:
+        """막대 윗변은 그 막대를 여는 메시지 높이다(그 메시지가 막대 변에 닿는다) — alt 앞 칸에서 반환한 막대를 다음 칸
+        나눔선 EDGE_CLEAR 아래에서 이어 가는 것은 빼고. 밑변은 그 막대에 닿는 마지막 메시지에서 끝나거나 CLEAR 이상 더 간다 —
+        그 사이면 화살표 밑에 짧은 꼬리가 남는다."""
+        continues = [d + EDGE_CLEAR for f in self.lay.frames for d in f.dividers]
+        for b in self.lay.bars:
+            ys = [m.y for m in self.lay.messages if _attached(m, b)]
+            if not any(_on(y, b.top) for y in ys) and not any(_on(b.top, y) for y in continues):
+                yield self.found("bar_off_message", (self.who(b.owner),), (b.rect[0], b.top, b.rect[2], b.top),
+                                 f"막대 윗변(y {fmt_num(b.top)})에 그 막대를 여는 메시지가 없다: {self.bar(b)}.")
+            if ys and EPS < b.bottom - max(ys) < CLEAR - EPS:
+                yield self.found("bar_off_message", (self.who(b.owner),), (b.rect[0], max(ys), b.rect[2], b.bottom),
+                                 f"막대가 마지막 메시지(y {fmt_num(max(ys))}) 밑으로 {fmt_num(b.bottom - max(ys))}px만 더 가 "
+                                 f"꼬리가 남는다(그 메시지에서 끝나거나 {CLEAR}px 이상 더 가야 한다): {self.bar(b)}.")
+
     # -------- 메시지 선
 
     def message_ends(self) -> Iterator[Finding]:
@@ -309,9 +328,8 @@ class _Scene:
 
     def lines_at_bar_ends(self) -> Iterator[Finding]:
         for m in self.lay.messages:
-            x0, x1 = sorted((m.start, m.end))
             for b in self.lay.bars:
-                if _attached(m, b) or not (b.rect[0] < x1 - EPS and x0 + EPS < b.rect[2]):
+                if not _enters(m, b):  # 막대에 바깥에서 닿기만 하는 선(_attached)도 여기 든다
                     continue
                 for end, edge in ((b.top, "윗변"), (b.bottom, "밑변")):
                     if abs(m.y - end) < CLEAR - EPS:
@@ -371,10 +389,14 @@ class _Scene:
         return False
 
     def frames_cutting_bars(self) -> Iterator[Finding]:
+        """막대 끝이 프레임 가로 선에 붙거나, 막대가 프레임 윗변·밑변 하나만 건너거나, alt 칸 안에서 시작한 막대가 칸 나눔선을
+        건넌다(앞 칸에서 반환한 생명선의 막대를 나눔선 EDGE_CLEAR 아래에서 이어 가는 것은 빼고)."""
         for f in self.framed:
+            edges = self.edges(f)
+            dividers = f.dividers if isinstance(f, PlacedFrame) else ()
             for b in self.lay.bars:
                 elements = (f.owner, self.who(b.owner))
-                for y, edge in self.edges(f):
+                for y, edge in edges:
                     for end, side in ((b.top, "윗변"), (b.bottom, "밑변")):
                         if abs(y - end) < EDGE_CLEAR - EPS:
                             yield self.found("frame_cuts_bar", elements, (b.rect[0], min(y, end), b.rect[2], max(y, end)),
@@ -383,12 +405,18 @@ class _Scene:
                 over_top = b.top + EPS < f.top < b.bottom - EPS
                 over_bottom = b.top + EPS < f.bottom < b.bottom - EPS
                 if over_top and not over_bottom and not self.returns_in(f, b):
-                    yield self.found("frame_cuts_bar", elements, between(b.rect, (f.left, f.top, f.right, f.bottom)),
+                    yield self.found("frame_cuts_bar", elements, between(b.rect, f.rect),
                                      f"막대가 {_frame(f)}의 윗변만 건너 그 안에서 메시지 없이 끝난다(잘린 것처럼 보인다): "
                                      f"{self.bar(b)}.")
                 if over_bottom and not over_top:
-                    yield self.found("frame_cuts_bar", elements, between(b.rect, (f.left, f.top, f.right, f.bottom)),
+                    yield self.found("frame_cuts_bar", elements, between(b.rect, f.rect),
                                      f"막대가 {_frame(f)} 안에서 시작해 밑변을 건넌다(잘린 것처럼 보인다): {self.bar(b)}.")
+                if f.top + EPS < b.top and not any(_on(b.top, d + EDGE_CLEAR) for d in dividers):
+                    for d in dividers:
+                        if b.top + EPS < d < b.bottom - EPS:
+                            yield self.found("frame_cuts_bar", elements, (b.rect[0], d, b.rect[2], d),
+                                             f"막대가 {_frame(f)}의 한 칸에서 시작해 칸 나눔선(y {fmt_num(d)})을 건넌다(칸 안에서 "
+                                             f"연 막대는 그 칸에서 닫는다): {self.bar(b)}.")
 
     def bars_outside_frames(self) -> Iterator[Finding]:
         for f in self.framed:
@@ -404,8 +432,7 @@ class _Scene:
                 if b.top >= a.bottom + FRAME_GAP - EPS:
                     break
                 what = "겹친다" if b.top < a.bottom - EPS else f"{fmt_num(b.top - a.bottom)}px로 붙는다"
-                yield self.found("frame_overlap", (a.owner, b.owner), between((a.left, a.top, a.right, a.bottom),
-                                                                              (b.left, b.top, b.right, b.bottom)),
+                yield self.found("frame_overlap", (a.owner, b.owner), between(a.rect, b.rect),
                                  f"프레임끼리 {what}({FRAME_GAP}px 이상 떨어져야 한다): {_frame(a)}(y {fmt_num(a.top)}~"
                                  f"{fmt_num(a.bottom)}), {_frame(b)}(y {fmt_num(b.top)}~{fmt_num(b.bottom)}).")
 
@@ -439,7 +466,7 @@ class _Scene:
             for i, p in enumerate(self.parts):
                 elements = (f.owner, f"participants[{i}]")
                 if isinstance(f, PlacedRef):
-                    box = (f.left, f.top, f.right, f.bottom)
+                    box = f.rect
                     if _overlap(box, p.head):
                         yield self.found("frame_on_participant", elements, between(box, p.head),
                                          f"{_frame(f)} 상자가 머리를 가린다: {self.head(p)}.")
@@ -528,28 +555,48 @@ class _Scene:
                     continue
                 yield self.found("text_overlap", (a.element, b.element), where, f"{what}: {a.title}, {b.title}.")
 
+    def notes_covering(self) -> Iterator[Finding]:
+        """노트는 흰 상자를 맨 나중에 그리므로 그 밑의 머리·생명선·막대·메시지·프레임·글자·다른 노트를 가린다."""
+        for j, n in enumerate(self.lay.notes):
+            box = n.rect
+            hits: list[tuple[str, str]] = []
+            for i, p in enumerate(self.parts):
+                if _overlap(box, p.head) or _crosses_v(p.x, p.dash_top, p.bottom, box):
+                    hits.append((f"participants[{i}]", f"참여자 '{p.participant.name}'의 머리·생명선"))
+            hits += [(self.who(b.owner), self.bar(b)) for b in self.lay.bars if _overlap(box, b.rect)]
+            for m in self.lay.messages:
+                x0, x1 = sorted((m.start, m.end))
+                if _crosses(m.y, x0, x1, box) or _overlap(m.arrow, box):
+                    hits.append((m.owner, _message(m)))
+            hits += [(f.owner, _frame(f)) for f in self.framed if _overlap(box, f.rect)]
+            hits += [(t.element, t.title) for t in self.texts if t.element != n.owner and _overlap(box, t.area)]
+            hits += [(o.owner, f"노트 {o.owner}") for o in self.lay.notes[j + 1:] if _overlap(box, o.rect)]
+            if hits:
+                yield self.found("note_covers", (n.owner, *(e for e, _ in hits)), box,
+                                 f"노트 {n.owner}(자리 {fmt_rect(box)})가 다른 것을 덮는다: {', '.join(t for _, t in hits)}.")
+
     def texts_outside(self) -> Iterator[Finding]:
         for f in self.lay.frames:
             for lab in f.conditions:
                 box = lab.box
                 if not (f.left < box[0] and box[2] < f.right and f.top < box[1] and box[3] < f.bottom):
                     yield self.found("text_outside", (f.owner,), box,
-                                     f"조건 글자가 {_frame(f)}(자리 {fmt_rect((f.left, f.top, f.right, f.bottom))}) 밖으로 나간다: "
+                                     f"조건 글자가 {_frame(f)}(자리 {fmt_rect(f.rect)}) 밖으로 나간다: "
                                      f"'{lab.text}'(자리 {fmt_rect(box)}).")
         for r in self.lay.refs:
             box = r.name.box
             if not (r.tag[2] < box[0] and box[2] < r.right and r.top < box[1] and box[3] < r.bottom):
                 yield self.found("text_outside", (r.owner,), box,
                                  f"ref 이름이 {_frame(r)} 상자 밖으로 나가거나 꼬리표에 닿는다: '{r.name.text}'(자리 {fmt_rect(box)}), "
-                                 f"상자 {fmt_rect((r.left, r.top, r.right, r.bottom))}.")
+                                 f"상자 {fmt_rect(r.rect)}.")
         for n in self.lay.notes:
             box = n.label.box
             if not (n.left < box[0] and box[2] < n.left + n.width - NOTE_FOLD and n.top < box[1] and box[3] < n.top + n.height):
                 yield self.found("text_outside", (n.owner,), box,
-                                 f"노트 글자가 노트 {n.owner}(자리 {fmt_rect((n.left, n.top, n.left + n.width, n.top + n.height))}) "
+                                 f"노트 글자가 노트 {n.owner}(자리 {fmt_rect(n.rect)}) "
                                  f"밖으로 나가거나 접힌 귀에 닿는다: '{n.text}'(자리 {fmt_rect(box)}).")
 
-    RULES = (participant_overlaps, bars_on_participants, bar_overlaps, message_ends, lines_at_bar_ends, line_overlaps,
-             lines_through_participants, frames_cutting_bars, bars_outside_frames, frame_overlaps, messages_in_refs,
-             lines_on_frames, frames_on_participants, tags_on_lifelines, lines_through_texts, texts_on_bars_and_participants,
-             texts_on_lifelines, text_overlaps, texts_outside)
+    RULES = (participant_overlaps, bars_on_participants, bar_overlaps, bar_ends, message_ends, lines_at_bar_ends,
+             line_overlaps, lines_through_participants, frames_cutting_bars, bars_outside_frames, frame_overlaps,
+             messages_in_refs, lines_on_frames, frames_on_participants, tags_on_lifelines, lines_through_texts,
+             texts_on_bars_and_participants, texts_on_lifelines, text_overlaps, notes_covering, texts_outside)

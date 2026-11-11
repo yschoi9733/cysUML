@@ -71,6 +71,7 @@ CASES = {
     "participant_overlap": lambda lay: swap(lay, "participants", part(lay, "B"), replace(part(lay, "B"), x=part(lay, "A").x + 10)),
     "bar_on_participant": lambda lay: swap(lay, "bars", bar(lay, "A"), replace(bar(lay, "A"), top=5)),
     "bar_overlap": lambda lay: replace(lay, bars=lay.bars + (moved(bar(lay, "B"), bar(lay, "B").top + 3),)),
+    "bar_off_message": lambda lay: swap(lay, "bars", bar(lay, "B"), replace(bar(lay, "B"), top=bar(lay, "B").top - 2)),
     "message_off_bar": lambda lay: swap(lay, "messages", lay.messages[1], replace(lay.messages[1], end=lay.messages[1].end + 3)),
     "line_at_bar_end": lambda lay: swap(lay, "bars", bar(lay, "B"), replace(bar(lay, "B"), bottom=lay.messages[3].y - 1)),
     "line_overlap": lambda lay: swap(lay, "messages", lay.messages[2], replace(lay.messages[2], y=lay.messages[1].y + 1)),
@@ -88,6 +89,8 @@ CASES = {
     "text_on_participant": lambda lay: relabel(lay, 1, x=part(lay, "B").x, y=20),
     "text_on_lifeline": lambda lay: relabel(lay, 1, x=part(lay, "B").x + 10),
     "text_overlap": lambda lay: relabel(lay, 2, x=lay.messages[1].labels[0].x, y=lay.messages[1].labels[0].y + 3),
+    "note_covers": lambda lay: swap(lay, "notes", lay.notes[0], replace(lay.notes[0], left=part(lay, "B").x - 20,
+                                                                        top=lay.messages[3].y - 10)),
     "text_outside": lambda lay: swap(lay, "notes", lay.notes[0], replace(lay.notes[0], width=20)),
 }
 
@@ -179,6 +182,28 @@ def test_message_end_inside_a_deeper_bar_is_caught(callback):
     m = callback.messages[3]
     found = SC.find(swap(callback, "messages", m, replace(m, start=outer.rect[2])))
     assert any(f.kind == "message_off_bar" and "더 옆으로 비킨 막대" in f.problem for f in found)
+
+
+def test_bar_tail_below_its_last_message_is_caught(base):
+    # B의 막대는 반환 item(messages[2])에서 끝난다 — 2px 더 가면 화살표 밑에 꼬리가 남는다
+    b = bar(base, "B")
+    assert b.bottom == base.messages[2].y
+    found = SC.find(swap(base, "bars", b, replace(b, bottom=b.bottom + 2)))
+    assert any(f.kind == "bar_off_message" and "꼬리" in f.problem for f in found)
+
+
+def test_bar_opened_in_an_alt_branch_running_into_the_next_is_caught():
+    lay = S.render({"participants": life("A", "B", "C"),
+                    "messages": [call("A", "B", "f()"), call("B", "C", "g()"), reply("C", "B"), call("B", "C", "h()"),
+                                 reply("C", "B"), reply("B", "A")],
+                    "frames": [{"kind": "alt", "branches": [{"condition": "p", "first": 1, "last": 2},
+                                                            {"condition": "else", "first": 3, "last": 4}]}]}).layout
+    assert SC.find(lay) == ()
+    (divider,) = lay.frames[0].dividers
+    first = bar(lay, "C")
+    assert first.bottom < divider
+    found = SC.find(swap(lay, "bars", first, replace(first, bottom=divider + 12)))
+    assert any(f.kind == "frame_cuts_bar" and "칸 나눔선" in f.problem for f in found)
 
 
 def test_frame_lines_too_close_are_caught(base):
