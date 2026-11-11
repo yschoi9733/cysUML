@@ -381,6 +381,20 @@ def test_bars_after_an_alt_do_not_depend_on_the_branch_order():
         assert bars_of(lay, "B")[-1].top == lay.messages[3].y
 
 
+@pytest.mark.parametrize("approve_first", [True, False])
+def test_alt_branch_order_does_not_change_who_answers_from_a_bar(approve_first):
+    # 게이트웨이는 승인 칸에서만 반환한다. 승인이 먼저든 거절이 먼저든 그 반환은 게이트웨이 막대에서 나간다
+    approve = [reply("G", "O", "approved"), reply("O", "C", "order")]
+    decline = [reply("O", "C", "error")]
+    first, second = (approve, decline) if approve_first else (decline, approve)
+    lay = lay_of(life("C", "O", "G"), [call("C", "O", "checkout()"), call("O", "G", "charge()"), *first, *second],
+                 frames=[{"kind": "alt", "branches": [{"condition": "a", "first": 2, "last": 1 + len(first)},
+                                                      {"condition": "b", "first": 2 + len(first), "last": 4}]}])
+    m = next(m for m in lay.messages if m.labels and m.labels[0].text == "approved")
+    assert any(b.owner == "G" and b.top <= m.y <= b.bottom and m.start == b.rect[0] for b in lay.bars)
+    assert rule_breaks(lay) == []
+
+
 def test_bar_closed_by_the_message_after_a_ref_ends_before_the_ref():
     lay = lay_of(life("A", "B", "C"), [call("A", "B"), call("A", "C")], frames=[{"kind": "ref", "name": "R", "before": 1}])
     (b,), r = bars_of(lay, "B"), lay.refs[0]

@@ -551,7 +551,7 @@ class _Activations:
     아래다. 부른 막대가 메시지 높이에서 끝났으면 그보다 CLEAR만큼 더 잇는다 — 그 메시지 선이 이 막대 생명선을 지날 때 선이
     막대 밑변을 따라가지 않게(그 밑변은 메시지 높이와 같이 움직여 메시지를 내려서는 못 비킨다).
 
-    프레임 규칙: 프레임 첫 메시지가 닫을 막대는 프레임 앞에서 닫는다. 그때 남아 열려 있던 막대는 부른 쪽이 메시지를 보내도
+    프레임 규칙: 칸마다 첫 메시지가 모두 닫을 막대는 프레임 앞에서 닫는다. 그때 남아 열려 있던 막대는 부른 쪽이 메시지를 보내도
     프레임 안에서 닫지 않고(protected) 프레임 밑변 아래까지 잇는다 — 그런 막대의 밑변은 막대 높이로만 정해져 프레임 윗변
     바로 밑에서 끝날 수 있어서다. 다만 그 생명선이 반환하면 그 높이에서 끝난다(프레임 윗변에서 FRAME_HEAD 넘게 아래다).
     프레임 안에서 연 막대는 칸이 끝날 때 닫는다. alt의 칸은 서로 대신하는 갈래라 칸마다 프레임이 열릴 때의 막대에서 시작한다
@@ -637,9 +637,22 @@ class _Activations:
             self.close_all()
         return s
 
-    def frame_start(self, src: int, kind: str, src_actor: bool) -> None:
-        """프레임 첫 메시지가 닫을 막대는 프레임 앞에서 닫고, 남은 막대를 프레임 끝까지 지킨다."""
-        self.send_from(src, kind, src_actor)
+    def _would_close(self, src: int, kind: str, src_actor: bool) -> set[int]:
+        """send_from이 닫을 막대(id). 아무것도 바꾸지 않는다."""
+        s = None if src_actor else self.find(src)
+        if s is not None:
+            above = self.stack[self.stack.index(s) + 1:]
+        else:
+            above = self.stack if kind != "reply" else []
+        return {id(x) for x in above if not x.protected}
+
+    def frame_start(self, firsts: list[tuple[int, str, bool]]) -> None:
+        """칸마다 첫 메시지(보내는 쪽, 종류, 액터인지)가 모두 닫을 막대는 프레임 앞에서 닫고, 남은 막대를 프레임 끝까지
+        지킨다. 한 칸의 첫 메시지만 보면 alt 칸 순서에 따라 그림이 달라진다."""
+        closing = set.intersection(*(self._would_close(*f) for f in firsts))
+        for x in reversed(list(self.stack)):
+            if id(x) in closing:
+                self._close(x)
         for b in self.stack:
             b.protected = True
         self.kept = list(self.stack)
@@ -736,9 +749,8 @@ def _plan(d: Diagram) -> _Plan:
             attach[ev.item] = acts.message(s, t, m.kind, e, actor[s], actor[t])
             at[ev.item] = e
         elif ev.kind == "start":
-            m = d.messages[d.fragments[ev.item].first]
-            s = index[m.source]
-            acts.frame_start(s, m.kind, actor[s])
+            firsts = [d.messages[b.first] for b in d.fragments[ev.item].branches]
+            acts.frame_start([(index[m.source], m.kind, actor[index[m.source]]) for m in firsts])
         elif ev.kind == "branch":
             acts.branch(e)
         elif ev.kind == "end":
