@@ -262,14 +262,50 @@ def test_actor_call_without_an_answer_keeps_the_short_bar():
 
 
 @pytest.mark.parametrize("yes_first", [True, False])
-def test_actor_answers_from_a_bar_in_every_alt_branch(yes_first):
+def test_actor_called_before_an_alt_answers_alike_in_every_branch(yes_first):
+    # 호출과 대답 사이에 프레임 선이 있으면 막대를 대답까지 잇지 않는다 — 어느 칸이 먼저든 두 대답이 같은 모양이다
     answers = [reply("U", "S", "yes"), reply("U", "S", "no")]
     lay = lay_of(life("S", "U", actor=("U",)), [call("S", "U", "confirm()"), *(answers if yes_first else answers[::-1])],
                  frames=[{"kind": "alt", "branches": [{"condition": "a", "first": 1, "last": 1},
                                                       {"condition": "b", "first": 2, "last": 2}]}])
-    for m in lay.messages[1:]:
-        assert any(b.owner == "U" and b.top <= m.y <= b.bottom and m.start == b.rect[0] for b in lay.bars), m.owner
+    assert [m.start for m in lay.messages[1:]] == [lay.participants[1].x] * 2
+    (u,) = bars_of(lay, "U")
+    assert u.bottom == u.top + S.ACT_H
     assert rule_breaks(lay) == []
+
+
+@pytest.mark.parametrize("ok_first", [True, False])
+def test_actor_answer_inside_one_branch_does_not_depend_on_branch_order(ok_first):
+    branches = [[reply("U", "C", "ok")], [call("C", "U", "ask()")]]
+    first, second = branches if ok_first else branches[::-1]
+    lay = lay_of(life("U", "C", actor=("U",)), [call("C", "U", "prompt()"), *first, *second, call("C", "U", "next()")],
+                 frames=[{"kind": "alt", "branches": [{"condition": "a", "first": 1, "last": 1},
+                                                      {"condition": "b", "first": 2, "last": 2}]}])
+    prompt = bars_of(lay, "U")[0]
+    assert prompt.bottom == prompt.top + S.ACT_H
+
+
+@pytest.mark.parametrize("p_first", [True, False])
+def test_ref_right_before_an_alt_does_not_depend_on_branch_order(p_first):
+    branches = [[call("B", "C", "p")], [call("A", "B", "q")]]
+    first, second = branches if p_first else branches[::-1]
+    lay = lay_of(life("A", "B", "C"), [call("A", "B", "m0"), call("B", "C", "m1"), *first, *second, call("A", "B", "after")],
+                 frames=[{"kind": "alt", "branches": [{"condition": "a", "first": 2, "last": 2},
+                                                      {"condition": "b", "first": 3, "last": 3}]},
+                         {"kind": "ref", "name": "R", "before": 2}])
+    b0 = bars_of(lay, "B")[0]
+    assert b0.bottom > lay.frames[0].bottom  # 어느 칸이 먼저든 B의 첫 막대는 alt를 감싼다
+    assert rule_breaks(lay) == []
+
+
+def test_frames_and_refs_one_after_another_keep_a_gap():
+    lay = lay_of(life("A", "B"), [call("A", "B")] * 4,
+                 frames=[{"kind": "loop", "first": 0, "last": 1}, {"kind": "opt", "first": 2, "last": 3},
+                         {"kind": "ref", "name": "R1", "before": 4}, {"kind": "ref", "name": "R2", "before": 4}])
+    loop, opt = lay.frames
+    r1, r2 = lay.refs
+    assert opt.top - loop.bottom >= S.FRAME_AFTER and r1.top - opt.bottom >= S.FRAME_AFTER
+    assert r2.top - r1.bottom >= S.REF_AFTER
 
 
 def test_actor_called_inside_a_frame_and_answering_after_it_ends_with_the_frame():

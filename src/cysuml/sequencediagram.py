@@ -18,7 +18,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from . import text as T
 from .canvas import SCALE, Canvas
@@ -546,9 +546,9 @@ class _Activations:
       다른 막대를 닫지 않는다 — 받는 쪽이 기다리던 막대가 끊기지 않게.
     - 반환은 보내는 막대(와 그 위에 남은 막대)를 그 높이에서 닫는다. 받는 생명선에 열린 막대가 있으면 그 위를 닫고 잇고,
       없으면 그 자리에서 연다(다른 막대는 닫지 않는다).
-    - 액터가 받는 호출은, 그 액터가 다음에 보내는 메시지가 반환(대답)이면 대답할 때까지 잇는다(대답을 기다리는 막대 —
-      다른 생명선이 메시지를 보내도 닫히지 않는다). 아니면 높이 ACT_H로 그리고 쌓지 않는다. 액터는 대답할 때 그 막대에서,
-      그 밖에는 막대 없이 생명선에서 보낸다. 만드는 메시지는 막대를 만들지 않는다.
+    - 액터가 받는 호출은, 그 액터가 다음에 보내는 메시지가 반환(대답)이고 그 사이에 프레임 선이 없으면 대답할 때까지
+      잇는다(대답을 기다리는 막대 — 다른 생명선이 메시지를 보내도 닫히지 않는다). 아니면 높이 ACT_H로 그리고 쌓지 않는다.
+      액터는 대답할 때 그 막대에서, 그 밖에는 막대 없이 생명선에서 보낸다. 만드는 메시지는 막대를 만들지 않는다.
     닫는 막대의 밑변은 "윗변 + ACT_H"와 그 막대가 마지막으로 주고받은 높이 가운데 아래쪽이고, 그 막대가 부른 막대보다는
     아래다. 부른 막대가 메시지 높이에서 끝났으면 그보다 CLEAR만큼 더 잇는다 — 그 메시지 선이 이 막대 생명선을 지날 때 선이
     막대 밑변을 따라가지 않게(그 밑변은 메시지 높이와 같이 움직여 메시지를 내려서는 못 비킨다).
@@ -556,7 +556,7 @@ class _Activations:
     프레임 규칙: 칸마다 첫 메시지가 모두 닫을 막대는 프레임 앞에서 닫는다. 그때 남아 열려 있던 막대는 부른 쪽이 메시지를 보내도
     프레임 안에서 닫지 않고(protected) 프레임 밑변 아래까지 잇는다 — 그런 막대의 밑변은 막대 높이로만 정해져 프레임 윗변
     바로 밑에서 끝날 수 있어서다. 다만 그 생명선이 반환하면 그 높이에서 끝난다(프레임 윗변에서 FRAME_HEAD 넘게 아래다).
-    프레임 안에서 연 막대(대답을 기다리는 액터 막대도)는 칸이 끝날 때 닫는다. alt의 칸은 서로 대신하는 갈래라 칸마다 프레임이 열릴 때의 막대에서 시작한다
+    프레임 안에서 연 막대는 칸이 끝날 때 닫는다. alt의 칸은 서로 대신하는 갈래라 칸마다 프레임이 열릴 때의 막대에서 시작한다
     — 앞 칸에서 반환한 그런 막대는 거기서 끝나고, 다음 칸에서는 칸 나눔선 EDGE_CLEAR 아래에서 이어지는 막대를 새로 연다.
     어느 한 칸에서라도 반환한 막대는 alt와 함께 끝나고(이어 가던 막대는 밑변 EDGE_CLEAR 위에서 닫는다), 모든 칸에서 계속
     일한 막대만 프레임 밖으로 이어진다 — 칸 차례에 따라 그 뒤 그림이 달라지지 않게.
@@ -660,39 +660,35 @@ class _Activations:
             above = self.stack if kind != "reply" else []
         return {id(x) for x in above if self._closable(x, True)}
 
-    def frame_start(self, firsts: list[tuple[int, str, bool]]) -> None:
-        """칸마다 첫 메시지(보내는 쪽, 종류, 액터인지)가 모두 닫을 막대는 프레임 앞에서 닫고, 남은 막대를 프레임 끝까지
-        지킨다. 한 칸의 첫 메시지만 보면 alt 칸 순서에 따라 그림이 달라진다."""
+    def preclose(self, firsts: list[tuple[int, str, bool]]) -> None:
+        """다음에 올 메시지들(보내는 쪽, 종류, 액터인지 — alt면 칸마다 첫 메시지)이 모두 닫을 막대를 지금 닫는다. 프레임·ref
+        앞에서 쓴다. 한 칸의 첫 메시지만 보면 alt 칸 순서에 따라 그림이 달라진다."""
         closing = set.intersection(*(self._would_close(*f) for f in firsts))
         for x in reversed(list(self.stack)):
             if id(x) in closing:
                 self._close(x)
+
+    def frame_start(self, firsts: list[tuple[int, str, bool]]) -> None:
+        """칸마다 첫 메시지가 모두 닫을 막대는 프레임 앞에서 닫고, 남은 막대를 프레임 끝까지 지킨다."""
+        self.preclose(firsts)
         for b in self.stack:
             b.protected = True
         self.kept = list(self.stack)
         self.ended = [False] * len(self.kept)
 
-    def branch(self, e: int, answers: Callable[[int], bool]) -> None:
+    def branch(self, e: int) -> None:
         """alt 칸 나눔: 앞 칸에서 연 막대를 닫고, 프레임이 열릴 때의 막대로 돌아간다. 앞 칸에서 반환해 끝난 막대는 이 칸에서
-        이어 가는 막대를 새로 연다. 대답을 기다리던 액터 막대는 그 액터가 이 칸에서 대답할 때만 잇는다(answers) — 대답
-        대신 다른 메시지를 보내면 그 선이 막대 가운데에서 나가게 된다."""
+        이어 가는 막대를 새로 연다. (대답을 기다리는 액터 막대는 프레임 선을 넘지 않으므로 여기 오지 않는다.)"""
         self.close_all(keep_sticky=False)  # 남는 것은 지킨 막대뿐이고, 쌓인 차례는 kept와 같다
         now: dict[int, _Bar] = {}  # 바꾼 막대 → 이 칸에서 잇는 막대
-        stack = []
         for i, b in enumerate(self.kept):
-            if b in self.stack:
-                stack.append(b)
-                continue
-            self.ended[i] = True
-            if b.sticky and not answers(b.life):
-                continue
-            parent = now.get(id(b.parent), b.parent) if b.parent is not None else None
-            self.kept[i] = _Bar(b.life, e, {(e, EDGE_CLEAR)}, protected=True, sticky=b.sticky, top_off=EDGE_CLEAR,
-                                parent=parent)
-            self.bars.append(self.kept[i])
-            now[id(b)] = self.kept[i]
-            stack.append(self.kept[i])
-        self.stack = stack
+            if b not in self.stack:
+                self.ended[i] = True
+                parent = now.get(id(b.parent), b.parent) if b.parent is not None else None
+                self.kept[i] = _Bar(b.life, e, {(e, EDGE_CLEAR)}, protected=True, top_off=EDGE_CLEAR, parent=parent)
+                self.bars.append(self.kept[i])
+                now[id(b)] = self.kept[i]
+        self.stack = list(self.kept)
 
     def frame_end(self, e: int) -> None:
         self.close_all(keep_sticky=False)
@@ -764,22 +760,32 @@ def _plan(d: Diagram) -> _Plan:
     acts = _Activations()
     attach: list = [(None, None)] * len(d.messages)
     at = [0] * len(d.messages)
-    def answers(name: str, start: int) -> bool:
-        """액터 name이 messages[start]부터 보는 다음 메시지가 반환(대답)인지. 그 전에 그 액터를 다시 부르면 대답은 나중
-        호출이 받으므로 아니다."""
-        for n in d.messages[start:]:
-            if n.source == name:
-                return n.kind == "reply"
-            if n.target == name and n.kind == "call":
-                return False
-        return False
+    msg_event = {ev.item: e for e, ev in enumerate(events) if ev.kind == "message"}
 
     def answered(k: int) -> bool:
-        """액터를 부르는 호출에 그 액터가 대답하는지 — 그러면 막대를 대답까지 잇는다."""
+        """액터를 부르는 호출에, 그 액터가 다음에 보내는 메시지가 반환(대답)이고 그 사이에 프레임 선(프레임·칸의 시작과
+        끝)이 없는지 — 그러면 막대를 대답까지 잇는다. 프레임 선을 넘으면 alt 칸 순서에 따라 대답이 달라지므로 잇지 않는다.
+        그 사이 그 액터를 다시 부르면 대답은 나중 호출이 받으므로 아니다."""
         m = d.messages[k]
-        return m.kind == "call" and actor[index[m.target]] and answers(m.target, k + 1)
+        if m.kind != "call" or not actor[index[m.target]]:
+            return False
+        for ev in events[msg_event[k] + 1:]:
+            if ev.kind in ("start", "branch", "end"):
+                return False
+            if ev.kind == "message":
+                n = d.messages[ev.item]
+                if n.source == m.target:
+                    return n.kind == "reply"
+                if n.target == m.target and n.kind == "call":
+                    return False
+        return False
 
-    names = [p.name for p in d.participants]
+    def firsts_at(k: int) -> list[tuple[int, str, bool]]:
+        """messages[k]부터 시작하는 다음 메시지들 — 그 자리에서 프레임이 열리면 칸마다 첫 메시지다."""
+        frame = next((f for f in d.fragments if f.first == k), None)
+        msgs = [d.messages[b.first] for b in frame.branches] if frame else [d.messages[k]]
+        return [(index[m.source], m.kind, actor[index[m.source]]) for m in msgs]
+
     for e, ev in enumerate(events):
         if ev.kind == "message":
             m = d.messages[ev.item]
@@ -787,18 +793,15 @@ def _plan(d: Diagram) -> _Plan:
             attach[ev.item] = acts.message(s, t, m.kind, e, actor[s], actor[t], answered(ev.item))
             at[ev.item] = e
         elif ev.kind == "start":
-            firsts = [d.messages[b.first] for b in d.fragments[ev.item].branches]
-            acts.frame_start([(index[m.source], m.kind, actor[index[m.source]]) for m in firsts])
+            acts.frame_start(firsts_at(d.fragments[ev.item].first))
         elif ev.kind == "branch":
-            start = d.fragments[ev.item].branches[ev.branch].first
-            acts.branch(e, lambda life: answers(names[life], start))
+            acts.branch(e)
         elif ev.kind == "end":
             acts.frame_end(e)
         else:
             before = d.refs[ev.item].before
             if before < len(d.messages):  # 바로 다음 메시지가 닫을 막대는 ref 앞에서 닫는다 — ref 밑에 짧은 조각이 남지 않게
-                s = index[d.messages[before].source]
-                acts.send_from(s, d.messages[before].kind, actor[s])
+                acts.preclose(firsts_at(before))
             acts.ref(e)
     acts.close_all(keep_sticky=False)
     bars = acts.bars
@@ -1122,8 +1125,15 @@ class _Placer:
         """프레임·칸·ref의 가로 선 높이. 맨 처음 일이어도 그 안 첫 메시지가 FIRST보다 위로 가지 않게 한다."""
         return max(self.floor + FRAME_GAP, self._closed_bottom(e) + EDGE_CLEAR, FIRST - FRAME_HEAD)
 
+    def _box_top(self, e: int) -> float:
+        """프레임·ref 윗변 높이. 바로 앞이 프레임 밑변이나 ref면 메시지처럼 띄운다 — 두 상자가 붙어 하나로 읽히지 않게."""
+        prev = self.plan.events[e - 1] if e else None
+        after = (self.ys[e - 1] + FRAME_AFTER if prev is not None and prev.kind == "end" else
+                 self.ys[e - 1] + REF_H + REF_AFTER if prev is not None and prev.kind == "ref" else -INF)
+        return max(self._edge(e), after)
+
     def start(self, e: int, f: Fragment) -> None:
-        y = self._edge(e)
+        y = self._box_top(e)
         self.ys.append(y)
         self._add((LEFT, y, INF, y))
         tag = _tag_width(f.kind)
@@ -1146,7 +1156,7 @@ class _Placer:
         self.frames[f.index].bottom = y
 
     def ref(self, e: int, r: Ref) -> None:
-        y = self._edge(e)
+        y = self._box_top(e)
         self.ys.append(y)
         self._add((LEFT, y, INF, y + REF_H))
         self.refs.append((r, y))
