@@ -25,7 +25,7 @@ from . import classcheck, classdiagram, sequencecheck, sequencediagram
 from .canvas import MIN_SCALE, SCALE
 from .classdiagram import InputError
 from .report import Report, fmt_rect
-from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS
+from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
 DEFAULT_DIR = "diagrams"
@@ -60,12 +60,13 @@ CLASS_TIPS = """클래스도 배치 요령:
 - 상자 사이는 관계 이름·다중도 글자가 들어갈 만큼 띄운다. 가로 80px·세로 60px쯤에서 시작하고, 글자가 길면 더 띄운다.
 - 상자 크기는 도구가 글자에 맞춰 늘린다(폭은 90px 이상). 그린 크기는 결과의 "상자 자리"에서 보고 다음 배치에 쓴다."""
 
-SEQUENCE_FLOW = """교류도 그리는 흐름:
+SEQUENCE_WAY_AROUND = "참여자 순서나 메시지 차례를 바꾸거나, 글자를 줄이거나, 그림을 나눈다"  # 교류도 배치 버그를 비켜 가는 법
+
+SEQUENCE_FLOW = f"""교류도 그리는 흐름:
 1. 참여자 차례, 메시지 차례, 프레임이 덮는 메시지 범위를 정해 그린다. 좌표는 주지 않는다 — 생명선 간격, 메시지 높이, \
 활성 막대는 도구가 정한다.
 2. 돌려받은 검사 결과와 그림을 본다. 교류도는 도구가 배치하므로 불합격은 cysUML의 배치 버그다. 그래도 그 그림이 필요하면 \
-항목마다 붙은 힌트대로 입력을 바꿔 비켜 간다 — 참여자 순서를 바꾸거나, 글자를 줄이거나, 그림을 나눈다. 배치하지 못했다는 \
-오류가 와도 같다.
+항목마다 붙은 힌트대로 입력을 바꿔 비켜 간다 — {SEQUENCE_WAY_AROUND}. 배치하지 못했다는 오류가 와도 같다.
 3. 고친 입력을 같은 file_name으로 다시 그린다(파일을 덮어쓴다).
 그림 크기는 알림이라 불합격이 아니다. 메시지가 많아 그림이 길면 나누는 편이 문서에 넣기 좋다."""
 
@@ -133,6 +134,7 @@ SEQUENCE_TOOL = f"""교류도를 그려 PNG 파일로 저장하고, 검사 결�
   - from·to(필수): 참여자 이름. 자기 자신에게 보내는 메시지는 받지 않는다 — 그 일은 notes에 적는다.
   - kind: "call"(기본, 호출)·"reply"(반환, 점선)·"create"(생명선을 만든다 — 그 생명선의 머리가 이 메시지 높이에 놓인다).
   - name: 메시지 글자. call은 꼭 준다(부르는 연산). reply는 돌려주는 값이 있을 때, create는 «create» 밑에 한 줄 더 쓸 때만 준다.
+  - 반환(reply)은 나를 부른 쪽으로 보낸다 — A가 B를 불렀으면 B에서 A로. 거꾸로 보내도 그려지지만 뜻이 틀린다.
   - create는 액터에 보내지 못하고, 그 생명선이 주고받는 첫 메시지여야 한다.
   - 활성 막대는 생명선을 부르면 열리고, 그 생명선이 반환하거나 부른 쪽이 다음 메시지를 보내면 닫힌다.
 - frames: 프레임 목록(없어도 된다, {MAX_FRAMES}개까지). 메시지는 messages 안의 자리(0부터)로 가리킨다. 프레임은 그림 전체 폭으로 \
@@ -147,8 +149,8 @@ last+1). 마지막 칸 조건은 흔히 "else"다.
 {COMMON_INPUT}
 
 결과
-- 글: 검사 결과, 저장한 파일 경로와 픽셀 크기. 검사 항목의 요소 이름은 입력 안의 자리다(participants[1]·messages[3]·frames[0]·\
-notes[0]).
+- 글: 검사 결과, 저장한 파일 경로와 픽셀 크기. 검사 항목은 메시지·프레임·노트를 입력 안의 자리(messages[3]·frames[0]·notes[0])로, \
+참여자를 이름으로 가리킨다.
 {IMAGE_RESULT}
 - 입력이 틀리면 그리지 않고 틀린 곳을 messages[2].to 꼴 자리와 함께 모두 모아 오류로 돌려준다. 그림이 너무 커서 PNG로 그릴 수 \
 없거나, 저장할 폴더에 쓸 수 없거나, 도구가 배치하지 못했을 때도 오류로 돌려준다.
@@ -240,33 +242,28 @@ def _boxes(drawing: classdiagram.Drawing) -> list[str]:
     return ["상자 자리(왼, 위, 폭×높이): " + ", ".join(f"{p.box.name}({fmt_rect(p.rect)})" for p in drawing.layout.boxes)]
 
 
-class _Undrawable(Exception):
-    """입력은 맞는데 그리지 못했다. 문구가 그대로 오류 결과가 된다."""
-
-
 Drawn = Union[classdiagram.Drawing, sequencediagram.Drawing]
 
 
 def _draw(file_name: str, render: Callable[[], Drawn], check: Callable[[Drawn], Report],
-          notes: Callable[[Drawn], list[str]], out_dir: Optional[str]) -> CallToolResult:
-    """render()로 그려 check로 검사하고 저장해 돌려준다. notes(그린 것)는 검사 결과 뒤에 붙이는 줄이다. file_name 문제는
-    그림 입력 오류와 함께 모아 알린다."""
+          extra_lines: Callable[[Drawn], list[str]], out_dir: Optional[str]) -> CallToolResult:
+    """render()로 그려 check로 검사하고 저장해 돌려준다. extra_lines(그린 것)는 검사 결과 뒤에 붙이는 줄이다. file_name
+    문제는 그림 입력 오류와 함께 모아 알린다."""
     name, problem = _file_name(file_name)
     problems = [problem] if problem else []
-    failed = None
     with _drawing:
         try:
             drawing = render()
         except InputError as e:
             problems += e.problems
-        except _Undrawable as e:
-            failed = str(e)
+        except LayoutError as e:  # file_name 문제가 함께 있으면 그것부터 알린다
+            if not problems:
+                return _error(f"교류도를 배치하지 못했다({e}). 파일은 저장하지 않았다. 교류도는 cysUML이 배치하므로 cysUML의 "
+                              f"버그다 — {SEQUENCE_WAY_AROUND}.")
         if problems:
             return _error(f"입력 오류 — {len(problems)}건\n" + "\n".join(f"- {p}" for p in problems))
-        if failed is not None:
-            return _error(failed)
         report = check(drawing)
-        extra = notes(drawing)
+        extra = extra_lines(drawing)
         if report.png_size is None:
             return _error("\n".join(["그림이 너무 커서 PNG를 그리지 않았다(파일도 저장하지 않았다).", report.summary(), *extra]))
         img = drawing.canvas.to_image()
@@ -308,14 +305,6 @@ def draw_class_diagram(
     return _draw(file_name, lambda: classdiagram.render(data, scale), classcheck.check, _boxes, out_dir)
 
 
-def _render_sequence(data: dict, scale: float) -> sequencediagram.Drawing:
-    try:
-        return sequencediagram.render(data, scale)
-    except RuntimeError as e:  # 배치가 걸리지 않는 자리를 찾지 못했다 — sequencediagram이 배치 버그로 낸다
-        raise _Undrawable(f"교류도를 배치하지 못했다({e}). 파일은 저장하지 않았다. 교류도는 cysUML이 배치하므로 cysUML의 "
-                          "버그다 — 참여자 순서나 메시지 차례를 바꾸거나, 글자를 줄이거나, 그림을 나눠 다시 그린다.") from e
-
-
 @mcp.tool(name="draw_sequence_diagram", description=SEQUENCE_TOOL)
 def draw_sequence_diagram(
         file_name: FileName,
@@ -328,4 +317,4 @@ def draw_sequence_diagram(
 ) -> CallToolResult:
     given = {"messages": messages, "frames": frames, "notes": notes}
     data = {"participants": participants, **{k: v for k, v in given.items() if v is not None}}
-    return _draw(file_name, lambda: _render_sequence(data, scale), sequencecheck.check, lambda _: [], out_dir)
+    return _draw(file_name, lambda: sequencediagram.render(data, scale), sequencecheck.check, lambda _: [], out_dir)

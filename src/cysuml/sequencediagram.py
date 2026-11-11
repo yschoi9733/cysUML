@@ -11,7 +11,7 @@
 3. 세로(_Placer): 메시지·프레임·ref를 차례대로 놓되, 앞서 놓은 글자·선·머리·막대에 걸리면 걸리지 않는 곳까지 내린다.
 
 틀린 입력은 그리기 전에 클래스도와 같은 InputError로 돌려준다. 문제마다 "messages[2].to: …"처럼 입력 안의 자리를 붙이고,
-한 번에 모두 모아 알린다.
+한 번에 모두 모아 알린다. 입력은 맞는데 배치가 걸리지 않는 자리를 찾지 못하면 LayoutError(배치 버그)다.
 """
 from __future__ import annotations
 
@@ -25,7 +25,12 @@ from .canvas import SCALE, Canvas
 from .classdiagram import InputError, _at, _Reader, _show
 from .geom import overlap
 
-__all__ = ["InputError", "parse", "layout", "draw", "render"]
+__all__ = ["InputError", "LayoutError", "parse", "layout", "draw", "render"]
+
+
+class LayoutError(RuntimeError):
+    """배치 버그: 입력은 맞는데 걸리지 않는 자리를 찾지 못했다."""
+
 
 PARTICIPANT_KINDS = ("lifeline", "actor")
 MESSAGE_KINDS = ("call", "reply", "create")
@@ -1083,7 +1088,7 @@ class _Placer:
                     for b, bx in bars:
                         if b not in attached and overlap(box, bx, PAD):
                             if bx[3] == INF:
-                                raise RuntimeError(f"배치 버그: 끝나지 않은 막대에 걸려 내릴 수 없다({box} / {bx})")
+                                raise LayoutError(f"배치 버그: 끝나지 않은 막대에 걸려 내릴 수 없다({box} / {bx})")
                             need = max(need, bx[3] + PAD - dy0 + EPS)
             for b, bx in bars:
                 if b in attached or not (bx[0] < span[1] and span[0] < bx[2]):
@@ -1103,7 +1108,7 @@ class _Placer:
             if need == -INF:
                 return y
             y = max(need, y + EPS)
-        raise RuntimeError("배치 버그: 걸리지 않는 높이를 찾지 못했다")
+        raise LayoutError("배치 버그: 걸리지 않는 높이를 찾지 못했다")
 
     # -------- 일 놓기
 
@@ -1142,7 +1147,7 @@ class _Placer:
                         best = x
             if best is not None:
                 return best
-        raise RuntimeError(f"배치 버그: messages[{k}] 글자가 들어갈 칸이 없다")
+        raise LayoutError(f"배치 버그: messages[{k}] 글자가 들어갈 칸이 없다")
 
     def message(self, e: int, k: int) -> None:
         m = self.d.messages[k]

@@ -91,6 +91,7 @@ def test_sequence_description_names_every_field_kind_and_limit_the_reader_takes(
         assert f'"{kind}"' in server.SEQUENCE_TOOL, kind
     for limit in (S.MAX_PARTICIPANTS, S.MAX_MESSAGES, S.MAX_FRAMES, S.MAX_NOTES):
         assert f"{limit}개까지" in server.SEQUENCE_TOOL
+    assert "반환(reply)은 나를 부른 쪽으로 보낸다" in server.SEQUENCE_TOOL
 
 
 def test_description_names_every_failure_kind_in_check_order():
@@ -398,15 +399,26 @@ def test_a_failed_sequence_check_says_it_is_a_cysuml_bug_and_still_saves(tmp_pat
 
 
 def _layout_bug(diagram):
-    raise RuntimeError("배치 버그: 시험")
+    raise sequencediagram.LayoutError("배치 버그: 시험")
 
 
 def test_a_layout_bug_is_an_error_with_a_way_around_and_nothing_is_written(tmp_path, monkeypatch):
     monkeypatch.setattr(sequencediagram, "layout", _layout_bug)
     r = draw_seq(file_name="checkout", participants=PEOPLE, messages=TALKS, out_dir=str(tmp_path))
     assert r.is_error
-    assert text(r).startswith("교류도를 배치하지 못했다(배치 버그: 시험). 파일은 저장하지 않았다.")
-    assert "참여자 순서나 메시지 차례를 바꾸거나, 글자를 줄이거나, 그림을 나눠 다시 그린다." in text(r)
+    assert text(r) == ("교류도를 배치하지 못했다(배치 버그: 시험). 파일은 저장하지 않았다. 교류도는 cysUML이 배치하므로 "
+                       f"cysUML의 버그다 — {server.SEQUENCE_WAY_AROUND}.")
+    assert server.SEQUENCE_WAY_AROUND in server.SEQUENCE_FLOW
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_another_runtime_error_is_not_told_as_a_layout_bug(tmp_path, monkeypatch):
+    def broken(diagram):
+        raise RuntimeError("코드 실수")
+    monkeypatch.setattr(sequencediagram, "layout", broken)
+    r = draw_seq(file_name="checkout", participants=PEOPLE, messages=TALKS, out_dir=str(tmp_path))
+    assert r.is_error
+    assert "배치하지 못했다" not in text(r)
     assert list(tmp_path.iterdir()) == []
 
 
