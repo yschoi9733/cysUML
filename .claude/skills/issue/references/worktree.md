@@ -537,10 +537,11 @@ pgrep -fl '\.app/Contents/MacOS/(pycharm|idea|dataspell)( |$)'
 않는다(실측). 떠 있는지는 실행 파일 자리로 본다:
 
 ```
-pgrep -fl '/\.venv/bin/cysuml( |$)'
+pgrep -fl '/\.venv/bin/(cysuml|python[0-9.]* -m cysuml)( |$)'
 ```
 
-출력이 없으면 묻지 않는다. 떠 있으면 `<pid> <경로>/.venv/bin/python <경로>/.venv/bin/cysuml` 꼴 줄이 나온다(실측 — 이
+출력이 없으면 묻지 않는다. 떠 있으면 `<pid> <경로>/.venv/bin/python <경로>/.venv/bin/cysuml` 꼴 줄이 나오고, `python -m
+cysuml` 로 띄웠으면 `<pid> <경로>/.venv/bin/python3 -m cysuml` 꼴이다(둘 다 `uv run --directory <경로>` 로 띄워 실측 — 이
 명령을 친 셸의 줄은 패턴 글자에 `\.` 가 들어 패턴과 맞지 않아 걸리지 않는다). 본 체크아웃이나 다른 레포의 `.venv` 에서 도는
 서버도 걸리므로 실행 파일 자리가 `<경로>` 아래인 줄만 본다 — 가려지지 않으면 그 줄을 보여 주고 묻는다. 그런 줄이 있으면,
 이 세션이 띄운 백그라운드 작업이면 위대로 멈추고, 아니면 그 서버를 띄운 MCP 클라이언트에서 서버를 끄거나(Claude Code 는
