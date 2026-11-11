@@ -91,8 +91,8 @@ the text and draws the activation bars:
 ```
 
 It gets back the check result, the saved file path, and the picture. As cysUML does the layout, a failed check is a
-cysUML bug. Each finding still says what to change in the input to get around it: the order of participants,
-shorter text, or splitting the diagram.
+cysUML bug. Each finding still says what to change in the input to get around it: the order of participants or
+messages, the messages a frame covers, shorter text, or splitting the diagram.
 
 ### Both tools
 
@@ -156,7 +156,7 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
   프레임(`loop`·`opt`·`alt`·`ref`)만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
   파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면
-  비켜 가는지(참여자 순서, 글자 줄이기, 그림 나누기) 알려 준다.
+  비켜 가는지(참여자·메시지 차례, 프레임이 덮는 범위, 글자 줄이기, 그림 나누기) 알려 준다.
 - 입력 형식 전체는 도구 설명에 있어 클라이언트가 어시스턴트에게 넘긴다.
 - 그림은 `out_dir`에, 없으면 서버 작업 폴더 아래 `diagrams/`에 저장한다. 같은 `file_name`이면 덮어쓴다. 쓸 수 없는 폴더(`/` 등)에서
   서버를 띄우는 클라이언트도 있는데, 그때는 도구가 오류로 알리므로 `out_dir`을 주면 된다.
