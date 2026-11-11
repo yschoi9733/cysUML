@@ -73,6 +73,7 @@ CASES = {
     "bar_overlap": lambda lay: replace(lay, bars=lay.bars + (moved(bar(lay, "B"), bar(lay, "B").top + 3),)),
     "message_off_bar": lambda lay: swap(lay, "messages", lay.messages[1], replace(lay.messages[1], end=lay.messages[1].end + 3)),
     "line_at_bar_end": lambda lay: swap(lay, "bars", bar(lay, "B"), replace(bar(lay, "B"), bottom=lay.messages[3].y - 1)),
+    "line_overlap": lambda lay: swap(lay, "messages", lay.messages[2], replace(lay.messages[2], y=lay.messages[1].y + 1)),
     "line_through_participant": lambda lay: swap(lay, "participants", part(lay, "B"),
                                           replace(part(lay, "B"), top=lay.messages[3].y - S.HEAD_H / 2)),
     "frame_cuts_bar": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], top=bar(lay, "B").top - 2)),
@@ -127,6 +128,35 @@ def test_message_end_away_from_its_lifeline_is_caught(base):
     assert any(f.kind == "message_off_bar" and "생명선" in f.problem for f in found)
 
 
+def test_bar_ending_just_below_a_message_that_ended_nothing_is_cut(base):
+    # A의 막대가 opt 윗변을 건너 messages[1] 선에서 CLEAR 아래에 끝난다 — 그 메시지에서 끝난 막대가 없으니 이유 없이 잘린 막대다
+    a = bar(base, "A")
+    cut = swap(base, "bars", a, replace(a, bottom=base.messages[1].y + S.CLEAR))
+    assert any(f.kind == "frame_cuts_bar" and "윗변만" in f.problem for f in SC.find(cut))
+
+
+def test_frame_side_through_a_label_or_a_message_is_caught(base):
+    f = base.frames[0]
+    lab = base.messages[1].labels[0]
+    found = SC.find(swap(base, "frames", f, replace(f, right=lab.x)))
+    assert any(x.kind == "line_through_text" and "오른쪽 변" in x.problem for x in found)
+    assert any(x.kind == "line_on_frame" and "오른쪽 변" in x.problem for x in found)
+
+
+def test_arrowhead_touching_a_head_is_caught(base):
+    # B의 머리 밑변을 messages[1] 선 3px 위로 — 선은 머리를 비키지만 화살촉(위아래 ARROW_HALF)이 머리에 닿는다
+    b = part(base, "B")
+    y = base.messages[1].y
+    moved_head = swap(base, "participants", b, replace(b, top=y - 3 - S.HEAD_H, dash_top=y - 3))
+    assert any(f.kind == "line_through_participant" and "화살촉" in f.problem for f in SC.find(moved_head))
+
+
+def test_bars_of_different_lifelines_overlapping_are_caught(base):
+    b, a = bar(base, "B"), bar(base, "A")
+    found = SC.find(swap(base, "bars", b, replace(b, x=a.x + 5)))
+    assert any(f.kind == "bar_overlap" and "다른 생명선" in f.problem for f in found)
+
+
 def test_message_line_on_a_frame_line_is_caught_without_bars_nearby():
     # 액터끼리 주고받는 반환에는 막대가 없다 — 프레임 선이 막대 끝에 붙어 우연히 걸리는 일이 없다
     lay = S.render({"participants": life("A", "B", actor=("A", "B")), "messages": [reply("A", "B", "x"), reply("B", "A", "y")],
@@ -168,8 +198,8 @@ def test_elements_are_input_places(base):
 
 
 def test_kind_names_shared_with_the_class_check_mean_the_same():
-    # 두 검사 결과를 같은 꼴로 돌려주므로, 이름이 같으면 뜻도 같다(선이 글자를 지난다·글자끼리 겹친다)
-    assert set(SC.KINDS) & set(K.KINDS) == {"line_through_text", "text_overlap"}
+    # 두 검사 결과를 같은 꼴로 돌려주므로, 이름이 같으면 뜻도 같다(선끼리 포개진다·선이 글자를 지난다·글자끼리 겹친다)
+    assert set(SC.KINDS) & set(K.KINDS) == {"line_overlap", "line_through_text", "text_overlap"}
 
 
 # ---------------------------------------------------------------- 걸지 않는 것
