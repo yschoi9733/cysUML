@@ -184,6 +184,12 @@ def _collinear(pts: tuple[Point, ...]) -> bool:
     return all((far[0] - x0) * (y - y0) == (far[1] - y0) * (x - x0) for x, y in others)
 
 
+def background(placement: T.Placement) -> Optional[Box]:
+    """Canvas.text(bg=True)가 글자 밑에 까는 흰 바탕(잉크 둘레 BG_MARGIN). 칠할 글자가 없으면 None."""
+    ink = placement.ink
+    return None if ink is None else (ink[0] - BG_MARGIN, ink[1] - BG_MARGIN, ink[2] + BG_MARGIN, ink[3] + BG_MARGIN)
+
+
 class Measure(NamedTuple):
     """size는 그린 것의 범위에 둘레 PAD를 둔 논리 좌표 폭·높이, png는 to_image가 낼 PNG의 픽셀 크기다. PNG는 오른쪽·아래를 픽셀에
     맞춰 늘려 size보다 1/배율 안쪽으로 조금 더 덮는다(frame). png는 그림이 너무 커(MAX_PIXELS) 그릴 수 없으면 None이다."""
@@ -229,9 +235,9 @@ class Canvas:
         것은 글자 기록이다)."""
         x, y = _nums(x, y)
         record = Text(x, y, s, bool(bold), anchor, False, owner)
-        ink = record.placement.ink
-        if bg and ink is not None:
-            self.erase(ink[0] - BG_MARGIN, ink[1] - BG_MARGIN, ink[2] + BG_MARGIN, ink[3] + BG_MARGIN, owner=owner)
+        wipe = background(record.placement)
+        if bg and wipe is not None:
+            self.erase(*wipe, owner=owner)
             record = replace(record, bg=True)
         return self._add(record)
 

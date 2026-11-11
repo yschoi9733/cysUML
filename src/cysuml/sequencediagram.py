@@ -23,6 +23,7 @@ from typing import Any, Optional
 from . import text as T
 from .canvas import SCALE, Canvas
 from .classdiagram import InputError, _at, _Reader, _show
+from .geom import overlap
 
 __all__ = ["InputError", "parse", "layout", "draw", "render"]
 
@@ -966,10 +967,6 @@ def _columns(d: Diagram, plan: _Plan) -> _Columns:
 # ---------------------------------------------------------------- 3. 세로
 
 
-def _overlap(a: Box, b: Box, pad: float) -> bool:
-    return a[0] - pad < b[2] and b[0] < a[2] + pad and a[1] - pad < b[3] and b[1] < a[3] + pad
-
-
 @dataclass
 class _FrameParts:
     """놓는 동안 모으는 loop·opt·alt 프레임의 높이와 조건 글자."""
@@ -1063,11 +1060,11 @@ class _Placer:
             for (x0, dy0, x1, dy1), avoid_bars in pieces:
                 box = (x0, y + dy0, x1, y + dy1)
                 for o in near:
-                    if _overlap(box, o, PAD):
+                    if overlap(box, o, PAD):
                         need = max(need, o[3] + PAD - dy0 + EPS)
                 if avoid_bars:
                     for b, bx in bars:
-                        if b not in attached and _overlap(box, bx, PAD):
+                        if b not in attached and overlap(box, bx, PAD):
                             if bx[3] == INF:
                                 raise RuntimeError(f"배치 버그: 끝나지 않은 막대에 걸려 내릴 수 없다({box} / {bx})")
                             need = max(need, bx[3] + PAD - dy0 + EPS)
@@ -1081,7 +1078,7 @@ class _Placer:
                 x = self._bar_x(nb)
                 box = (x - ACT_W / 2, y, x + ACT_W / 2, y + ACT_H)
                 for o in near:
-                    if _overlap(box, o, PAD):
+                    if overlap(box, o, PAD):
                         need = max(need, o[3] + PAD + EPS)
                 for b, bx in bars:
                     if b.life == nb.life and b.depth == nb.depth and bx[3] != INF and bx[3] > y - BAR_GAP:

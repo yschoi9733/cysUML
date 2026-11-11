@@ -32,6 +32,12 @@ def meets(a: Box, b: Box) -> bool:
     return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
 
 
+def overlap(a: Box, b: Box, pad: float = 0.0, eps: float = 0.0) -> bool:
+    """a를 사방으로 pad만큼 넓히면 b와 겹치는지. 맞닿는 것과 eps 안으로만 걸치는 것은 치지 않는다."""
+    return (a[0] - pad < b[2] - eps and b[0] < a[2] + pad - eps
+            and a[1] - pad < b[3] - eps and b[1] < a[3] + pad - eps)
+
+
 def between(a: Box, b: Box) -> Box:
     """두 상자가 겹친 곳. 떨어져 있으면 둘 사이 빈 곳(가로·세로 가운데 떨어진 쪽은 그 틈, 겹친 쪽은 겹친 폭)."""
     x0, x1 = sorted((max(a[0], b[0]), min(a[2], b[2])))

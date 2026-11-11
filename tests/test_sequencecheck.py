@@ -151,6 +151,36 @@ def test_arrowhead_touching_a_head_is_caught(base):
     assert any(f.kind == "line_through_participant" and "화살촉" in f.problem for f in SC.find(moved_head))
 
 
+@pytest.fixture(scope="module")
+def callback():
+    """C가 B를 되불러 B에 옆으로 비킨 막대(깊이 1)가 생긴다. messages[2]는 그 막대 오른쪽 변에 닿고, messages[3]은 거기서 나간다."""
+    return S.render({"participants": life("A", "B", "C"),
+                     "messages": [call("A", "B", "f()"), call("B", "C", "g()"), call("C", "B", "cb()"), reply("B", "C"),
+                                  reply("C", "B"), reply("B", "A")]}).layout
+
+
+def test_callback_layout_passes(callback):
+    inner = max((b for b in callback.bars if b.owner == "B"), key=lambda b: b.depth)
+    assert inner.depth == 1 and callback.messages[2].end == inner.rect[2]
+    assert SC.find(callback) == ()
+
+
+def test_message_end_on_the_far_edge_of_its_bar_is_caught(callback):
+    # 오른쪽에서 오는 cb()가 막대를 지나 왼쪽 변에 닿는다 — 선이 막대를 가로지른다
+    inner = max((b for b in callback.bars if b.owner == "B"), key=lambda b: b.depth)
+    m = callback.messages[2]
+    found = SC.find(swap(callback, "messages", m, replace(m, end=inner.rect[0])))
+    assert any(f.kind == "message_off_bar" and "맞은편 변" in f.problem for f in found)
+
+
+def test_message_end_inside_a_deeper_bar_is_caught(callback):
+    # B→C 반환을 바깥 막대 오른쪽 변에서 내보내면 그 끝이 위에 그려지는 안쪽 막대 안이다
+    outer = min((b for b in callback.bars if b.owner == "B"), key=lambda b: b.depth)
+    m = callback.messages[3]
+    found = SC.find(swap(callback, "messages", m, replace(m, start=outer.rect[2])))
+    assert any(f.kind == "message_off_bar" and "더 옆으로 비킨 막대" in f.problem for f in found)
+
+
 def test_frame_lines_too_close_are_caught(base):
     # 프레임 밑변과 ref 윗변이 0.5px — 겹치지 않아도 한 굵은 선으로 보인다
     found = SC.find(swap(base, "refs", base.refs[0], moved(base.refs[0], base.frames[0].bottom + 0.5)))
