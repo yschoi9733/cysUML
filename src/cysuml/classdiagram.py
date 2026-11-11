@@ -19,6 +19,7 @@ from typing import Any, Optional, Union
 from . import text as T
 from .canvas import BG_MARGIN, SCALE, Canvas, Line, Point, Polygon, Text
 from .geom import gap, grow, hits, meets, outline, span
+from .report import fmt_num, fmt_rect
 
 CLASS_KINDS = ("class", "abstract", "interface", "enum")
 RELATION_KINDS = ("association", "aggregation", "composition", "generalization", "realization", "dependency")
@@ -632,22 +633,6 @@ def layout(diagram: Diagram) -> Layout:
                 labels.append(Label(role, text, *spots.pick(text, multiplicity_spots(tip, toward))))
         out.append(replace(p, labels=tuple(labels)))
     return Layout(placed, tuple(out))
-
-
-def round1(v: float) -> float:
-    """오류·검사 결과에 쓰는 수: 소수 한 자리로 반올림(-0은 0으로)."""
-    return round(v, 1) + 0.0
-
-
-def fmt_num(v: float) -> str:
-    """round1한 수를 글자로(끝의 .0은 뗀다)."""
-    s = f"{round1(v):.1f}"
-    return s[:-2] if s.endswith(".0") else s
-
-
-def fmt_rect(rect: T.Box) -> str:
-    """오류·검사 문구에 쓰는 상자 자리: "왼, 위, 폭×높이"."""
-    return f"{fmt_num(rect[0])}, {fmt_num(rect[1])}, {fmt_num(rect[2] - rect[0])}×{fmt_num(rect[3] - rect[1])}"
 
 
 # ---------------------------------------------------------------- 그리기

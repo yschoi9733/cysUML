@@ -16,9 +16,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
 from .canvas import Line, Point, Polygon
-from .classdiagram import LABEL_CLEAR, Drawing, PlacedRelation, fmt_num, fmt_rect, round1
+from .classdiagram import LABEL_CLEAR, Drawing, PlacedRelation
 from .geom import (Box, alongside, axis_gap, between, clip, crossings, distance, enters, grow, hits, inside, meets, outline,
                    span, touches)
+from .report import Finding, fmt_num, fmt_rect, round1
+from .report import Report as _Report
 
 # 검사 여유값(논리 좌표 px)
 BOX_CLEARANCE = 4  # 상자를 사방으로 이만큼 넓힌 곳에 선이나 다른 상자가 닿으면 지나간·겹친 것으로 본다
@@ -53,60 +55,21 @@ Segment = tuple[Point, Point]
 
 
 @dataclass(frozen=True)
-class Finding:
-    """검사 항목 하나. kind는 종류, elements는 걸린 요소의 이름(상자 이름이나 관계 기록의 owner), where는 걸린 자리(논리 좌표
-    왼, 위, 오른, 아래 — 엇갈린 곳은 넓이가 없다), problem은 무엇이 걸렸는지, hint는 고치는 법이다.
+class Report(_Report):
+    """report.Report에 선끼리 엇갈린 곳(crossings, 알림)을 더한다. Finding의 elements는 상자 이름이나 관계 기록의 owner이고,
+    불합격 종류는 KINDS, 알림 종류는 crossing이다."""
 
-    불합격 종류는 KINDS, 알림 종류는 crossing이다.
-    """
+    crossings: tuple[Finding, ...] = ()
 
-    kind: str
-    elements: tuple[str, ...]
-    where: Box
-    problem: str
-    hint: str
+    PASSED = "합격 — 선이 상자·글자를 지나거나 겹친 곳이 없다."
+    SHRINK = "상자를 가까이 모으거나 배율을 낮춘다"
 
-    def __str__(self) -> str:
-        return f"{self.problem} {self.hint}"
+    def _extra(self) -> dict:
+        return {"crossings": [f.to_dict() for f in self.crossings]}
 
-    def to_dict(self) -> dict:
-        return {"kind": self.kind, "elements": list(self.elements), "where": [round1(v) for v in self.where],
-                "problem": self.problem, "hint": self.hint}
-
-
-@dataclass(frozen=True)
-class Report:
-    """failures가 비어 있으면 합격이다. crossings는 선끼리 엇갈린 곳(알림), size는 그린 것의 범위에 둘레 여백을 둔 논리 좌표
-    폭·높이, png_size는 scale배로 낼 PNG의 픽셀 수다 — 그 배율로는 너무 커 PNG를 그릴 수 없으면 None이다(합격과 따로 본다).
-    둘 다 Canvas.measure 값이다."""
-
-    failures: tuple[Finding, ...]
-    crossings: tuple[Finding, ...]
-    size: tuple[float, float]
-    png_size: Optional[tuple[int, int]]
-    scale: float
-
-    @property
-    def passed(self) -> bool:
-        return not self.failures
-
-    def to_dict(self) -> dict:
-        png = self.png_size or (None, None)
-        return {"passed": self.passed,
-                "failures": [f.to_dict() for f in self.failures],
-                "crossings": [f.to_dict() for f in self.crossings],
-                "size": {"width": round1(self.size[0]), "height": round1(self.size[1]),
-                         "png_width": png[0], "png_height": png[1], "scale": self.scale}}
-
-    def summary(self) -> str:
-        out = [f"불합격 — {len(self.failures)}건" if self.failures else "합격 — 선이 상자·글자를 지나거나 겹친 곳이 없다."]
-        out += [f"{i}. {f}" for i, f in enumerate(self.failures, 1)]
-        out.append(f"알림 — 선끼리 엇갈린 곳 {len(self.crossings)}곳" + (f". {CROSSING_HINT}" if self.crossings else ""))
-        out += [f"- {f.problem}" for f in self.crossings]
-        png = (f"PNG {self.png_size[0]}×{self.png_size[1]}px(배율 {self.scale:g})" if self.png_size else
-               f"배율 {self.scale:g}로는 PNG로 그리기에 너무 크다 — 상자를 가까이 모으거나 배율을 낮춘다")
-        out.append(f"알림 — 그림 크기: 논리 좌표 {fmt_num(self.size[0])}×{fmt_num(self.size[1])}(둘레 여백 포함), {png}")
-        return "\n".join(out)
+    def _notices(self) -> list[str]:
+        return ([f"알림 — 선끼리 엇갈린 곳 {len(self.crossings)}곳" + (f". {CROSSING_HINT}" if self.crossings else "")]
+                + [f"- {f.problem}" for f in self.crossings])
 
 
 @dataclass(frozen=True)
@@ -242,7 +205,8 @@ def check(drawing: Drawing) -> Report:
     measured = drawing.canvas.measure()
     if measured is None:
         raise ValueError("그린 것이 없다")
-    return Report(tuple(failures), tuple(_crossings(relations, pairs)), measured.size, measured.png, drawing.canvas.scale)
+    return Report(tuple(failures), measured.size, measured.png, drawing.canvas.scale,
+                  crossings=tuple(_crossings(relations, pairs)))
 
 
 def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:
