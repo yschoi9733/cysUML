@@ -433,7 +433,7 @@ class _SeqReader(_Reader):
         lists = {key: self.items(o[key], key) if key in o else [] for key in DIAGRAM_FIELDS}
         too_many = [(key, noun, limit) for key, noun, limit in LIMITS if len(lists[key]) > limit]
         for key, noun, limit in too_many:
-            self.fail(key, f"{noun} {len(lists[key])}개다 — {limit}개까지 그린다. 그림을 나눈다")
+            self.fail(key, f"{noun} {len(lists[key])}개다 — {limit}개까지 받는다. 그림을 나눈다")
         if too_many:
             return None
         raw_p = lists["participants"]
@@ -625,7 +625,11 @@ class _Activations:
             s = self.open(src, e)
         d = None
         if kind == "reply":
-            if s is not None:
+            if s is not None and s.sticky:
+                # 액터의 대답: 그 위 막대는 액터가 부른 것이 아니라 두고, 대답 높이는 기다리던 부른 막대에 넘긴다
+                s.terms.add((e, 0))
+                self._close(s)
+            elif s is not None:
                 # 위에 남은 것은 프레임이 지키던 막대와 대답을 기다리는 막대(와 그 부른 막대)뿐이다(나머지는 send_from이
                 # 닫았다). 부른 쪽이 반환하면 함께 끝나고, 이 반환 선이 그 생명선을 지날 수 있어 선 아래로 CLEAR만큼 잇는다.
                 # 이 반환을 받는 생명선의 막대는 남겨 아래에서 반환에 잇고, 대답을 기다리는 액터 막대와 그 부른 막대들은
@@ -655,9 +659,10 @@ class _Activations:
         return self.find(src) if not src_actor or kind == "reply" else None
 
     def _send_closing(self, s: Optional[_Bar], kind: str) -> list[_Bar]:
-        """보내는 쪽 규칙이 닫을 막대: 보내는 막대 s가 있으면 그 위, 없으면 반환이 아닌 한 모두(_closing이 뺄 것은 빼고)."""
+        """보내는 쪽 규칙이 닫을 막대: 보내는 막대 s가 있으면 그 위, 없으면 반환이 아닌 한 모두(_closing이 뺄 것은 빼고).
+        대답을 기다리던 액터 막대 위에 쌓인 막대는 그 액터가 부른 것이 아니라 닫지 않는다."""
         if s is not None:
-            return self._closing(self.stack[self.stack.index(s) + 1:])
+            return [] if s.sticky else self._closing(self.stack[self.stack.index(s) + 1:])
         return self._closing(list(self.stack)) if kind != "reply" else []
 
     def send_from(self, src: int, kind: str, src_actor: bool) -> Optional[_Bar]:
@@ -812,8 +817,12 @@ def _plan(d: Diagram) -> _Plan:
             acts.frame_end(e)
         else:
             before = d.refs[ev.item].before
-            if before < len(d.messages):  # 바로 다음 메시지가 닫을 막대는 ref 앞에서 닫는다 — ref 밑에 짧은 조각이 남지 않게
+            # 바로 다음 메시지가 닫을 막대는 ref 앞에서 닫는다 — ref 밑에 짧은 조각이 남지 않게. 맨 끝 ref면 다음 메시지가
+            # 없으니 열린 막대를 모두 닫는다
+            if before < len(d.messages):
                 acts.preclose(firsts_at(before))
+            else:
+                acts.close_all(keep_sticky=False)
             acts.ref(e)
     acts.close_all(keep_sticky=False)
     bars = acts.bars

@@ -117,7 +117,7 @@ def test_frames_are_read_by_kind():
     ({"participants": life(*[f"P{i}" for i in range(S.MAX_PARTICIPANTS + 1)])}, "participants: 참여자가 41개다"),
     ({"participants": life("A", "B"), "messages": [call("A", "B")] * (S.MAX_MESSAGES + 1)}, "messages: 메시지가 301개다"),
     ({"participants": life("A"), "frames": [{"kind": "ref", "name": "R", "before": 0}] * (S.MAX_FRAMES + 1)},
-     "frames: 프레임이 101개다 — 100개까지 그린다. 그림을 나눈다"),
+     "frames: 프레임이 101개다 — 100개까지 받는다. 그림을 나눈다"),
     ({"participants": life("A"), "notes": ["n"] * (S.MAX_NOTES + 1)}, "notes: 노트가 51개다"),
 ])
 def test_input_problems_point_at_the_field(data, expected):
@@ -279,6 +279,22 @@ def test_caller_waiting_for_an_actor_survives_its_own_callers_return():
     ok = lay.messages[4]
     assert a.bottom >= ok.y and ok.end == a.rect[2]
     assert rule_breaks(lay) == []
+
+
+def test_actor_answering_someone_else_keeps_the_receiver_and_the_waiting_caller():
+    # U는 A가 불렀는데 B에게 대답한다. B 막대는 끊기지 않고, 기다리던 A 막대는 그 대답까지 이어진다
+    lay = lay_of(life("A", "U", "B", "C", actor=("U",)),
+                 [call("A", "U", "ask()"), call("B", "C", "work()"), reply("C", "B"), reply("U", "B", "ans")])
+    ans = lay.messages[3]
+    (a,), (b,) = bars_of(lay, "A"), bars_of(lay, "B")
+    assert a.bottom >= ans.y and b.top == lay.messages[1].y and b.bottom >= ans.y and ans.end == b.rect[0]
+    assert rule_breaks(lay) == []
+
+
+def test_trailing_refs_do_not_stretch_bars_under_them():
+    lay = lay_of(life("A", "B"), [call("A", "B", "f()")],
+                 frames=[{"kind": "ref", "name": "R1", "before": 1}, {"kind": "ref", "name": "R2", "before": 1}])
+    assert all(b.bottom <= lay.refs[0].top - S.EDGE_CLEAR for b in lay.bars)
 
 
 def test_frame_or_ref_right_after_a_message_keeps_away_from_its_line():
