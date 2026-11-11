@@ -265,6 +265,10 @@ class PlacedFrame:
     dividers: tuple[float, ...]
     conditions: tuple[Label, ...]
 
+    @property
+    def tag(self) -> Box:
+        return _tag_box(self.left, self.top, self.fragment.kind)
+
 
 @dataclass(frozen=True)
 class PlacedRef:
@@ -276,6 +280,10 @@ class PlacedRef:
     bottom: float
     name: Label
 
+    @property
+    def tag(self) -> Box:
+        return _tag_box(self.left, self.top, "ref")
+
 
 @dataclass(frozen=True)
 class PlacedNote:
@@ -285,6 +293,10 @@ class PlacedNote:
     top: float
     width: float
     height: float
+
+    @property
+    def label(self) -> Label:
+        return Label(self.text, self.left + NOTE_TEXT_X, self.top + self.height / 2, "lm")
 
 
 @dataclass(frozen=True)
@@ -859,6 +871,10 @@ def _tag_width(op: str) -> float:
     return max(TAG_MIN_W, T.text_width(op, True) + TAG_PAD)
 
 
+def _tag_box(left: float, top: float, op: str) -> Box:
+    return left, top, left + _tag_width(op), top + TAG_H
+
+
 def _label_lines(m: Message) -> list[str]:
     if m.kind == "create":
         return [CREATE_LABEL] + ([m.name] if m.name else [])
@@ -1157,10 +1173,10 @@ class _Placer:
         y = self._box_top(e)
         self.ys.append(y)
         self._add((LEFT, y, INF, y))
-        tag = _tag_width(f.kind)
-        self._add((LEFT, y, LEFT + tag, y + TAG_H))
+        tag = _tag_box(LEFT, y, f.kind)
+        self._add(tag)
         cond = f.branches[0].condition
-        self.frames[f.index] = _FrameParts(y, [self._condition(e, y, LEFT + tag + COND_GAP, cond)] if cond else [])
+        self.frames[f.index] = _FrameParts(y, [self._condition(e, y, tag[2] + COND_GAP, cond)] if cond else [])
 
     def branch(self, e: int, f: Fragment, j: int) -> None:
         y = self._box_top(e)
@@ -1244,10 +1260,9 @@ def layout(diagram: Diagram) -> Layout:
 # ---------------------------------------------------------------- 그리기
 
 
-def _draw_tag(c: Canvas, left: float, top: float, op: str, owner: str) -> None:
-    w = _tag_width(op)
-    c.poly([(left, top), (left + w, top), (left + w, top + TAG_SIDE), (left + w - TAG_CUT, top + TAG_H), (left, top + TAG_H)],
-           owner=owner)
+def _draw_tag(c: Canvas, tag: Box, op: str, owner: str) -> None:
+    left, top, right, bottom = tag
+    c.poly([(left, top), (right, top), (right, top + TAG_SIDE), (right - TAG_CUT, bottom), (left, bottom)], owner=owner)
     c.text(left + TAG_TEXT[0], top + TAG_TEXT[1], op, bold=True, owner=owner)
 
 
@@ -1275,14 +1290,15 @@ def _draw_message(c: Canvas, m: PlacedMessage) -> None:
         c.line([(m.start, y), (m.end, y)], dash=REPLY_DASH, owner=o)
         c.open_arrow((m.end, y), (m.start, y), size=ARROW, owner=o)
     for lab in m.labels:
-        c.text(lab.x, lab.y, lab.text, anchor="mm", bg=True, owner=o)
+        c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=True, owner=o)
 
 
 def _draw_note(c: Canvas, n: PlacedNote) -> None:
     l, t, w, h, f = n.left, n.top, n.width, n.height, NOTE_FOLD
     c.poly([(l, t), (l + w - f, t), (l + w, t + f), (l + w, t + h), (l, t + h)], owner=n.owner)
     c.line([(l + w - f, t), (l + w - f, t + f), (l + w, t + f)], owner=n.owner)
-    c.text(l + NOTE_TEXT_X, t + h / 2, n.text, owner=n.owner)
+    lab = n.label
+    c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, owner=n.owner)
 
 
 def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
@@ -1300,12 +1316,12 @@ def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
         c.rect(b.x - ACT_W / 2, b.top, ACT_W, b.bottom - b.top, owner=b.owner)
     for r in lay.refs:
         c.rect(r.left, r.top, r.right - r.left, r.bottom - r.top, owner=r.owner)
-        _draw_tag(c, r.left, r.top, "ref", r.owner)
-        c.text(r.name.x, r.name.y, r.name.text, anchor="mm", owner=r.owner)
+        _draw_tag(c, r.tag, "ref", r.owner)
+        c.text(r.name.x, r.name.y, r.name.text, anchor=r.name.anchor, owner=r.owner)
     for f in lay.frames:
-        _draw_tag(c, f.left, f.top, f.fragment.kind, f.owner)
+        _draw_tag(c, f.tag, f.fragment.kind, f.owner)
         for lab in f.conditions:
-            c.text(lab.x, lab.y, lab.text, anchor="lm", bg=True, owner=f.owner)
+            c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=True, owner=f.owner)
     for m in lay.messages:
         _draw_message(c, m)
     for n in lay.notes:
