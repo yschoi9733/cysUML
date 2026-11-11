@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Iterator, Union
+from typing import Iterator, Optional, Union
 
 from . import text as T
 from .canvas import background
@@ -240,7 +240,7 @@ class _Scene:
                                      between(a.head, b.head), f"머리끼리 겹친다: {self.head(a)}, {self.head(b)}.")
         for i, a in enumerate(self.parts):  # 내려온 머리(만들어지는 참여자)는 흰 상자라 그 밑을 지나는 이웃 생명선을 가린다
             for j, b in enumerate(self.parts):
-                if i != j and _crosses_v(b.x, b.dash_top, b.bottom, a.head):
+                if i != j and _crosses_v(b.x, b.dash_top, b.bottom, grow(a.head, PAD)):
                     yield self.found("participant_overlap", (f"participants[{i}]", f"participants[{j}]"),
                                      (b.x, a.head[1], b.x, a.head[3]),
                                      f"머리가 다른 참여자의 생명선(x {fmt_num(b.x)})과 겹친다(머리가 가리거나 생명선이 머리를 지난다): "
@@ -271,15 +271,15 @@ class _Scene:
         bars = self.lay.bars
         for i, a in enumerate(bars):
             for b in bars[i + 1:]:
-                if a.owner != b.owner and _overlap(a.rect, b.rect):
+                if a.owner != b.owner and _overlap(a.rect, b.rect, BAR_GAP):
                     yield self.found("bar_overlap", (self.who(a.owner), self.who(b.owner)), between(a.rect, b.rect),
-                                     f"다른 생명선의 막대끼리 겹친다: {self.bar(a)}, {self.bar(b)}.")
+                                     f"다른 생명선의 막대끼리 겹치거나 {BAR_GAP}px 안으로 붙는다: {self.bar(a)}, {self.bar(b)}.")
 
-    def continues(self, b: PlacedBar) -> bool:
-        """alt 앞 칸에서 반환해 끝난 막대를 이어 가는 막대(PlacedBar.continued)이고, 그 윗변이 그 막대가 든 alt의 칸 나눔선
-        EDGE_CLEAR 아래인지."""
-        return b.continued and any(f.top < b.top < f.bottom and _on(b.top, d + EDGE_CLEAR)
-                                   for f in self.lay.frames for d in f.dividers)
+    def continues(self, b: PlacedBar, f: Optional[Framed] = None) -> bool:
+        """alt 앞 칸에서 반환해 끝난 막대를 이어 가는 막대(PlacedBar.continued)이고, 그 윗변이 그 막대가 든 alt(f를 주면 f)의 칸
+        나눔선 EDGE_CLEAR 아래인지."""
+        return b.continued and any(g.top < b.top < g.bottom and _on(b.top, d + EDGE_CLEAR)
+                                   for g in ([f] if f is not None else self.lay.frames) for d in self.dividers(g))
 
     def bars_off_lifelines(self) -> Iterator[Finding]:
         """막대 가운데는 생명선에서 깊이 × NEST만큼 오른쪽이고, 깊이 d(>0) 막대가 시작할 때는 같은 생명선에 깊이 d-1 막대가
@@ -450,7 +450,7 @@ class _Scene:
                 if over_bottom and not over_top:
                     yield self.found("frame_cuts_bar", elements, between(b.rect, f.rect),
                                      f"막대가 {_frame(f)} 안에서 시작해 밑변을 건넌다(잘린 것처럼 보인다): {self.bar(b)}.")
-                if f.top + EPS < b.top and not (b.continued and any(_on(b.top, d + EDGE_CLEAR) for d in dividers)):
+                if f.top + EPS < b.top and not self.continues(b, f):
                     for d in dividers:  # 이어 가는 막대는 이 alt의 칸 나눔선 아래에서 시작할 때만 봐준다
                         if b.top + EPS < d < b.bottom - EPS:
                             yield self.found("frame_cuts_bar", elements, (b.rect[0], d, b.rect[2], d),

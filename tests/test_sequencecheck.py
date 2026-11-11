@@ -256,6 +256,13 @@ def test_tag_side_along_a_lifeline_is_caught(base):
     assert "tag_on_lifeline" in kinds(found)
 
 
+def test_lowered_head_side_along_another_lifeline_is_caught(base):
+    # C의 머리 왼쪽 변이 B의 생명선에서 1px — 가리지 않아도 테두리와 점선이 한 선으로 보인다
+    c, b = part(base, "C"), part(base, "B")
+    found = SC.find(swap(base, "participants", c, replace(c, width=2 * (c.x - b.x - 1))))
+    assert any(f.kind == "participant_overlap" and "생명선" in f.problem for f in found)
+
+
 def test_lowered_head_covering_another_lifeline_is_caught(base):
     # 만들어지는 C의 머리는 내려와 있어 B의 머리와는 안 겹치지만, 넓으면 B의 생명선을 가린다
     c = part(base, "C")
@@ -269,10 +276,16 @@ def test_frame_lines_too_close_are_caught(base):
     assert any(f.kind == "frame_overlap" and "0.5px로 붙는다" in f.problem for f in found)
 
 
-def test_bars_of_different_lifelines_overlapping_are_caught(base):
+@pytest.mark.parametrize("gap", [-9, 0, 2])  # 겹침·맞닿음·BAR_GAP 안
+def test_bars_of_different_lifelines_overlapping_or_touching_are_caught(base, gap):
     b, a = bar(base, "B"), bar(base, "A")
-    found = SC.find(swap(base, "bars", b, replace(b, x=a.x + 5)))
+    found = SC.find(swap(base, "bars", b, replace(b, x=a.rect[2] + gap + S.ACT_W / 2)))
     assert any(f.kind == "bar_overlap" and "다른 생명선" in f.problem for f in found)
+
+
+def test_report_crossings_must_be_named():
+    with pytest.raises(TypeError):
+        K.Report((), (), (1, 1), (1, 1), 1.0)  # 옛 차례(failures, crossings, size, …)로 부르면 조용히 틀리는 대신 멈춘다
 
 
 def test_message_line_on_a_frame_line_is_caught_without_bars_nearby():
@@ -309,7 +322,7 @@ def test_note_text_is_checked_with_other_texts(base):
 
 
 def test_elements_are_input_places(base):
-    (f,) = [f for f in SC.find(CASES["participant_overlap"](base)) if f.kind == "participant_overlap"]
+    (f,) = [f for f in SC.find(CASES["participant_overlap"](base)) if f.problem.startswith("머리끼리")]
     assert f.elements == ("participants[1]", "participants[2]")
     found = SC.find(CASES["text_on_bar"](base))
     assert ("messages[1]", "participants[1]") in [f.elements for f in found if f.kind == "text_on_bar"]
