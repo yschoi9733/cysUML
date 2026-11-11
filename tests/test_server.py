@@ -104,6 +104,15 @@ def test_unwritable_folder_is_a_clear_error(tmp_path):
     assert r.is_error
     assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {blocker / 'sub'}에")
     assert "out_dir에 절대 경로로 준다" in text(r)
+    assert "상자 자리(왼, 위, 폭×높이): Order(0, 0, 90×48)" in text(r)
+
+
+def test_home_of_an_unknown_user_is_an_error_not_a_folder_named_tilde(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    r = draw(file_name="order", classes=ORDER, out_dir="~no-such-user-for-cysuml/img")
+    assert r.is_error
+    assert text(r).startswith("out_dir '~no-such-user-for-cysuml/img'의 '~'를 홈 폴더로 풀 수 없다")
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_unwritable_default_folder_names_the_working_folder(tmp_path, monkeypatch):

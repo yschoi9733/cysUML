@@ -94,8 +94,8 @@ static이 true면 밑줄을 긋는다.
 결과
 - 글: 검사 결과, 상자마다 그린 자리와 크기, 저장한 파일 경로와 픽셀 크기.
 - 그림: 저장한 PNG. 긴 변이 {MAX_IMAGE_EDGE}px를 넘으면 그 길이로 줄여 돌려준다(저장한 파일은 줄이지 않는다).
-- 입력이 틀리면 그리지 않고 틀린 곳을 classes[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. 그림이 너무 커서 PNG로 \
-그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.
+- classes·relations·file_name이 틀리면 그리지 않고 틀린 곳을 classes[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
+그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.
 
 불합격(선이 상자나 글자를 지나는 등 문서에 넣을 수 없는 그림) {len(KIND_NAMES)}가지: {", ".join(KIND_NAMES.values())}.
 
@@ -165,6 +165,8 @@ def _write(path: Path, data: bytes) -> None:
 def _save(png: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[Path], Optional[str]]:
     """(저장한 경로, 문제). 비었거나 공백뿐인 out_dir은 주지 않은 것으로 본다."""
     given = (out_dir or "").strip()
+    if given.startswith("~") and os.path.expanduser(given).startswith("~"):
+        return None, f"out_dir {given!r}의 '~'를 홈 폴더로 풀 수 없다. 저장하지 않았다 — out_dir을 절대 경로로 준다."
     try:
         folder = Path(os.path.abspath(os.path.expanduser(given or DEFAULT_DIR)))
     except OSError as e:  # 서버 작업 폴더가 지워졌다
@@ -217,7 +219,7 @@ def draw_class_diagram(
     full = _png(img)
     path, problem = _save(full, out_dir, name)
     if problem:
-        return _error(problem + "\n\n" + report.summary())
+        return _error(problem + "\n\n" + report.summary() + "\n" + _boxes(drawing))
     shown = _shrink(img)
     lines = [report.summary(), _boxes(drawing), f"저장한 파일: {path} ({img.width}×{img.height}px)"]
     if shown is not img:
