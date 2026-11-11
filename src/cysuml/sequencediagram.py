@@ -251,6 +251,16 @@ class PlacedMessage:
     end: float
     labels: tuple[Label, ...]
 
+    @property
+    def arrow(self) -> Box:
+        """화살촉이 차지하는 상자."""
+        return _arrow_box(self.end, 1 if self.end > self.start else -1, self.y)
+
+
+def _arrow_box(end: float, sign: int, y: float) -> Box:
+    """끝이 end이고 sign 쪽(1이면 오른쪽)으로 가는 메시지 선의 화살촉 상자."""
+    return min(end, end - sign * ARROW), y - ARROW_HALF, max(end, end - sign * ARROW), y + ARROW_HALF
+
 
 @dataclass(frozen=True)
 class PlacedFrame:
@@ -1134,9 +1144,7 @@ class _Placer:
             x2 = c.x[t]
         lines = _label_lines(m)
         below = _label_below(m, right) if lines else None
-        pieces: list[tuple[Box, bool]] = [((min(x1, x2), 0.0, max(x1, x2), 0.0), False),
-                                          ((min(x2, x2 - sign * ARROW), -ARROW_HALF, max(x2, x2 - sign * ARROW), ARROW_HALF),
-                                           False)]
+        pieces: list[tuple[Box, bool]] = [((min(x1, x2), 0.0, max(x1, x2), 0.0), False), (_arrow_box(x2, sign, 0.0), False)]
         labels_rel = []
         if lines:
             x = self._label_x(k, lines, (c.x[s] + x2) / 2 if m.kind == "create" else (c.x[s] + c.x[t]) / 2)

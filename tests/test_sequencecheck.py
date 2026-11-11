@@ -5,6 +5,7 @@ from dataclasses import replace
 
 import pytest
 
+from cysuml import classcheck as K
 from cysuml import sequencecheck as SC
 from cysuml import sequencediagram as S
 
@@ -67,22 +68,23 @@ def moved(item, top):
 
 
 CASES = {
-    "head_overlap": lambda lay: swap(lay, "participants", part(lay, "B"), replace(part(lay, "B"), x=part(lay, "A").x + 10)),
-    "bar_on_head": lambda lay: swap(lay, "bars", bar(lay, "A"), replace(bar(lay, "A"), top=5)),
+    "participant_overlap": lambda lay: swap(lay, "participants", part(lay, "B"), replace(part(lay, "B"), x=part(lay, "A").x + 10)),
+    "bar_on_participant": lambda lay: swap(lay, "bars", bar(lay, "A"), replace(bar(lay, "A"), top=5)),
     "bar_overlap": lambda lay: replace(lay, bars=lay.bars + (moved(bar(lay, "B"), bar(lay, "B").top + 3),)),
     "message_off_bar": lambda lay: swap(lay, "messages", lay.messages[1], replace(lay.messages[1], end=lay.messages[1].end + 3)),
     "line_at_bar_end": lambda lay: swap(lay, "bars", bar(lay, "B"), replace(bar(lay, "B"), bottom=lay.messages[3].y - 1)),
-    "line_through_head": lambda lay: swap(lay, "participants", part(lay, "B"),
+    "line_through_participant": lambda lay: swap(lay, "participants", part(lay, "B"),
                                           replace(part(lay, "B"), top=lay.messages[3].y - S.HEAD_H / 2)),
     "frame_cuts_bar": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], top=bar(lay, "B").top - 2)),
     "bar_outside_frame": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], right=part(lay, "A").x)),
     "frame_overlap": lambda lay: swap(lay, "refs", lay.refs[0], moved(lay.refs[0], lay.frames[0].bottom - 5)),
     "message_in_ref": lambda lay: swap(lay, "refs", lay.refs[0], moved(lay.refs[0], lay.messages[3].y - 10)),
-    "frame_on_head": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], top=part(lay, "C").top + 10)),
+    "line_on_frame": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], bottom=lay.messages[2].y + 4)),
+    "frame_on_participant": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], top=part(lay, "C").top + 10)),
     "tag_on_lifeline": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], left=part(lay, "U").x - 10)),
     "line_through_text": lambda lay: relabel(lay, 1, y=lay.messages[3].y),
     "text_on_bar": lambda lay: relabel(lay, 1, x=part(lay, "A").x),
-    "text_on_head": lambda lay: relabel(lay, 1, x=part(lay, "B").x, y=20),
+    "text_on_participant": lambda lay: relabel(lay, 1, x=part(lay, "B").x, y=20),
     "text_on_lifeline": lambda lay: relabel(lay, 1, x=part(lay, "B").x + 10),
     "text_overlap": lambda lay: relabel(lay, 2, x=lay.messages[1].labels[0].x, y=lay.messages[1].labels[0].y + 3),
     "text_outside": lambda lay: swap(lay, "notes", lay.notes[0], replace(lay.notes[0], width=20)),
@@ -104,7 +106,7 @@ def test_each_kind_is_caught(base, kind):
     lambda lay: swap(lay, "refs", lay.refs[0], moved(lay.refs[0], part(lay, "C").top + 5)),  # ref 상자가 머리를 가린다
 ])
 def test_ref_box_over_a_head_is_caught(base, change):
-    assert "frame_on_head" in kinds(SC.find(change(base)))
+    assert "frame_on_participant" in kinds(SC.find(change(base)))
 
 
 @pytest.mark.parametrize("change, problem", [
@@ -125,11 +127,49 @@ def test_message_end_away_from_its_lifeline_is_caught(base):
     assert any(f.kind == "message_off_bar" and "생명선" in f.problem for f in found)
 
 
+def test_message_line_on_a_frame_line_is_caught_without_bars_nearby():
+    # 액터끼리 주고받는 반환에는 막대가 없다 — 프레임 선이 막대 끝에 붙어 우연히 걸리는 일이 없다
+    lay = S.render({"participants": life("A", "B", actor=("A", "B")), "messages": [reply("A", "B", "x"), reply("B", "A", "y")],
+                    "frames": [{"kind": "opt", "first": 0, "last": 0}]}).layout
+    assert lay.bars == () and SC.find(lay) == ()
+    moved_frame = swap(lay, "frames", lay.frames[0], replace(lay.frames[0], bottom=lay.messages[1].y))
+    assert kinds(SC.find(moved_frame)) == ["line_on_frame"]
+
+
+def test_white_background_of_a_label_counts_as_covering(base):
+    # 줄 상자는 막대에서 2px(TEXT_BAR_GAP 넘게) 떨어졌지만, 그 밑에 깐 흰 바탕(잉크 둘레 BG_MARGIN)이 막대 변을 지운다
+    a, lab = bar(base, "A"), base.messages[1].labels[0]
+    shifted = relabel(base, 1, x=lab.x + (a.rect[2] + 2 - lab.box[0]))
+    box = shifted.messages[1].labels[0].box
+    assert not SC._overlap(box, a.rect, SC.TEXT_BAR_GAP)
+    assert "text_on_bar" in kinds(SC.find(shifted))
+
+
+def test_white_background_wiping_another_text_is_caught(base):
+    # 조건 글자를 꼬리표에서 1px 떨어뜨리면 줄 상자는 안 겹치지만, 조건 밑에 깐 흰 바탕이 꼬리표 테두리를 지운다
+    f = base.frames[0]
+    (cond,) = f.conditions
+    near = swap(base, "frames", f, replace(f, conditions=(replace(cond, x=cond.x + f.tag[2] + 1 - cond.box[0]),)))
+    (found,) = [x for x in SC.find(near) if x.kind == "text_overlap"]
+    assert "흰 바탕이 다른 글자를 지운다" in found.problem
+
+
+def test_note_text_is_checked_with_other_texts(base):
+    note = base.notes[0].label
+    found = SC.find(relabel(base, 1, x=note.box[0] + 20, y=note.y))
+    assert ("messages[1]", "notes[0]") in [f.elements for f in found if f.kind == "text_overlap"]
+
+
 def test_elements_are_input_places(base):
-    (f,) = [f for f in SC.find(CASES["head_overlap"](base)) if f.kind == "head_overlap"]
+    (f,) = [f for f in SC.find(CASES["participant_overlap"](base)) if f.kind == "participant_overlap"]
     assert f.elements == ("participants[1]", "participants[2]")
     found = SC.find(CASES["text_on_bar"](base))
     assert ("messages[1]", "participants[1]") in [f.elements for f in found if f.kind == "text_on_bar"]
+
+
+def test_kind_names_shared_with_the_class_check_mean_the_same():
+    # 두 검사 결과를 같은 꼴로 돌려주므로, 이름이 같으면 뜻도 같다(선이 글자를 지난다·글자끼리 겹친다)
+    assert set(SC.KINDS) & set(K.KINDS) == {"line_through_text", "text_overlap"}
 
 
 # ---------------------------------------------------------------- 걸지 않는 것
@@ -141,6 +181,15 @@ def test_label_may_cover_a_lifeline_its_message_crosses():
                     "messages": [call("A", "C", "processPaymentWithRetry(orderId, amount, currency)")]}).layout
     (lab,) = lay.messages[0].labels
     assert lab.box[0] < part(lay, "B").x < lab.box[2]
+    assert SC.find(lay) == ()
+
+
+def test_condition_may_cover_lifelines():
+    # 조건 글자는 꼬리표 오른쪽 같은 줄에 쓰는 자리라 생명선 점선을 지우며 건넌다 — 막대·머리만 비킨다
+    lay = S.render({"participants": life("A", "B", "C"), "messages": [reply("A", "B"), reply("B", "C")],
+                    "frames": [{"kind": "opt", "first": 0, "last": 1, "condition": "a very long condition for every lifeline"}]}).layout
+    (cond,) = lay.frames[0].conditions
+    assert all(cond.box[0] < p.x < cond.box[2] for p in lay.participants[1:])
     assert SC.find(lay) == ()
 
 
