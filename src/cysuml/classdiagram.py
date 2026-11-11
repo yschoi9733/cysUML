@@ -252,7 +252,7 @@ class _Reader:
             self.fail(path, f"수여야 한다(받은 값 {_show(v)})")
             return None
         if not least <= f <= COORD_LIMIT:
-            self.fail(path, f"{least:.0f}~{COORD_LIMIT:.0f} 사이여야 한다(받은 값 {_show(v)})")
+            self.fail(path, f"{fmt_num(least)}~{fmt_num(COORD_LIMIT)} 사이여야 한다(받은 값 {_show(v)})")
             return None
         return f
 
@@ -589,7 +589,7 @@ def _route(r: Relation, a: T.Box, b: T.Box, path: str) -> tuple[Optional[tuple[P
                 problems.append(f"{path}: {key} 쪽 끝 구간 길이 {fmt_num(length)}가 끝 모양 길이({fmt_num(need)})보다 짧다 — "
                                 f"{which} 꺾는 점을 상자에서 더 떼어 놓는다")
     if sum(lengths) > MAX_LINE:
-        problems.append(f"{path}: 선 길이 {sum(lengths):.0f}가 {MAX_LINE}을 넘는다 — 상자를 가까이 모은다")
+        problems.append(f"{path}: 선 길이 {fmt_num(sum(lengths))}가 {MAX_LINE}을 넘는다 — 상자를 가까이 모은다")
     return (None if problems else points), problems
 
 

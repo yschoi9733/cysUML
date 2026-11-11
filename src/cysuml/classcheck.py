@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
 from .canvas import Line, Point, Polygon
@@ -176,13 +176,13 @@ class _Relation:
         tips = [self.points[i] for i in self._ends_at(box)]
         return [h for h in self.heads if any(math.dist(h.tip, t) <= LINE_EPS for t in tips)]
 
-    def away_from(self, box: str) -> tuple[Segment, ...]:
-        """제 끝 상자 box에 붙어 가는지 볼 구간. 그 상자에 닿는 끝 구간과 그 끝에 얹힌 선 끝 모양은 뺀다 — 끝 구간은 상자 가운데를
-        향해 나가므로, 넓은 상자 변을 비스듬히 나가는 평범한 선도 처음 몇 px는 변에 붙어 있다."""
+    def away_from(self, box: str) -> tuple[tuple[Segment, ...], tuple[Segment, ...]]:
+        """제 끝 상자 box에 붙어 가는지 볼 (선 구간, 선 끝 모양 테두리). 그 상자에 닿는 끝 구간과 그 끝에 얹힌 선 끝 모양은 뺀다 —
+        끝 구간은 상자 가운데를 향해 나가므로, 넓은 상자 변을 비스듬히 나가는 평범한 선도 처음 몇 px는 변에 붙어 있다."""
         drop = {0 if i == 0 else len(self.path) - 1 for i in self._ends_at(box)}
-        path = tuple(s for i, s in enumerate(self.path) if i not in drop)
         attached = self.heads_at(box)
-        return path + tuple(e for h in self.heads if h not in attached for e in h.edges)
+        return (tuple(s for i, s in enumerate(self.path) if i not in drop),
+                tuple(e for h in self.heads if h not in attached for e in h.edges))
 
     def over_own(self, head: _Head) -> list[Segment]:
         """이 선이 제 선 끝 모양 head를 지나는 구간들. 그 모양이 얹힌 끝 구간은 빼고, 삼각형·마름모는 안쪽으로 OWN_MARGIN 넘게
@@ -309,6 +309,23 @@ def _box_overlaps(boxes: list[_Box]) -> Iterator[Finding]:
                           "위 크기를 보고 옮긴다.")
 
 
+@dataclass(eq=False)
+class _BoxHit:
+    """상자 하나에 같은 자리로 걸린 선들. own이면 그 상자가 선들의 끝 상자다. inside는 묶인 선 가운데 하나라도 상자 안을 지나는지,
+    along은 (끝 상자일 때) 선 구간이 변을 따라가는지다 — 아니면 반대쪽 끝의 선 끝 모양만 그 상자 변에 붙었다."""
+
+    box: _Box
+    where: Box
+    own: bool
+    inside: bool = False
+    along: bool = False
+    rels: list[_Relation] = field(default_factory=list)
+
+
+def _length(parts: Iterable[Segment]) -> float:
+    return sum(math.dist(p, q) for p, q in parts)
+
+
 def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box]) -> Iterator[Finding]:
     """선이 양 끝이 아닌 상자를 지나거나, 제 끝 상자 변에 붙어 간다(상자 테두리가 두 겹으로 보인다). 같은 상자를 같은 자리에서
     지나는 선들(공유 줄기)은 한 항목으로 묶는다."""
@@ -319,25 +336,38 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box]) -> Itera
             if not meets(r.bounds, wide):
                 continue
             own = b.name in (r.placed.relation.source, r.placed.relation.target)
-            parts = _parts(r.away_from(b.name) if own else r.segments, wide)
-            if own and sum(math.dist(p, q) for p, q in parts) <= OVERLAP_MIN:
-                continue  # 제 끝 상자 띠를 잠깐 스치는 꺾음은 변을 따라가는 게 아니다
+            if own:
+                path, edges = r.away_from(b.name)
+                on_path, on_heads = _parts(path, wide), _parts(edges, wide)
+                parts = on_path + on_heads
+                if _length(parts) <= OVERLAP_MIN:
+                    continue  # 제 끝 상자 띠를 잠깐 스치는 꺾음은 변을 따라가는 게 아니다
+            else:
+                on_path, parts = [], _parts(r.segments, wide)
             if parts:
                 where = _cover(parts)
-                entry = found.get((b.name, own, where), lambda: [b, where, False, [], own])
-                entry[2] = entry[2] or any(hits(p, q, b.rect) for p, q in parts)  # 묶인 선 가운데 하나라도 상자 안을 지나면
-                _add(entry[3], r)
-    for b, where, inside_box, rels, own in found.values():
-        if own:
-            yield Finding("line_through_box", (*_owners(rels), b.name), where,
+                hit = found.get((b.name, own, where), lambda: _BoxHit(b, where, own))
+                hit.inside = hit.inside or any(hits(p, q, b.rect) for p, q in parts)
+                hit.along = hit.along or _length(on_path) > OVERLAP_MIN
+                _add(hit.rels, r)
+    for hit in found.values():
+        b, rels, vias = hit.box, hit.rels, {r.via for r in hit.rels}
+        if hit.own and hit.along:
+            yield Finding("line_through_box", (*_owners(rels), b.name), hit.where,
                           f"선이 제 끝 상자 변에 {BOX_CLEARANCE}px 안으로 붙어 간다: {_titles(rels)}, {b.title}.",
                           f"상자 테두리가 두 겹으로 보인다 — 꺾는 점(via)을 고쳐 그 상자 변에서 {BOX_CLEARANCE}px 넘게 띄운다.")
-            continue
-        what = "선이 상자를 지난다" if inside_box else f"선이 상자에 {BOX_CLEARANCE}px 안으로 붙어 지나간다"
-        vias = {r.via for r in rels}
-        fix = "꺾는 점(via)을 고쳐" if vias == {True} else "선에 꺾는 점(via)을 주어" if vias == {False} else "꺾는 점(via)을 주거나 고쳐"
-        yield Finding("line_through_box", (*_owners(rels), b.name), where, f"{what}: {_titles(rels)}, {b.title}.",
-                      f"그 상자를 옮기거나, {fix} 그 상자를 비켜 가게 한다.")
+        elif hit.own:
+            fix = ("두 상자를 더 떼어 놓는다" if vias == {False}
+                   else "꺾는 점(via)을 고치거나 두 상자를 더 떼어 놓는다")
+            yield Finding("line_through_box", (*_owners(rels), b.name), hit.where,
+                          f"선 끝 모양이 제 끝 상자 변에 {BOX_CLEARANCE}px 안으로 붙는다: {_titles(rels)}, {b.title}.",
+                          f"반대쪽 끝의 화살촉·삼각형·마름모가 이 상자 변에 닿아 보인다 — {fix}.")
+        else:
+            what = "선이 상자를 지난다" if hit.inside else f"선이 상자에 {BOX_CLEARANCE}px 안으로 붙어 지나간다"
+            fix = ("꺾는 점(via)을 고쳐" if vias == {True} else "선에 꺾는 점(via)을 주어" if vias == {False}
+                   else "꺾는 점(via)을 주거나 고쳐")
+            yield Finding("line_through_box", (*_owners(rels), b.name), hit.where, f"{what}: {_titles(rels)}, {b.title}.",
+                          f"그 상자를 옮기거나, {fix} 그 상자를 비켜 가게 한다.")
 
 
 def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box]) -> Iterator[Finding]:

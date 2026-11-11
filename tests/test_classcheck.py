@@ -88,6 +88,18 @@ def test_end_segment_leaving_its_box_at_a_shallow_angle_passes():
     assert r.passed
 
 
+@pytest.mark.parametrize("b_top, passed", [(58, False), (80, True)])
+def test_end_shape_reaching_the_other_end_box_hints_to_space_the_boxes(b_top, passed):
+    # A 바로 밑 B로 가는 의존선은 10px뿐이라 B 쪽 화살촉 갈래 끝(y≈49)이 A 아래 변(48)에 붙는다 — 꺾는 점이 없으니 상자를 떼야 한다
+    r = report([box("A", 0, 0), box("B", 0, b_top)], [rel("dependency", "A", "B")])
+    assert r.passed is passed
+    if not passed:
+        (f,) = r.failures
+        assert f.kind == "line_through_box" and f.elements == ("A->B", "A")
+        assert "선 끝 모양이 제 끝 상자 변에 4px 안으로 붙는다" in f.problem
+        assert f.hint.endswith("두 상자를 더 떼어 놓는다.") and "via" not in f.hint
+
+
 def test_bend_just_outside_its_own_box_that_leaves_at_once_passes():
     # 꺾는 점 (93, 24)는 A 오른쪽 변에서 3px이지만, 다음 구간이 곧바로 비스듬히 멀어져 변을 따라가지 않는다
     r = report([box("A", 0, 0), box("B", 400, 200)],
