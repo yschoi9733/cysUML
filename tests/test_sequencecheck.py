@@ -70,6 +70,7 @@ def moved(item, top):
 CASES = {
     "participant_overlap": lambda lay: swap(lay, "participants", part(lay, "B"), replace(part(lay, "B"), x=part(lay, "A").x + 10)),
     "bar_on_participant": lambda lay: swap(lay, "bars", bar(lay, "A"), replace(bar(lay, "A"), top=5)),
+    "bar_off_lifeline": lambda lay: swap(lay, "bars", bar(lay, "A"), replace(bar(lay, "A"), x=bar(lay, "A").x + 7)),
     "bar_overlap": lambda lay: replace(lay, bars=lay.bars + (moved(bar(lay, "B"), bar(lay, "B").top + 3),)),
     "bar_off_message": lambda lay: swap(lay, "bars", bar(lay, "B"), replace(bar(lay, "B"), top=bar(lay, "B").top - 2)),
     "message_off_bar": lambda lay: swap(lay, "messages", lay.messages[1], replace(lay.messages[1], end=lay.messages[1].end + 3)),
@@ -192,18 +193,38 @@ def test_bar_tail_below_its_last_message_is_caught(base):
     assert any(f.kind == "bar_off_message" and "꼬리" in f.problem for f in found)
 
 
-def test_bar_opened_in_an_alt_branch_running_into_the_next_is_caught():
-    lay = S.render({"participants": life("A", "B", "C"),
-                    "messages": [call("A", "B", "f()"), call("B", "C", "g()"), reply("C", "B"), call("B", "C", "h()"),
-                                 reply("C", "B"), reply("B", "A")],
-                    "frames": [{"kind": "alt", "branches": [{"condition": "p", "first": 1, "last": 2},
-                                                            {"condition": "else", "first": 3, "last": 4}]}]}).layout
-    assert SC.find(lay) == ()
-    (divider,) = lay.frames[0].dividers
-    first = bar(lay, "C")
+@pytest.fixture(scope="module")
+def alt():
+    """alt 두 칸에서 B가 C를 한 번씩 부른다 — C의 막대는 칸마다 열고 닫힌다."""
+    return S.render({"participants": life("A", "B", "C"),
+                     "messages": [call("A", "B", "f()"), call("B", "C", "g()"), reply("C", "B"), call("B", "C", "h()"),
+                                  reply("C", "B"), reply("B", "A")],
+                     "frames": [{"kind": "alt", "branches": [{"condition": "p", "first": 1, "last": 2},
+                                                             {"condition": "else", "first": 3, "last": 4}]}]}).layout
+
+
+def test_bar_opened_in_an_alt_branch_running_into_the_next_is_caught(alt):
+    assert SC.find(alt) == ()
+    (divider,) = alt.frames[0].dividers
+    first = bar(alt, "C")
     assert first.bottom < divider
-    found = SC.find(swap(lay, "bars", first, replace(first, bottom=divider + 12)))
+    found = SC.find(swap(alt, "bars", first, replace(first, bottom=divider + 12)))
     assert any(f.kind == "frame_cuts_bar" and "칸 나눔선" in f.problem for f in found)
+
+
+def test_bar_at_a_divider_that_continues_nothing_is_caught(alt):
+    # C의 앞 칸 막대는 그 칸 안에서 열렸으므로, 나눔선 EDGE_CLEAR 아래에서 메시지 없이 시작하는 C의 막대는 이어 가는 막대가 아니다
+    (divider,) = alt.frames[0].dividers
+    orphan = replace(bar(alt, "C"), top=divider + S.EDGE_CLEAR, bottom=divider + S.EDGE_CLEAR + 10)
+    found = SC.find(replace(alt, bars=alt.bars + (orphan,)))
+    assert any(f.kind == "bar_off_message" and "여는 메시지가 없다" in f.problem for f in found)
+
+
+def test_lowered_head_covering_another_lifeline_is_caught(base):
+    # 만들어지는 C의 머리는 내려와 있어 B의 머리와는 안 겹치지만, 넓으면 B의 생명선을 가린다
+    c = part(base, "C")
+    found = SC.find(swap(base, "participants", c, replace(c, width=2 * (c.x - part(base, "B").x) + 20)))
+    assert any(f.kind == "participant_overlap" and "생명선" in f.problem for f in found)
 
 
 def test_frame_lines_too_close_are_caught(base):
