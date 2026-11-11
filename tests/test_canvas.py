@@ -252,6 +252,25 @@ def test_frame_maps_output_pixels_exactly(width):
     assert img.size[0] / 1.6 == pytest.approx(fr - fx) and img.size[1] / 1.6 == pytest.approx(fb - fy)
 
 
+def test_drawing_calls_return_what_they_record():
+    c = Canvas()
+    made = [c.line([(0, 0), (10, 0)]), c.rect(0, 0, 5, 5), c.ellipse(0, 0, 5, 5), c.poly([(0, 0), (5, 0), (0, 5)]),
+            c.open_arrow((20, 0), (0, 0)), c.closed_arrow((20, 0), (0, 0)), c.diamond((0, 0), (20, 0)),
+            c.erase(0, 0, 1, 1)]
+    assert made == c.records
+    label = c.text(0, 0, "가", bg=True)
+    assert label is c.records[-1] and label.bg and type(c.records[-2]).__name__ == "Mask"
+
+
+def test_measure_gives_the_framed_size_and_the_png_size():
+    c = Canvas(1.6)
+    c.rect(0.3, 0.7, 333.33, 50.07)
+    (w, h), png = c.measure()  # Measure(size, png)
+    assert (w, h) == pytest.approx((333.33 + 2 * PAD, 50.07 + 2 * PAD))
+    assert png == c.to_image().size
+    assert Canvas().measure() is None
+
+
 def test_nothing_drawn_cannot_be_rendered():
     c = Canvas()
     with pytest.raises(ValueError, match="그린 것이 없다"):
@@ -268,6 +287,16 @@ def test_oversized_drawing_is_rejected_before_allocating(scale, pts):
     for call in (c.frame, c.to_image):
         with pytest.raises(ValueError, match="너무 크다"):
             call()
+    assert c.measure().png is None
+
+
+@pytest.mark.parametrize("scale", [0.25, 1.6, 3.0])
+def test_measured_png_size_is_the_size_to_image_draws(scale):
+    c = Canvas(scale)
+    c.rect(0.3, 0.7, 333.33, 50.07)
+    c.text(10, 10, "가 A")
+    assert c.measure().png == c.to_image().size
+    assert Canvas(scale).measure() is None
 
 
 def test_box_outline_coordinates_are_rounded_to_centre_the_border():

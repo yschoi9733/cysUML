@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 
 from cysuml import classdiagram as C
+from cysuml import geom as G
 from cysuml import text as T
 from cysuml.canvas import Line, Polygon, Rect, Text
 
@@ -80,6 +81,21 @@ def test_relation_lines_are_drawn_under_boxes_and_labels_on_top():
     first_box, last_box = kinds.index("box"), len(kinds) - 1 - kinds[::-1].index("box")
     assert set(kinds[:first_box]) == {"Line"}
     assert set(kinds[last_box + 1:]) == {"Mask", "Text"}
+
+
+def test_drawing_hands_over_each_relations_records():
+    d = C.render({"classes": [{"name": "A", "left": 0, "top": 0}, {"name": "B", "left": 300, "top": 0}],
+                  "relations": [{"kind": "association", "from": "A", "to": "B", "navigable": "both", "name": "has",
+                                 "to_multiplicity": "1"},
+                                {"kind": "realization", "from": "B", "to": "A", "via": [[345, 100], [45, 100]]},
+                                {"kind": "composition", "from": "A", "to": "B", "via": [[45, -60], [345, -60]]}]})
+    for drawn, placed in zip(d.drawn, d.layout.relations, strict=True):
+        assert drawn.line.points == placed.points
+        assert all(r in d.canvas.records and r.owner == placed.owner for r in (drawn.line, *drawn.heads, *drawn.labels))
+        assert [t.text for t in drawn.labels] == [lab.text for lab in placed.labels]
+    heads = [[type(h).__name__ for h in drawn.heads] for drawn in d.drawn]
+    assert heads == [["Line", "Line"], ["Polygon"], ["Polygon", "Line"]]  # 두 화살촉 / 삼각형 / 마름모와 화살촉
+    assert len(d.drawn[0].labels) == 2 and d.drawn[1].labels == ()
 
 
 def test_box_grows_to_fit_text_keeping_left_and_top():
@@ -231,8 +247,8 @@ def touches_a_line(drawing, box):
     """글자의 흰 바탕이 관계선이나 선 끝 모양(그린 기록 그대로)에 닿는지."""
     owners = {r.owner for r in drawing.layout.relations}
     drawn = [r for r in drawing.canvas.records if r.owner in owners and isinstance(r, (Line, Polygon))]
-    wide = C._grow(box, C.LABEL_CLEAR)
-    return any(C._hits(p, q, wide) for p, q in C._outline_segments(drawn))
+    wide = G.grow(box, C.LABEL_CLEAR)
+    return any(G.hits(p, q, wide) for p, q in G.outline(drawn))
 
 
 def test_association_name_sits_above_the_middle_of_a_rightward_line():
@@ -291,7 +307,7 @@ def test_multiplicities_avoid_boxes():
     labels = {t.text: t for t in owned(d, "A->B", Text)}
     assert set(labels) == {"1", "0..*"} and all(t.bg for t in labels.values())
     for t in labels.values():
-        assert all(C._gap(t.box, r) >= C.MULT_ENOUGH for r in rects)
+        assert all(G.gap(t.box, r) >= C.MULT_ENOUGH for r in rects)
         assert math.dist((t.x, t.y), START if t.text == "1" else END) <= max(C.MULT_DISTANCES)
 
     blocked = copy.deepcopy(data)
@@ -299,7 +315,7 @@ def test_multiplicities_avoid_boxes():
     d2 = C.render(blocked)
     one = next(t for t in owned(d2, "A->B", Text) if t.text == "1")
     assert one.y > 24
-    assert all(C._gap(one.box, p.rect) > 0 for p in d2.layout.boxes)
+    assert all(G.gap(one.box, p.rect) > 0 for p in d2.layout.boxes)
     assert labels["1"].y < 24
 
 
@@ -314,10 +330,10 @@ def test_multiplicities_keep_off_lines_and_each_other():
     labels = [t for t in d.canvas.records if isinstance(t, Text) and t.bg]
     assert len(labels) == 5
     for i, t in enumerate(labels):
-        wide = C._grow(t.box, C.LABEL_CLEAR)
+        wide = G.grow(t.box, C.LABEL_CLEAR)
         assert not touches_a_line(d, t.box), t.text
-        assert all(C._gap(wide, p.rect) >= 0 for p in d.layout.boxes), t.text
-        assert all(C._gap(wide, u.box) >= 0 for u in labels[:i]), t.text
+        assert all(G.gap(wide, p.rect) >= 0 for p in d.layout.boxes), t.text
+        assert all(G.gap(wide, u.box) >= 0 for u in labels[:i]), t.text
 
 
 def test_labels_keep_off_end_shapes_of_other_relations():
@@ -330,7 +346,7 @@ def test_labels_keep_off_end_shapes_of_other_relations():
     assert not touches_a_line(d, label.box)
 
     triangle = Polygon(((60, 40), (80, 30), (80, 50)))
-    spots = C._Spots([(-500, -500, -400, -400)], C._outline_segments([triangle]))
+    spots = C._Spots([(-500, -500, -400, -400)], G.outline([triangle]))
     first = (70, 40)  # 삼각형 위 — 선분만 보면 닿는 데가 없다
     assert spots.pick("1", [first, (0, 0)]) == (0, 0)
 
@@ -499,11 +515,11 @@ def test_missing_box_is_reported_even_when_the_relation_has_other_problems():
     (lambda d: d["classes"][1].update(left=90) or rel(navigable="none")(d), "relations[0]: 상자 'A'와 'B'가 겹치거나 맞닿아"),
     (lambda d: d["classes"][1].update(left=60) or rel()(d), "relations[0]: 상자 'A'와 'B'가 겹치거나 맞닿아"),
     (lambda d: d["classes"][1].update(left=110) or rel(kind="composition")(d),
-     "relations[0]: 선 길이 20.0가 양 끝 모양 길이(18+10)보다 짧다"),
+     "relations[0]: 선 길이 20가 양 끝 모양 길이(18+10)보다 짧다"),
     (rel(kind="composition", navigable="none", via=[[95, 24], [195, 200]]),
-     "relations[0]: from 쪽 끝 구간 길이 5.0가 끝 모양 길이(18)보다 짧다 — 첫 꺾는 점을"),
+     "relations[0]: from 쪽 끝 구간 길이 5가 끝 모양 길이(18)보다 짧다 — 첫 꺾는 점을"),
     (rel(kind="generalization", via=[[195, 200], [345, 60]]),
-     "relations[0]: to 쪽 끝 구간 길이 12.0가 끝 모양 길이(18)보다 짧다 — 마지막 꺾는 점을"),
+     "relations[0]: to 쪽 끝 구간 길이 12가 끝 모양 길이(18)보다 짧다 — 마지막 꺾는 점을"),
     (lambda d: d["classes"][0].update(left=-999_000) or rel(kind="dependency")(d), "relations[0]: 선 길이 999210가 200000을 넘는다"),
     (rel(to="A", via=[[200, 24], [300, 24]]), "relations[0]: 선의 두 끝이 같은 점 (90.0, 24.0)이다"),
     (rel(via=[[-50, 24]]), "relations[0]: 선이 from 상자 'A'(0, 0, 90×48) 안을 지난다"),
