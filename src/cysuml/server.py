@@ -6,18 +6,20 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
 import os
+import secrets
 import threading
 import unicodedata
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent
 from PIL import Image
-from pydantic import Field
+from pydantic import Field, WithJsonSchema
 
 from . import classcheck, classdiagram
 from .canvas import MIN_SCALE, SCALE
@@ -101,7 +103,14 @@ static이 true면 밑줄을 긋는다.
 
 {TIPS}"""
 
-mcp = MCPServer(name="cysUML", instructions=INSTRUCTIONS, version=version("cysuml"))
+def _version() -> str:
+    try:
+        return version("cysuml")
+    except PackageNotFoundError:  # 설치하지 않은 소스에서 띄웠다
+        return ""
+
+
+mcp = MCPServer(name="cysUML", instructions=INSTRUCTIONS, version=_version())
 _drawing = threading.Lock()  # 동기 도구는 스레드에서 돈다. 글꼴 객체를 함께 쓰므로 그리기는 한 번에 하나씩
 
 
@@ -140,20 +149,34 @@ def _shrink(img: Image.Image) -> Image.Image:
     return img.resize((max(1, round(w * k)), max(1, round(h * k))), Image.LANCZOS)
 
 
-def _save(png: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[Path], Optional[str]]:
-    """(저장한 경로, 문제)."""
-    given = bool(out_dir)
+def _write(path: Path, data: bytes) -> None:
+    """같은 폴더의 임시 파일에 다 쓴 뒤 바꿔 넣는다 — 쓰다 실패하거나 같은 이름으로 동시에 써도 깨진 파일이 남지 않는다."""
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
     try:
-        folder = Path(os.path.abspath(os.path.expanduser(out_dir if given else DEFAULT_DIR)))
+        with open(tmp, "xb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+def _save(png: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[Path], Optional[str]]:
+    """(저장한 경로, 문제). 비었거나 공백뿐인 out_dir은 주지 않은 것으로 본다."""
+    given = (out_dir or "").strip()
+    try:
+        folder = Path(os.path.abspath(os.path.expanduser(given or DEFAULT_DIR)))
     except OSError as e:  # 서버 작업 폴더가 지워졌다
         return None, f"서버 작업 폴더를 알 수 없어 저장할 곳을 정하지 못했다({e.strerror or e}). out_dir에 절대 경로를 준다."
     path = folder / f"{name}.png"
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(png)
-    except OSError as e:
+        _write(path, png)
+    except (OSError, ValueError) as e:  # ValueError: 경로에 NUL 글자
+        reason = e.strerror if isinstance(e, OSError) and e.strerror else e
         where = f"out_dir {folder}" if given else f"기본 폴더 {folder}(서버 작업 폴더 아래 {DEFAULT_DIR}/)"
-        return None, (f"그림을 저장하지 못했다 — {where}에 {path.name}을(를) 쓸 수 없다({e.strerror or e}). "
+        return None, (f"그림을 저장하지 못했다 — {where}에 {path.name}을(를) 쓸 수 없다({reason}). "
                       "쓸 수 있는 폴더를 out_dir에 절대 경로로 준다.")
     return path, None
 
@@ -166,27 +189,33 @@ def _boxes(drawing: classdiagram.Drawing) -> str:
 @mcp.tool(name="draw_class_diagram", description=CLASS_TOOL)
 def draw_class_diagram(
         file_name: Annotated[str, Field(description="저장할 파일 이름(확장자 없이). 같은 이름이면 덮어쓴다.")],
-        classes: Annotated[list[dict[str, Any]], Field(description="상자 목록(하나 이상). 필드는 도구 설명에 있다.")],
-        relations: Annotated[Optional[list[dict[str, Any]]], Field(description="관계 목록. 필드는 도구 설명에 있다.")] = None,
+        classes: Annotated[Any, WithJsonSchema(
+            {"type": "array", "items": {"type": "object"}, "description": "상자 목록(하나 이상). 필드는 도구 설명에 있다."})],
+        relations: Annotated[Any, WithJsonSchema(
+            {"type": "array", "items": {"type": "object"}, "description": "관계 목록. 필드는 도구 설명에 있다."})] = None,
         out_dir: Annotated[Optional[str], Field(
             description=f"저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/.")] = None,
         scale: Annotated[float, Field(ge=MIN_SCALE, allow_inf_nan=False,
                                       description=f"출력 배율(기본 {SCALE:g}). 보통은 주지 않는다.")] = SCALE,
 ) -> CallToolResult:
+    # classes·relations는 모양을 검사하지 않고 받는다 — 파서가 자리 붙은 오류를 한 번에 모아 알린다
     name, problem = _file_name(file_name)
-    if problem:
-        return _error(f"입력 오류 — 1건\n- {problem}")
+    problems = [problem] if problem else []
+    data = {"classes": classes} if relations is None else {"classes": classes, "relations": relations}
     with _drawing:
         try:
-            drawing = classdiagram.render({"classes": classes, "relations": relations or []}, scale)
+            drawing = classdiagram.render(data, scale)
         except classdiagram.InputError as e:
-            return _error(f"입력 오류 — {len(e.problems)}건\n" + "\n".join(f"- {p}" for p in e.problems))
+            problems += e.problems
+        if problems:
+            return _error(f"입력 오류 — {len(problems)}건\n" + "\n".join(f"- {p}" for p in problems))
         report = classcheck.check(drawing)
         if report.png_size is None:
             return _error("그림이 너무 커서 PNG를 그리지 않았다(파일도 저장하지 않았다).\n"
                           + report.summary() + "\n" + _boxes(drawing))
         img = drawing.canvas.to_image()
-    path, problem = _save(_png(img), out_dir, name)
+    full = _png(img)
+    path, problem = _save(full, out_dir, name)
     if problem:
         return _error(problem + "\n\n" + report.summary())
     shown = _shrink(img)
@@ -194,7 +223,8 @@ def draw_class_diagram(
     if shown is not img:
         lines.append(f"돌려준 그림은 긴 변을 {MAX_IMAGE_EDGE}px로 줄였다({shown.width}×{shown.height}px). "
                      "원래 크기는 저장한 파일에 있다.")
+    data_b64 = base64.b64encode(full if shown is img else _png(shown)).decode("ascii")
     return CallToolResult(content=[
         TextContent(type="text", text="\n".join(lines)),
-        ImageContent(type="image", data=base64.b64encode(_png(shown)).decode("ascii"), mime_type="image/png"),
+        ImageContent(type="image", data=data_b64, mime_type="image/png"),
     ])

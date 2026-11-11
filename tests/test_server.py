@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import sys
 
 import anyio
@@ -43,7 +44,10 @@ def test_lists_one_tool_with_flow_and_tips_in_its_description_and_the_instructio
     (tool,) = tools
     assert tool.name == "draw_class_diagram"
     assert tool.input_schema["required"] == ["file_name", "classes"]
-    assert set(tool.input_schema["properties"]) == {"file_name", "classes", "relations", "out_dir", "scale"}
+    props = tool.input_schema["properties"]
+    assert set(props) == {"file_name", "classes", "relations", "out_dir", "scale"}
+    for key in ("classes", "relations"):
+        assert props[key]["type"] == "array" and props[key]["items"] == {"type": "object"}
     for part in (server.FLOW, server.TIPS):
         assert part in tool.description and part in instructions
 
@@ -110,6 +114,34 @@ def test_unwritable_default_folder_names_the_working_folder(tmp_path, monkeypatc
     assert f"기본 폴더 {tmp_path / 'diagrams'}(서버 작업 폴더 아래 diagrams/)" in text(r)
 
 
+def test_null_character_in_out_dir_is_a_clear_error(tmp_path):
+    r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path) + "/a\0b")
+    assert r.is_error
+    assert text(r).startswith("그림을 저장하지 못했다 — out_dir ")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_blank_out_dir_means_the_default_folder(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    draw(file_name="order", classes=ORDER, out_dir="   ")
+    assert [p.name for p in tmp_path.iterdir()] == ["diagrams"]
+    assert (tmp_path / "diagrams" / "order.png").exists()
+
+
+def test_a_folder_in_the_way_of_the_file_is_an_error_and_leaves_no_temporary_file(tmp_path):
+    (tmp_path / "order.png").mkdir()
+    r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
+    assert r.is_error
+    assert [p.name for p in tmp_path.iterdir()] == ["order.png"]
+    assert list((tmp_path / "order.png").iterdir()) == []
+
+
+def test_saving_leaves_only_the_png(tmp_path):
+    draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
+    draw(file_name="order", classes=ORDER, relations=PLACES, out_dir=str(tmp_path))
+    assert [p.name for p in tmp_path.iterdir()] == ["order.png"]
+
+
 @pytest.mark.parametrize("name, problem", [
     ("", "비어 있다"),
     (" .png ", "비어 있다"),
@@ -140,9 +172,37 @@ def test_input_errors_come_back_with_their_place_and_nothing_is_written(tmp_path
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("args", [{"classes": "nope"}, {"scale": 0.1}])
-def test_arguments_of_the_wrong_shape_are_tool_errors(tmp_path, args):
-    r = draw(**{"file_name": "order", "classes": ORDER, "out_dir": str(tmp_path), **args})
+def test_a_bad_file_name_comes_back_with_the_other_input_errors(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    r = draw(file_name="docs/order", classes=[{"name": "A", "left": "x", "top": 0}])
+    assert r.is_error
+    lines = text(r).splitlines()
+    assert lines[0] == "입력 오류 — 2건"
+    assert lines[1].startswith("- file_name에 파일 이름으로 쓸 수 없는 글자가 있다: '/'")
+    assert lines[2] == "- classes[0].left: 수여야 한다(받은 값 'x')"
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("args, problems", [
+    ({"classes": "nope"}, ["classes: 목록이어야 한다(받은 값 'nope')"]),
+    ({"classes": ["A"], "relations": {"kind": "association"}},
+     ["classes[0]: 객체여야 한다(받은 값 'A')", "relations: 목록이어야 한다(받은 값 {'kind': 'association'})"]),
+])
+def test_classes_and_relations_of_the_wrong_shape_come_back_from_the_reader(tmp_path, args, problems):
+    r = draw(**{"file_name": "order", "out_dir": str(tmp_path), **args})
+    assert r.is_error
+    assert text(r).splitlines() == [f"입력 오류 — {len(problems)}건"] + [f"- {p}" for p in problems]
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_classes_sent_as_a_json_string_still_draw(tmp_path):
+    r = draw(file_name="order", classes=json.dumps(ORDER), relations=json.dumps(PLACES), out_dir=str(tmp_path))
+    assert not r.is_error
+    assert (tmp_path / "order.png").exists()
+
+
+def test_scale_below_the_least_is_a_tool_error(tmp_path):
+    r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path), scale=0.1)
     assert r.is_error
     assert list(tmp_path.iterdir()) == []
 
