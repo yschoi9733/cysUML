@@ -66,7 +66,7 @@ KINDS = (  # 불합격 종류(이 차례로 낸다)
     "note_covers",               # 노트(흰 상자)가 다른 것을 덮는다
     "text_outside",              # 조건·ref 이름·노트 글자가 제 프레임·상자·노트 밖으로 나간다
 )
-ORDER = {kind: i for i, kind in enumerate(KINDS)}  # find가 이 번호로 정렬한다
+ORDER = {kind: i for i, kind in enumerate(KINDS)}
 
 FRAME_HINT = "프레임이 덮는 메시지 범위(first·last·칸)나 ref 자리(before)를 바꾸거나, 프레임을 빼고 그림을 나눈다."
 TEXT_HINT = "그 글자를 줄이거나 참여자 순서를 바꾼다."
@@ -203,6 +203,7 @@ class _Scene:
         self.parts = lay.participants
         self.index = {p.participant.name: i for i, p in enumerate(self.parts)}
         self.framed: list[Framed] = sorted([*lay.frames, *lay.refs], key=lambda f: f.top)
+        self.lines = [(f, self.edges(f), self.sides(f)) for f in self.framed]  # 프레임·ref마다 가로 선과 옆 변
         texts = []
         for k, m in enumerate(lay.messages):
             texts += [_label(m.owner, f"{_message(m)}의 글자", lab, True, k) for lab in m.labels]
@@ -213,6 +214,7 @@ class _Scene:
             texts += [_tag(r), _label(r.owner, f"{_frame(r)}의 이름", r.name, not r.covers)]
         texts += [_label(n.owner, f"노트 {n.owner}의 글자", n.label, True) for n in lay.notes]
         self.texts = texts
+        self.over_texts = [t for t in texts if t.over_bars]
         by_owner: dict[str, list[PlacedBar]] = defaultdict(list)
         by_depth: dict[tuple[str, int], list[PlacedBar]] = defaultdict(list)
         for b in lay.bars:
@@ -452,13 +454,12 @@ class _Scene:
         touched = self.touched[b.closer]
         if _on(b.bottom, m.y):
             return i in touched
-        return _on(b.bottom, m.y + CLEAR) and any(c is not b and _on(c.bottom, m.y) for c in (self.lay.bars[j] for j in touched))
+        return _on(b.bottom, m.y + CLEAR) and any(j != i and _on(self.lay.bars[j].bottom, m.y) for j in touched)
 
     def frames_cutting_bars(self) -> Iterator[Finding]:
         """막대 끝이 프레임 가로 선에 붙거나, 막대가 프레임 윗변·밑변 하나만 건너거나, alt 칸 안에서 시작한 막대가 칸 나눔선을
         건넌다(앞 칸에서 반환한 생명선의 막대를 나눔선 EDGE_CLEAR 아래에서 이어 가는 것은 빼고)."""
-        for f in self.framed:
-            edges = self.edges(f)
+        for f, edges, _ in self.lines:
             for i, b in enumerate(self.lay.bars):
                 elements = (f.owner, self.who(b.owner))
                 for y, edge in edges:
@@ -512,8 +513,7 @@ class _Scene:
     def lines_on_frames(self) -> Iterator[Finding]:
         """프레임·ref 가로 선은 메시지 선과 나란해 가까우면 한 선으로 보이거나 화살촉이 닿는다. 옆 변을 건너는 메시지 선·화살촉은
         프레임 밖으로 나간다."""
-        for f in self.framed:
-            edges, sides = self.edges(f), self.sides(f)
+        for f, edges, sides in self.lines:
             for m in self.lay.messages:
                 x0, x1 = sorted((m.start, m.end))
                 for y, edge in edges:
@@ -528,8 +528,7 @@ class _Scene:
                                          f"{_message(m)}의 선이나 화살촉이 {_frame(f)}의 {side}(x {fmt_num(x)})을 건넌다.")
 
     def frames_on_participants(self) -> Iterator[Finding]:
-        for f in self.framed:
-            edges, sides = self.edges(f), self.sides(f)
+        for f, edges, sides in self.lines:
             for i, p in enumerate(self.parts):
                 elements = (f.owner, f"participants[{i}]")
                 if f.covers:  # 흰 ref 상자는 머리를 가리고, 프레임은 테두리 선만 머리를 지날 수 있다
@@ -576,8 +575,7 @@ class _Scene:
                 elif _overlap(arrow, a):
                     yield self.found("line_through_text", (m.owner, t.element), between(arrow, a),
                                      f"{_message(m)}의 화살촉이 글자에 닿는다: {t.title}.")
-        for f in self.framed:
-            edges, sides = self.edges(f), self.sides(f)
+        for f, edges, sides in self.lines:
             for t in self.texts:
                 a = t.area
                 for y, edge in edges:
@@ -590,18 +588,14 @@ class _Scene:
                                          f"{_frame(f)}의 {side}(x {fmt_num(x)})이 글자를 지난다: {t.title}.")
 
     def texts_on_bars(self) -> Iterator[Finding]:
-        for t in self.texts:
-            if not t.over_bars:
-                continue
+        for t in self.over_texts:
             for b in self.lay.bars:
                 if _overlap(t.area, b.rect, TEXT_BAR_GAP):
                     yield self.found("text_on_bar", (t.element, self.who(b.owner)), between(t.area, b.rect),
                                      f"글자가 막대를 가린다(막대와 {TEXT_BAR_GAP}px 이상 떨어져야 한다): {t.title}, {self.bar(b)}.")
 
     def texts_on_participants(self) -> Iterator[Finding]:
-        for t in self.texts:
-            if not t.over_bars:
-                continue
+        for t in self.over_texts:
             for i, p in enumerate(self.parts):
                 if _overlap(t.area, p.head):
                     yield self.found("text_on_participant", (t.element, f"participants[{i}]"), between(t.area, p.head),

@@ -185,8 +185,7 @@ class Diagram:
 @dataclass(frozen=True)
 class Label:
     """한 줄 글자. anchor "mm"이면 (x, y)가 가운데, "lm"이면 x가 왼쪽 끝이다. bg면 글자 밑에 흰 바탕을 깔아 그 밑 점선을
-    지운다(메시지 글자·조건). 놓은 자리(placed)는 처음 읽을 때 한 번 재 둔다 — 아래 배치 결과의 cached_property(머리·화살촉·
-    꼬리표·노트 글자)도 같다."""
+    지운다(메시지 글자·조건)."""
 
     text: str
     x: float
@@ -297,7 +296,7 @@ class Framed:
         return self.left, self.top, self.right, self.bottom
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PlacedFrame(Framed):
     """loop·opt·alt 프레임. dividers는 alt 칸을 나누는 점선 높이, conditions는 칸마다의 조건 글자다(조건이 없는 칸은 없다)."""
 
@@ -310,7 +309,7 @@ class PlacedFrame(Framed):
         return self.fragment.kind
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PlacedRef(Framed):
     ref: Ref
     name: Label
