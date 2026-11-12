@@ -119,7 +119,8 @@ claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml
 ## License
 
 cysUML is under the [MIT License](LICENSE). The bundled fonts are Liberation Sans and Noto Sans KR, both under the
-SIL Open Font License 1.1 (see [`src/cysuml/fonts`](src/cysuml/fonts)).
+SIL Open Font License 1.1 (see [`LiberationSans-LICENSE.txt`](src/cysuml/fonts/LiberationSans-LICENSE.txt) and
+[`NotoSansKR-LICENSE.txt`](src/cysuml/fonts/NotoSansKR-LICENSE.txt)).
 
 ---
 
