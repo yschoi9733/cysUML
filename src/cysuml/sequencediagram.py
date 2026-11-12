@@ -23,9 +23,9 @@ from typing import Any, Optional
 from . import text as T
 from .canvas import SCALE, Canvas
 from .geom import overlap
-from .reading import InputError, Reader
-from .reading import at as _at
-from .reading import show as _show
+from .parsing import InputError, Reader
+from .parsing import at as _at
+from .parsing import show as _show
 
 __all__ = ["InputError", "parse", "layout", "draw", "render"]
 
@@ -1015,7 +1015,7 @@ class _Placer:
             if i not in plan.created:
                 self._add(self._head_box(i, 0.0))
 
-    # -------- 도우미
+    # -------- 자리 셈
 
     def _add(self, box: Box) -> None:
         self.obstacles.append(box)

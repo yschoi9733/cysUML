@@ -19,9 +19,9 @@ from typing import Any, Optional, Union
 from . import text as T
 from .canvas import BG_MARGIN, SCALE, Canvas, Line, Point, Polygon, Text
 from .geom import gap, grow, hits, meets, outline, span
-from .reading import InputError, Reader
-from .reading import at as _at
-from .reading import show as _show
+from .parsing import InputError, Reader
+from .parsing import at as _at
+from .parsing import show as _show
 from .report import fmt_num, fmt_rect
 
 CLASS_KINDS = ("class", "abstract", "interface", "enum")

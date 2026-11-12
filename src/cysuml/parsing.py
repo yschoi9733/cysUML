@@ -1,7 +1,7 @@
-"""클래스도·교류도가 함께 쓰는 입력 읽기: 틀린 입력(InputError)과 읽기 도우미.
+"""클래스도·교류도의 parsing이 함께 쓰는 것: 틀린 입력(InputError), 자리 표기(at), 값 보이기(show), 공용 Reader.
 
-읽기는 틀린 곳을 만나도 멈추지 않고 문제를 모은다. 문제마다 "classes[0].left: …"처럼 입력 안의 자리를 붙인다.
-그림마다 읽는 모양은 Reader를 이어받아 더한다.
+Reader는 틀린 곳을 만나도 멈추지 않고 문제를 모은다. 문제마다 "classes[0].left: …"처럼 입력 안의 자리를 붙인다.
+그림마다 다른 부분은 Reader를 이어받아 더한다.
 """
 from __future__ import annotations
 

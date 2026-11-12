@@ -6,17 +6,17 @@ from pathlib import Path
 import pytest
 
 from cysuml import classdiagram as C
-from cysuml import reading as R
+from cysuml import parsing as P
 from cysuml import sequencediagram as S
 
 
 def test_both_diagrams_raise_the_shared_input_error():
-    assert C.InputError is R.InputError and S.InputError is R.InputError
+    assert C.InputError is P.InputError and S.InputError is P.InputError
 
 
 def test_sequence_diagram_does_not_load_class_diagram():
     # 하위 프로세스가 이 테스트가 불러온 것과 같은 cysuml을 불러오게 그 자리를 넘긴다(설치 방식과 상관없이)
-    src = str(Path(R.__file__).resolve().parents[1])
+    src = str(Path(P.__file__).resolve().parents[1])
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [src, os.environ.get("PYTHONPATH")]))}
     code = "import sys, cysuml.sequencediagram; print('cysuml.classdiagram' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True, env=env).stdout
@@ -38,10 +38,10 @@ def test_sequence_diagram_does_not_load_class_diagram():
     (lambda r: r.choice("a", "x", ("a", "b")), "a", []),
 ])
 def test_reader_collects_problems_with_their_place(read, expected, problems):
-    reader = R.Reader()
+    reader = P.Reader()
     assert read(reader) == expected and reader.problems == problems
 
 
 def test_place_and_value_notation():
-    assert [R.at("", "classes"), R.at("classes", 0), R.at("classes[0]", "name")] == ["classes", "classes[0]", "classes[0].name"]
-    assert R.show("a" * 50) == repr("a" * 50)[:37] + "..." and R.show(10 ** 5000) == "(아주 큰 정수)"
+    assert [P.at("", "classes"), P.at("classes", 0), P.at("classes[0]", "name")] == ["classes", "classes[0]", "classes[0].name"]
+    assert P.show("a" * 50) == repr("a" * 50)[:37] + "..." and P.show(10 ** 5000) == "(아주 큰 정수)"
