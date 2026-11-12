@@ -18,7 +18,8 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from functools import cached_property
+from typing import Any, ClassVar, Optional
 
 from . import text as T
 from .canvas import SCALE, Canvas
@@ -199,9 +200,13 @@ class Label:
     anchor: str = "mm"
     bg: bool = False
 
+    @cached_property
+    def placed(self) -> T.Placement:
+        return T.place(self.x, self.y, self.text, False, self.anchor)
+
     @property
     def box(self) -> Box:
-        return T.place(self.x, self.y, self.text, False, self.anchor).box
+        return self.placed.box
 
 
 @dataclass(frozen=True)
@@ -215,7 +220,7 @@ class PlacedParticipant:
     dash_top: float
     bottom: float
 
-    @property
+    @cached_property
     def head(self) -> Box:
         return _head_box(self.participant, self.x, self.width, self.top)
 
@@ -250,7 +255,7 @@ class PlacedBar:
     continued: bool = False
     closer: Optional[int] = None
 
-    @property
+    @cached_property
     def rect(self) -> Box:
         return self.x - ACT_W / 2, self.top, self.x + ACT_W / 2, self.bottom
 
@@ -266,7 +271,7 @@ class PlacedMessage:
     end: float
     labels: tuple[Label, ...]
 
-    @property
+    @cached_property
     def arrow(self) -> Box:
         """화살촉이 차지하는 상자."""
         return _arrow_box(self.end, 1 if self.end > self.start else -1, self.y)
@@ -278,44 +283,48 @@ def _arrow_box(end: float, sign: int, y: float) -> Box:
 
 
 @dataclass(frozen=True)
-class PlacedFrame:
-    """loop·opt·alt 프레임. dividers는 alt 칸을 나누는 점선 높이, conditions는 칸마다의 조건 글자다(조건이 없는 칸은 없다)."""
+class Framed:
+    """프레임(PlacedFrame)과 ref(PlacedRef)의 공용 바탕: left~right·top~bottom 상자와 왼쪽 위 꼬리표(글자는 kind). dividers는
+    alt 칸 나눔선 높이이고(ref에는 없다), covers면 흰 상자라 그 밑을 지나는 생명선·막대를 덮는다(ref)."""
 
-    fragment: Fragment
     owner: str
     left: float
     top: float
     right: float
     bottom: float
+    kind: ClassVar[str]  # 하위 클래스가 정한다 — 값을 두지 않아야 하위 클래스의 dividers 필드에 기본값으로 잡히지 않는다
+    dividers: ClassVar[tuple[float, ...]]
+    covers: ClassVar[bool] = False
+
+    @cached_property
+    def tag(self) -> Box:
+        return _tag_box(self.left, self.top, self.kind)
+
+    @property
+    def rect(self) -> Box:
+        return self.left, self.top, self.right, self.bottom
+
+
+@dataclass(frozen=True, kw_only=True)
+class PlacedFrame(Framed):
+    """loop·opt·alt 프레임. dividers는 alt 칸을 나누는 점선 높이, conditions는 칸마다의 조건 글자다(조건이 없는 칸은 없다)."""
+
+    fragment: Fragment
     dividers: tuple[float, ...]
     conditions: tuple[Label, ...]
 
     @property
-    def tag(self) -> Box:
-        return _tag_box(self.left, self.top, self.fragment.kind)
-
-    @property
-    def rect(self) -> Box:
-        return self.left, self.top, self.right, self.bottom
+    def kind(self) -> str:
+        return self.fragment.kind
 
 
-@dataclass(frozen=True)
-class PlacedRef:
+@dataclass(frozen=True, kw_only=True)
+class PlacedRef(Framed):
     ref: Ref
-    owner: str
-    left: float
-    top: float
-    right: float
-    bottom: float
     name: Label
-
-    @property
-    def tag(self) -> Box:
-        return _tag_box(self.left, self.top, "ref")
-
-    @property
-    def rect(self) -> Box:
-        return self.left, self.top, self.right, self.bottom
+    kind: ClassVar[str] = "ref"
+    dividers: ClassVar[tuple[float, ...]] = ()
+    covers: ClassVar[bool] = True
 
 
 @dataclass(frozen=True)
@@ -327,7 +336,7 @@ class PlacedNote:
     width: float
     height: float
 
-    @property
+    @cached_property
     def label(self) -> Label:
         return Label(self.text, self.left + NOTE_TEXT_X, self.top + self.height / 2, "lm")
 
@@ -1267,13 +1276,15 @@ class _Placer:
         for r, _ in self.refs:
             left_off, right_off = _extent([r.name])
             right = max(right, name_left + right_off - left_off + COND_GAP)
-        frames = tuple(PlacedFrame(f, f"frames[{f.index}]", LEFT, p.top, right, p.bottom, tuple(p.dividers), tuple(p.conditions))
+        frames = tuple(PlacedFrame(f"frames[{f.index}]", LEFT, p.top, right, p.bottom, fragment=f, dividers=tuple(p.dividers),
+                                   conditions=tuple(p.conditions))
                        for f in d.fragments for p in (self.frames[f.index],))
         refs = []
         for r, top in self.refs:
             left_off, _ = _extent([r.name])
             x = max((LEFT + right) / 2, name_left - left_off)
-            refs.append(PlacedRef(r, f"frames[{r.index}]", LEFT, top, right, top + REF_H, Label(r.name, x, top + REF_H / 2)))
+            refs.append(PlacedRef(f"frames[{r.index}]", LEFT, top, right, top + REF_H, ref=r,
+                                  name=Label(r.name, x, top + REF_H / 2)))
         notes = tuple(PlacedNote(s, f"notes[{j}]", LEFT, life_end + NOTE_GAP + NOTE_STEP * j,
                                  max(NOTE_MIN_W, math.ceil(T.text_width(s) + NOTE_PAD)), NOTE_H)
                       for j, s in enumerate(d.notes))
@@ -1295,10 +1306,10 @@ def layout(diagram: Diagram) -> Layout:
 # ---------------------------------------------------------------- 그리기
 
 
-def _draw_tag(c: Canvas, tag: Box, op: str, owner: str) -> None:
-    left, top, right, bottom = tag
-    c.poly([(left, top), (right, top), (right, top + TAG_SIDE), (right - TAG_CUT, bottom), (left, bottom)], owner=owner)
-    c.text(left + TAG_TEXT[0], top + TAG_TEXT[1], op, bold=True, owner=owner)
+def _draw_tag(c: Canvas, f: Framed) -> None:
+    left, top, right, bottom = f.tag
+    c.poly([(left, top), (right, top), (right, top + TAG_SIDE), (right - TAG_CUT, bottom), (left, bottom)], owner=f.owner)
+    c.text(left + TAG_TEXT[0], top + TAG_TEXT[1], f.kind, bold=True, owner=f.owner)
 
 
 def _draw_participant(c: Canvas, p: PlacedParticipant) -> None:
@@ -1351,10 +1362,10 @@ def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
         c.rect(b.x - ACT_W / 2, b.top, ACT_W, b.bottom - b.top, owner=b.owner)
     for r in lay.refs:
         c.rect(r.left, r.top, r.right - r.left, r.bottom - r.top, owner=r.owner)
-        _draw_tag(c, r.tag, "ref", r.owner)
+        _draw_tag(c, r)
         c.text(r.name.x, r.name.y, r.name.text, anchor=r.name.anchor, bg=r.name.bg, owner=r.owner)
     for f in lay.frames:
-        _draw_tag(c, f.tag, f.fragment.kind, f.owner)
+        _draw_tag(c, f)
         for lab in f.conditions:
             c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=lab.bg, owner=f.owner)
     for m in lay.messages:

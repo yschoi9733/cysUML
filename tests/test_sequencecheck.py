@@ -1,6 +1,8 @@
+import inspect
 import itertools
 import json
 import random
+import re
 from dataclasses import replace
 
 import pytest
@@ -105,6 +107,13 @@ def test_each_kind_is_caught(base, kind):
     found = SC.find(CASES[kind](base))
     assert kind in kinds(found), [f.problem for f in found]
     assert kinds(found) == sorted(kinds(found), key=SC.KINDS.index)
+
+
+def test_rules_run_in_kind_order_one_kind_each():
+    sources = [inspect.getsource(rule) for rule in SC._Scene.RULES]
+    named = [re.findall(r'self\.found\("(\w+)"', s) for s in sources]  # 규칙마다 낸다고 적은 종류
+    assert [len(n) for n in named] == [s.count("self.found(") for s in sources]  # 종류는 늘 글자 그대로 적는다
+    assert [set(n) for n in named] == [{k} for k in SC.KINDS]
 
 
 @pytest.mark.parametrize("change", [
