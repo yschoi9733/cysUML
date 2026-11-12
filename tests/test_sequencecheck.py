@@ -24,6 +24,10 @@ def reply(a, b, name=None):
     return {"from": a, "to": b, "kind": "reply", **({"name": name} if name else {})}
 
 
+def make(a, b, name=None):
+    return {"from": a, "to": b, "kind": "create", **({"name": name} if name else {})}
+
+
 def kinds(found):
     return [f.kind for f in found]
 
@@ -45,7 +49,7 @@ def base():
 def test_base_drawing_passes_and_has_what_the_cases_change(base):
     assert SC.find(base) == ()
     assert len(base.frames) == 1 and len(base.refs) == 1 and len(base.notes) == 1
-    assert base.participants[3].top > 0  # C는 만드는 메시지 높이로 내려온다
+    assert base.participants[3].lives[0].top > 0  # C는 만드는 메시지 높이로 내려온다
 
 
 def part(lay, name):
@@ -54,6 +58,12 @@ def part(lay, name):
 
 def bar(lay, owner):
     return min((b for b in lay.bars if b.owner == owner), key=lambda b: b.top)
+
+
+def relife(p, **kw):
+    """참여자의 (하나뿐인) 머리·생명선을 바꾼다."""
+    (only,) = p.lives
+    return replace(p, lives=(replace(only, **kw),))
 
 
 def swap(lay, field, old, new):
@@ -79,13 +89,13 @@ CASES = {
     "line_at_bar_end": lambda lay: swap(lay, "bars", bar(lay, "B"), replace(bar(lay, "B"), bottom=lay.messages[3].y - 1)),
     "line_overlap": lambda lay: swap(lay, "messages", lay.messages[2], replace(lay.messages[2], y=lay.messages[1].y + 1)),
     "line_through_participant": lambda lay: swap(lay, "participants", part(lay, "B"),
-                                          replace(part(lay, "B"), top=lay.messages[3].y - S.HEAD_H / 2)),
+                                          relife(part(lay, "B"), top=lay.messages[3].y - S.HEAD_H / 2)),
     "frame_cuts_bar": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], top=bar(lay, "B").top - 2)),
     "bar_outside_frame": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], right=part(lay, "A").x)),
     "frame_overlap": lambda lay: swap(lay, "refs", lay.refs[0], moved(lay.refs[0], lay.frames[0].bottom - 5)),
     "message_in_ref": lambda lay: swap(lay, "refs", lay.refs[0], moved(lay.refs[0], lay.messages[3].y - 10)),
     "line_on_frame": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], bottom=lay.messages[2].y + 4)),
-    "frame_on_participant": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], top=part(lay, "C").top + 10)),
+    "frame_on_participant": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], top=part(lay, "C").lives[0].top + 10)),
     "tag_on_lifeline": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], left=part(lay, "U").x - 10)),
     "line_through_text": lambda lay: relabel(lay, 1, y=lay.messages[3].y),
     "text_on_bar": lambda lay: relabel(lay, 1, x=part(lay, "A").x),
@@ -117,7 +127,7 @@ def test_rules_run_in_kind_order_one_kind_each():
 
 
 @pytest.mark.parametrize("change", [
-    lambda lay: swap(lay, "refs", lay.refs[0], moved(lay.refs[0], part(lay, "C").top + 5)),  # ref 상자가 머리를 가린다
+    lambda lay: swap(lay, "refs", lay.refs[0], moved(lay.refs[0], part(lay, "C").lives[0].top + 5)),  # ref 상자가 머리를 가린다
 ])
 def test_ref_box_over_a_head_is_caught(base, change):
     assert "frame_on_participant" in kinds(SC.find(change(base)))
@@ -160,7 +170,7 @@ def test_arrowhead_touching_a_head_is_caught(base):
     # B의 머리 밑변을 messages[1] 선 3px 위로 — 선은 머리를 비키지만 화살촉(위아래 ARROW_HALF)이 머리에 닿는다
     b = part(base, "B")
     y = base.messages[1].y
-    moved_head = swap(base, "participants", b, replace(b, top=y - 3 - S.HEAD_H, dash_top=y - 3))
+    moved_head = swap(base, "participants", b, relife(b, top=y - 3 - S.HEAD_H, dash_top=y - 3))
     assert any(f.kind == "line_through_participant" and "화살촉" in f.problem for f in SC.find(moved_head))
 
 
@@ -241,6 +251,53 @@ def test_layout_tells_which_bars_continue_and_where_bars_end(base):
     assert SC.find(lay) == ()
     found = SC.find(swap(lay, "bars", goes_on, replace(goes_on, top=goes_on.top + 2, bottom=goes_on.bottom)))
     assert any(f.kind == "bar_off_message" and "이어 가는 막대" in f.problem for f in found)
+
+
+@pytest.fixture(scope="module")
+def recreated():
+    """alt 두 칸에서 B가 C를 한 번씩 만든다 — C는 머리·생명선이 둘이고, 첫 생명선은 칸 나눔선에서 끝난다."""
+    return S.render({"participants": life("A", "B", "C"),
+                     "messages": [call("A", "B", "f()"), make("B", "C"), call("B", "C", "g()"), reply("C", "B"),
+                                  make("B", "C"), call("B", "C", "g()"), reply("C", "B"), reply("B", "A")],
+                     "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 3},
+                                                             {"condition": "else", "first": 4, "last": 6}]}]}).layout
+
+
+def test_recreated_layout_passes(recreated):
+    assert len(part(recreated, "C").lives) == 2
+    assert SC.find(recreated) == ()
+
+
+def test_message_where_a_recreated_lifeline_is_missing_is_caught(recreated):
+    # g()를 C의 첫 생명선이 끝난 칸 나눔선과 다시 만든 머리 사이로 옮기면 그 높이에 C의 생명선이 없다
+    first, second = part(recreated, "C").lives
+    m = recreated.messages[2]
+    found = SC.find(swap(recreated, "messages", m, replace(m, y=(first.bottom + second.top) / 2)))
+    assert any(f.kind == "message_off_bar" and "생명선 밖" in f.problem for f in found)
+
+
+def test_bar_where_a_recreated_lifeline_is_missing_is_caught(recreated):
+    _, second = part(recreated, "C").lives
+    b = bar(recreated, "C")
+    found = SC.find(swap(recreated, "bars", b, replace(b, bottom=second.top - 2)))
+    assert any(f.kind == "bar_off_lifeline" and "하나 안에 들지 않는다" in f.problem for f in found)
+
+
+def test_first_life_running_through_the_next_head_is_caught(recreated):
+    c = part(recreated, "C")
+    first, second = c.lives
+    longer = replace(c, lives=(replace(first, bottom=second.dash_top + 5), second))
+    found = SC.find(swap(recreated, "participants", c, longer))
+    assert any(f.kind == "participant_overlap" and "같은 참여자의 다른 생명선" in f.problem for f in found)
+
+
+def test_heads_of_one_participant_overlapping_are_caught(recreated):
+    c = part(recreated, "C")
+    first, second = c.lives
+    up = replace(c, lives=(first, replace(second, top=first.top + 10, dash_top=first.dash_top + 10)))
+    found = SC.find(swap(recreated, "participants", c, up))
+    assert any(f.kind == "participant_overlap" and f.problem.startswith("머리끼리") and f.elements == ("participants[2]",)
+               for f in found)
 
 
 def test_messages_meeting_end_to_end_at_one_height_are_caught(callback):
@@ -529,6 +586,86 @@ def nested_diagram(seed):
             "notes": [word() for _ in range(rnd.randint(0, 1))]}
 
 
+def recreating_diagram(seed):
+    """alt 칸마다 같은 참여자 X를 다시 만드는 입력. 칸 둘·셋 가운데 둘 이상에서 X를 만들고, 그 밖의 메시지는 random_diagram처럼
+    뽑는다. X는 칸 안에서 만든 뒤에만 주고받고, 마지막으로 만든 칸 뒤로는 아무 데서나 주고받는다. alt 앞뒤에 다른 프레임도 둔다."""
+    rnd = random.Random(seed)
+    word = lambda: rnd.choice(WORDS)  # noqa: E731
+    parts = [{"name": f"{rnd.choice(NAMES)}{i}", "kind": "actor" if rnd.random() < 0.2 else "lifeline"}
+             for i in range(rnd.randint(3, 6))]
+    x = rnd.choice(parts)
+    x["kind"] = "lifeline"
+    others = [p["name"] for p in parts if p is not x]
+    messages = []
+
+    def chat(count, names):
+        for _ in range(count):
+            src, dst = rnd.sample(names, 2)
+            messages.append(reply(src, dst, word() if rnd.random() < 0.8 else None) if rnd.random() < 0.4 else call(src, dst, word()))
+
+    chat(rnd.randint(0, 4), others)
+    before = len(messages)
+    count = rnd.randint(2, 3)
+    makes = sorted(rnd.sample(range(count), rnd.randint(2, count)))
+    branches = []
+    for j in range(count):
+        first = len(messages)
+        if j in makes:
+            chat(rnd.randint(0, 2), others)
+            messages.append(make(rnd.choice(others), x["name"], word() if rnd.random() < 0.6 else None))
+            chat(rnd.randint(0, 3), others + [x["name"]])
+        else:
+            chat(rnd.randint(1, 3), others + ([x["name"]] if j > makes[-1] else []))
+        branches.append({"condition": "else" if j == count - 1 and rnd.random() < 0.5 else word(),
+                         "first": first, "last": len(messages) - 1})
+    after = len(messages)
+    chat(rnd.randint(0, 4), others + [x["name"]])
+    frames = [{"kind": "alt", "branches": branches}]
+    for lo, hi in ((0, before), (after, len(messages))):
+        if hi > lo and rnd.random() < 0.5:
+            a = rnd.randrange(lo, hi)
+            frames.append({"kind": rnd.choice(["loop", "opt"]), "first": a, "last": rnd.randrange(a, hi), "condition": word()})
+    if rnd.random() < 0.3:
+        frames.append({"kind": "ref", "name": word(), "before": rnd.choice([before, after])})
+    rnd.shuffle(frames)
+    return {"participants": parts, "messages": messages, "frames": frames,
+            "notes": [word() for _ in range(rnd.randint(0, 1))]}
+
+
+def messages_of(seq):
+    """(보내는 쪽, 받는 쪽, 종류) 차례를 메시지로 — 호출·만들기와 반환 둘에 하나는 글자를 단다."""
+    return [{"from": s, "to": t, "kind": k, **({"name": WORDS[(i * 5) % len(WORDS)]} if k != "reply" or i % 2 else {})}
+            for i, (s, t, k) in enumerate(seq)]
+
+
+def recreate_variants():
+    """같은 참여자 X를 alt 칸마다 다시 만드는 작은 짜임 전부. 참여자 A·B·C 가운데 X는 가운데나 오른쪽이고 A는 액터일 수도 있다.
+    칸 둘이면 칸마다 [만들기]·[만들기, 메시지]·[메시지, 만들기](메시지는 세 참여자 사이 호출·반환 전부)에 alt 뒤 A가 X를 부르는지,
+    칸 셋이면 첫 칸 [만들기]·[만들기, 메시지], 가운데 칸 메시지 하나, 끝 칸 [만들기]다. 틀린 입력(앞 칸 X를 다시 만들기 전에 쓰기
+    등)은 건너뛴다."""
+    names = ("A", "B", "C")
+    options = [(s, t, k) for s in names for t in names if s != t for k in ("call", "reply")]
+    for x in ("B", "C"):
+        makes = [(s, x, "create") for s in names if s != x]
+        first = [[c] for c in makes] + [[c, o] for c in makes for o in options]
+        two = first + [[o, c] for c in makes for o in options]
+        layouts = [(actors, (a, b), tail) for actors in ((), ("A",)) for a, b in itertools.product(two, repeat=2)
+                   for tail in ([], [("A", x, "call")])]
+        layouts += [((), (a, [o], [c]), []) for a in first for o in options for c in makes]
+        for actors, branches, tail in layouts:
+            seq = [m for b in branches for m in b] + tail
+            spans, k = [], 0
+            for b in branches:
+                spans.append({"condition": f"c{len(spans)}", "first": k, "last": k + len(b) - 1})
+                k += len(b)
+            data = {"participants": life(*names, actor=actors), "messages": messages_of(seq),
+                    "frames": [{"kind": "alt", "branches": spans}]}
+            try:
+                yield S.parse(data), data
+            except S.InputError:
+                continue
+
+
 def frame_variants(n):
     """메시지 n개에 놓을 수 있는 프레임 배치 전부: 없음, ref 자리마다, loop·opt 범위마다, alt 칸 나누기마다(칸 셋까지), 그리고
     프레임·ref가 잇달아 놓이는 것 하나."""
@@ -557,8 +694,7 @@ def small_diagrams(n_messages, kinds_=("call", "reply", "create"), actor_sets=((
     for actors in actor_sets:
         parts = life(*names, actor=actors)
         for seq in itertools.product(options, repeat=n_messages):
-            msgs = [{"from": s, "to": t, "kind": k, **({"name": WORDS[(i * 5) % len(WORDS)]} if k != "reply" or i % 2 else {})}
-                    for i, (s, t, k) in enumerate(seq)]
+            msgs = messages_of(seq)
             for frames in frames_of(n_messages):
                 data = {"participants": parts, "messages": msgs, "frames": frames}
                 try:
@@ -602,6 +738,18 @@ def test_nested_inputs_pass(seed):
     assert r.passed, r.summary()
 
 
+@pytest.mark.parametrize("seed", range(400))
+def test_recreating_inputs_pass(seed):
+    r = SC.check(S.render(recreating_diagram(seed), scale=0.5))
+    assert r.passed, r.summary()
+
+
+def test_every_small_recreating_diagram_passes():
+    cases = list(recreate_variants())
+    assert len(cases) > 5000
+    assert failing(cases) == []
+
+
 def test_every_two_message_diagram_passes():
     cases = list(small_diagrams(2))
     assert len(cases) > 8000
@@ -617,17 +765,18 @@ def test_every_three_message_call_and_reply_passes():
 def test_generated_inputs_cover_the_interesting_cases():
     seen = set()
     for seed in range(400):
-        for make in (random_diagram, nested_diagram):
-            lay = S.layout(S.parse(make(seed)))
+        for generate in (random_diagram, nested_diagram, recreating_diagram):
+            lay = S.layout(S.parse(generate(seed)))
             seen |= {f.fragment.kind for f in lay.frames} | ({"ref"} if lay.refs else set())
             seen |= {"nested"} if any(b.depth for b in lay.bars) else set()
             seen |= {"create"} if any(m.message.kind == "create" for m in lay.messages) else set()
+            seen |= {"recreate"} if any(len(p.lives) > 1 for p in lay.participants) else set()
             seen |= {"crossing"} if any(lab.box[0] < p.x < lab.box[2] for m in lay.messages for lab in m.labels
                                         for p in lay.participants) else set()
             seen |= {"actor answers"} if any(m.message.kind == "reply" and p.participant.kind == "actor"
                                              and p.participant.name == m.message.source
                                              for m in lay.messages for p in lay.participants) else set()
-    assert seen >= {"loop", "opt", "alt", "ref", "nested", "create", "crossing", "actor answers"}
+    assert seen >= {"loop", "opt", "alt", "ref", "nested", "create", "recreate", "crossing", "actor answers"}
 
 
 @pytest.mark.parametrize("seed", range(0, 400, 40))
