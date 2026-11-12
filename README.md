@@ -116,8 +116,10 @@ To try your working copy in Claude Code, register it under another name:
 claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml
 ```
 
-The bundled fonts are Liberation Sans and Noto Sans KR, both under the SIL Open Font License
-(see [`src/cysuml/fonts`](src/cysuml/fonts)).
+## License
+
+cysUML is under the [MIT License](LICENSE). The bundled fonts are Liberation Sans and Noto Sans KR, both under the
+SIL Open Font License 1.1 (see [`src/cysuml/fonts`](src/cysuml/fonts)).
 
 ---
 
@@ -166,3 +168,8 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
 
 `uv sync`로 준비하고 `uv run pytest`로 시험한다. 작업 중인 코드를 Claude Code에서 써 보려면 다른 이름으로 등록한다:
 `claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml`.
+
+### 라이선스
+
+cysUML은 [MIT 라이선스](LICENSE)를 따른다. 함께 넣은 글꼴 Liberation Sans와 Noto Sans KR은 SIL Open Font License 1.1을
+따른다([`src/cysuml/fonts`](src/cysuml/fonts)).
