@@ -29,6 +29,10 @@ def overlap(a, b, pad=0.0):
     return a[0] - pad < b[2] and b[0] < a[2] + pad and a[1] - pad < b[3] and b[1] < a[3] + pad
 
 
+def make(a, b, name=None):
+    return {"from": a, "to": b, "kind": "create", **({"name": name} if name else {})}
+
+
 def problems(data):
     with pytest.raises(S.InputError) as e:
         S.parse(data)
@@ -76,6 +80,25 @@ def test_frames_are_read_by_kind():
      "messages[1].to: 'B'는 messages[0]에서 이미 만들었다"),
     ({"participants": life("A", "B"), "messages": [call("B", "A"), {"from": "A", "to": "B", "kind": "create"}]},
      "messages[1].to: 'B'는 messages[0]에서 이미 메시지를 주고받았다"),
+    # 다시 만드는 것은 같은 alt의 다른 칸에서만 — 한 칸 안, alt 밖에서 만든 뒤, 다른 alt의 칸은 입력 오류다
+    ({"participants": life("A", "B"), "messages": [make("A", "B")] * 3,
+      "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 1}, {"condition": "y", "first": 2, "last": 2}]}]},
+     "messages[1].to: 'B'는 messages[0]에서 이미 만들었다 — 다시 만드는 것은 같은 alt의 다른 칸에서만 한다"),
+    ({"participants": life("A", "B"), "messages": [make("A", "B"), call("A", "B"), make("A", "B")],
+      "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 1}, {"condition": "y", "first": 2, "last": 2}]}]},
+     "messages[2].to: 'B'는 messages[0]에서 이미 만들었다"),
+    ({"participants": life("A", "B", "C"), "messages": [make("A", "B"), call("A", "C"), call("A", "C"), make("A", "B")],
+      "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 0}, {"condition": "y", "first": 1, "last": 1}]},
+                 {"kind": "alt", "branches": [{"condition": "x", "first": 2, "last": 2}, {"condition": "y", "first": 3, "last": 3}]}]},
+     "messages[3].to: 'B'는 messages[0]에서 이미 만들었다"),
+    # 앞 칸에서 만든 생명선은 그 칸과 함께 끝난다 — 다음 칸에서 다시 만들기 전에는 주고받지 않는다
+    ({"participants": life("A", "B"), "messages": [make("A", "B"), call("B", "A"), make("A", "B")],
+      "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 0}, {"condition": "y", "first": 1, "last": 2}]}]},
+     "messages[1].from: 'B'의 생명선은 frames[0].branches[0]와 함께 끝나 messages[2]에서 다시 만들기 전에는 없다"),
+    ({"participants": life("A", "B"), "messages": [make("A", "B"), call("A", "B"), make("A", "B")],
+      "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 0}, {"condition": "y", "first": 1, "last": 1},
+                                              {"condition": "z", "first": 2, "last": 2}]}]},
+     "messages[1].to: 'B'의 생명선은 frames[0].branches[0]와 함께 끝나 messages[2]에서"),
     ({"participants": life("A", "B"), "messages": [call("A", "B")], "frames": [{"first": 0, "last": 0}]},
      "frames[0]: 'kind' 필드가 빠졌다"),
     ({"participants": life("A", "B"), "messages": [call("A", "B")], "frames": [{"kind": "loop", "first": 0}]},
@@ -156,6 +179,23 @@ def test_a_broken_message_does_not_count_as_using_a_participant():
     found = problems({"participants": life("A", "B"),
                       "messages": [{"from": "A", "to": "B", "kind": "bogus"}, {"from": "A", "to": "B", "kind": "create"}]})
     assert len(found) == 1 and found[0].startswith("messages[0].kind")
+
+
+def test_recreating_waits_until_the_frames_are_right():
+    # 프레임이 틀리면 만드는 메시지가 어느 칸인지 가릴 수 없다 — 프레임 오류만 알리고, 다시 만들기는 그 오류를 고친 뒤에 본다
+    found = problems({"participants": life("A", "B"), "messages": [make("A", "B")] * 2,
+                      "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 1}]}]})
+    assert list(found) == ["frames[0].branches: alt는 칸이 둘 이상이어야 한다 — 칸이 하나면 opt를 쓴다"]
+    found = problems({"participants": life("A", "B"), "messages": [make("A", "B"), call("A", "B"), make("A", "B")],
+                      "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 0},
+                                                              {"condition": "y", "first": 1, "last": 1}]},
+                                 {"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 1},
+                                                              {"condition": "y", "first": 2, "last": 2}]}]})
+    assert list(found) == ["frames[1]: frames[0]와 덮는 메시지가 겹친다 — 프레임 안에 프레임을 넣지 않는다"]
+    # ref는 칸을 가르는 데 쓰지 않으므로, ref만 틀렸으면 다시 만들기도 함께 본다
+    found = problems({"participants": life("A", "B"), "messages": [make("A", "B")] * 2, "frames": [{"kind": "ref", "name": "R"}]})
+    assert list(found) == ["frames[0]: 'before' 필드가 빠졌다", "messages[1].to: 'B'는 messages[0]에서 이미 만들었다 — 다시 만드는 "
+                           "것은 같은 alt의 다른 칸에서만 한다"]
 
 
 def test_overlapping_frames_are_reported_once_each():
@@ -398,10 +438,64 @@ def test_created_lifeline_head_comes_down_to_the_create_message():
     lay = lay_of(life("A", "B"), [{"from": "A", "to": "B", "kind": "create", "name": "B()"}, call("A", "B")])
     m = lay.messages[0]
     b = lay.participants[1]
-    assert b.top == m.y - S.HEAD_H / 2 and b.dash_top == m.y + S.HEAD_H / 2
+    (only,) = b.lives
+    assert only.top == m.y - S.HEAD_H / 2 and only.dash_top == m.y + S.HEAD_H / 2
     assert m.end == b.x - b.width / 2
     assert [lab.text for lab in m.labels] == ["«create»", "B()"]
     assert bars_of(lay, "B")[0].top == lay.messages[1].y  # 만드는 메시지는 막대를 열지 않는다
+
+
+def alt_of(*spans):
+    return {"kind": "alt", "branches": [{"condition": f"c{j}", "first": a, "last": b} for j, (a, b) in enumerate(spans)]}
+
+
+RECREATE = {"participants": life("A", "B", "C"),
+            "messages": [call("A", "B", "f()"), make("B", "C", "C(x)"), call("B", "C", "g()"), reply("C", "B"),
+                         make("B", "C", "C(y)"), call("B", "C", "g()"), reply("C", "B"), call("B", "C", "close()"),
+                         reply("B", "A")],
+            "frames": [alt_of((1, 3), (4, 6))]}
+
+
+def test_recreated_lifeline_has_a_head_in_each_branch():
+    # 앞 칸에서 만든 C의 생명선은 칸 나눔선에서 끝나고, 다음 칸 머리는 그 칸의 만드는 메시지 높이로 내려온다. 마지막에 만든
+    # 생명선은 다른 생명선처럼 그림 끝까지 간다
+    lay = S.render(RECREATE).layout
+    (divider,) = lay.frames[0].dividers
+    c = lay.participants[2]
+    first, second = c.lives
+    made = [lay.messages[1], lay.messages[4]]
+    assert [one.top for one in c.lives] == [m.y - S.HEAD_H / 2 for m in made]
+    assert [one.dash_top for one in c.lives] == [m.y + S.HEAD_H / 2 for m in made]
+    assert [one.made_by for one in c.lives] == [1, 4] and lay.participants[0].lives[0].made_by is None
+    assert first.bottom == divider < second.top
+    assert second.bottom == lay.participants[0].lives[0].bottom
+    assert all(m.end == c.x - c.width / 2 for m in made)
+    assert rule_breaks(lay) == []
+
+
+def test_recreated_lifeline_ends_with_its_own_branch():
+    # 칸 셋 가운데 첫째·셋째에서 만든다 — 첫 생명선은 첫 칸 나눔선에서 끝나 가운데 칸에는 C가 없다
+    lay = lay_of(life("A", "B", "C"), [make("A", "C"), call("A", "B"), make("A", "C")], frames=[alt_of((0, 0), (1, 1), (2, 2))])
+    first, second = lay.participants[2].lives
+    d1, d2 = lay.frames[0].dividers
+    assert first.bottom == d1 and d2 < second.top
+    assert rule_breaks(lay) == []
+
+
+def test_label_may_cross_where_a_recreated_lifeline_is_not():
+    # 가운데 칸에서 A가 C를 부르는 글자는, 그 높이에 생명선이 없는 B 위에 놓일 수 있다
+    lay = lay_of(life("A", "B", "C"), [make("A", "B"), call("A", "C", "processPaymentWithRetry(orderId)"), make("A", "B")],
+                 frames=[alt_of((0, 0), (1, 1), (2, 2))])
+    (lab,) = lay.messages[1].labels
+    assert lab.box[0] < lay.participants[1].x < lab.box[2]
+    assert rule_breaks(lay) == []
+
+
+def test_recreated_lifeline_draws_a_head_and_a_dashed_line_per_life():
+    recs = S.render(RECREATE).canvas.records
+    heads = [r for r in recs if isinstance(r, Rect) and r.owner == "C" and r.height == S.HEAD_H]
+    dashes = [r for r in recs if isinstance(r, Line) and r.owner == "C" and r.dash == S.LIFE_DASH]
+    assert len(heads) == len(dashes) == 2
 
 
 def test_bar_open_when_a_frame_starts_wraps_the_whole_frame():
@@ -606,7 +700,7 @@ def test_frames_share_the_full_width_and_alt_is_split_with_else():
 
 def test_notes_are_collected_below_the_lifelines():
     lay = lay_of(life("A", "B"), [call("A", "B")], notes=["첫째", "둘째"])
-    bottom = max(p.bottom for p in lay.participants)
+    bottom = max(one.bottom for p in lay.participants for one in p.lives)
     assert [n.top for n in lay.notes] == [bottom + S.NOTE_GAP, bottom + S.NOTE_GAP + S.NOTE_STEP]
     assert all(n.left == S.LEFT for n in lay.notes)
 
@@ -623,7 +717,7 @@ def test_measured_boxes_follow_a_replaced_layout():
     assert replace(r, left=r.left + 5, top=r.top + 7).tag == shift(r.tag)
     assert replace(r.name, x=r.name.x + 5, y=r.name.y + 7).box == shift(r.name.box)
     assert replace(n, left=n.left + 5, top=n.top + 7).label.box == shift(n.label.box)
-    assert replace(u, x=u.x + 5, top=u.top + 7).head == shift(u.head)
+    assert replace(u, x=u.x + 5, lives=(replace(u.lives[0], top=u.lives[0].top + 7),)).heads == (shift(u.heads[0]),)
     assert replace(m, end=m.end + 5, y=m.y + 7).arrow == (m.arrow[0] + 5, m.arrow[1] + 7, m.arrow[2] + 5, m.arrow[3] + 7)
     b = lay.bars[0]
     assert replace(b, x=b.x + 5, top=b.top + 7, bottom=b.bottom + 7).rect == shift(b.rect)

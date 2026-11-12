@@ -42,7 +42,7 @@ FRAME_LINE_CLEAR = ARROW_HALF + PAD  # 메시지 선과 프레임 가로 선 사
 MESSAGE_GAP = 2 * ARROW_HALF + PAD   # 가로로 겹쳐 지나는 두 메시지 선 사이 — 화살촉끼리도 PAD 이상 떨어진다
 
 KINDS = (  # 불합격 종류(이 순서로 낸다)
-    "participant_overlap",       # 머리끼리 겹치거나 머리가 다른 생명선을 가린다
+    "participant_overlap",       # 머리끼리 겹치거나 머리가 제 생명선 밖의 생명선을 가린다
     "bar_on_participant",        # 막대가 머리에 걸치거나 다른 생명선을 덮는다
     "bar_overlap",               # 한 생명선의 같은 깊이 막대끼리 붙거나, 다른 생명선의 막대끼리 겹친다
     "bar_off_lifeline",          # 막대가 제 생명선(깊이만큼 비킨 자리)에 있지 않거나, 비킨 막대가 시작할 때 바깥 막대가 없다
@@ -71,7 +71,8 @@ ORDER = {kind: i for i, kind in enumerate(KINDS)}
 FRAME_HINT = "프레임이 덮는 메시지 범위(first·last·칸)나 ref 자리(before)를 바꾸거나, 프레임을 빼고 그림을 나눈다."
 TEXT_HINT = "그 글자를 줄이거나 참여자 순서를 바꾼다."
 HINTS = {
-    "participant_overlap": "참여자 이름을 줄이거나 참여자 순서를 바꾼다.",
+    "participant_overlap": "참여자 이름을 줄이거나 참여자 순서를 바꾼다. alt 칸마다 다시 만든 한 참여자의 머리·생명선끼리면 만드는 "
+                           "메시지의 차례나 칸 범위를 바꾼다.",
     "bar_on_participant": "참여자 순서를 바꾸거나, 만드는 메시지(create)의 차례를 바꾼다.",
     "bar_overlap": "그 생명선을 부르는 메시지의 차례를 바꾸거나 그림을 나눈다.",
     "bar_off_lifeline": "그 생명선을 부르고 돌려주는 메시지의 차례를 바꾸거나 그림을 나눈다.",
@@ -240,8 +241,13 @@ class _Scene:
     def who(self, name: str) -> str:
         return f"participants[{self.index[name]}]"
 
-    def head(self, p: PlacedParticipant) -> str:
-        return f"참여자 '{p.participant.name}'의 머리(자리 {fmt_rect(p.head)})"
+    @staticmethod
+    def head(p: PlacedParticipant, box: Box) -> str:
+        return f"참여자 '{p.participant.name}'의 머리(자리 {fmt_rect(box)})"
+
+    @staticmethod
+    def lifelines(p: PlacedParticipant) -> str:
+        return ", ".join(f"{fmt_num(life.dash_top)}~{fmt_num(life.bottom)}" for life in p.lives)
 
     @staticmethod
     def bar(b: PlacedBar) -> str:
@@ -254,30 +260,40 @@ class _Scene:
     # -------- 머리·막대
 
     def participant_overlaps(self) -> Iterator[Finding]:
-        for i, a in enumerate(self.parts):
-            for j in range(i + 1, len(self.parts)):
-                b = self.parts[j]
-                if _overlap(a.head, b.head):
+        """머리끼리 겹치거나(alt 칸마다 다시 만든 한 참여자의 머리끼리도), 머리가 그 머리의 생명선 밖의 생명선과 겹친다."""
+        heads = [(i, n, h) for i, p in enumerate(self.parts) for n, h in enumerate(p.heads)]
+        for at, (i, _, a) in enumerate(heads):
+            for j, _, b in heads[at + 1:]:
+                if _overlap(a, b):
+                    yield self.found("participant_overlap", (f"participants[{i}]", f"participants[{j}]"), between(a, b),
+                                     f"머리끼리 겹친다: {self.head(self.parts[i], a)}, {self.head(self.parts[j], b)}.")
+        for i, n, a in heads:  # 내려온 머리(만들어지는 참여자)는 흰 상자라 그 밑을 지나는 생명선을 가린다
+            for j, p in enumerate(self.parts):
+                life = next((life for o, life in enumerate(p.lives) if (i, n) != (j, o)
+                             and _crosses_v(p.x, life.dash_top, life.bottom, grow(a, PAD))), None)
+                if life is not None:
+                    whose = (f"다른 참여자의 생명선(x {fmt_num(p.x)})" if i != j
+                             else f"같은 참여자의 다른 생명선(y {fmt_num(life.dash_top)}~{fmt_num(life.bottom)})")
                     yield self.found("participant_overlap", (f"participants[{i}]", f"participants[{j}]"),
-                                     between(a.head, b.head), f"머리끼리 겹친다: {self.head(a)}, {self.head(b)}.")
-        for i, a in enumerate(self.parts):  # 내려온 머리(만들어지는 참여자)는 흰 상자라 그 밑을 지나는 이웃 생명선을 가린다
-            for j, b in enumerate(self.parts):
-                if i != j and _crosses_v(b.x, b.dash_top, b.bottom, grow(a.head, PAD)):
-                    yield self.found("participant_overlap", (f"participants[{i}]", f"participants[{j}]"),
-                                     (b.x, a.head[1], b.x, a.head[3]),
-                                     f"머리가 다른 참여자의 생명선(x {fmt_num(b.x)})과 겹친다(머리가 가리거나 생명선이 머리를 지난다): "
-                                     f"{self.head(a)}.")
+                                     (p.x, a[1], p.x, a[3]),
+                                     f"머리가 {whose}과 겹친다(머리가 가리거나 생명선이 머리를 지난다): "
+                                     f"{self.head(self.parts[i], a)}.")
 
     def bars_on_participants(self) -> Iterator[Finding]:
         """막대(흰 사각형)가 머리에 걸치거나, 다른 참여자의 생명선 점선을 덮거나 그 변이 PAD 안으로 붙는다."""
         for b in self.lay.bars:
             for i, p in enumerate(self.parts):
-                if _overlap(b.rect, p.head):
-                    yield self.found("bar_on_participant", (self.who(b.owner), f"participants[{i}]"), between(b.rect, p.head),
-                                     f"막대가 머리에 걸친다: {self.bar(b)}, {self.head(p)}.")
-                elif p.participant.name != b.owner and _crosses_v(p.x, p.dash_top, p.bottom, grow(b.rect, PAD)):
-                    yield self.found("bar_on_participant", (self.who(b.owner), f"participants[{i}]"),
-                                     (p.x, max(b.top, p.dash_top), p.x, min(b.bottom, p.bottom)),
+                elements = (self.who(b.owner), f"participants[{i}]")
+                on = [h for h in p.heads if _overlap(b.rect, h)]
+                for h in on:
+                    yield self.found("bar_on_participant", elements, between(b.rect, h),
+                                     f"막대가 머리에 걸친다: {self.bar(b)}, {self.head(p, h)}.")
+                if on or p.participant.name == b.owner:
+                    continue
+                life = next((life for life in p.lives if _crosses_v(p.x, life.dash_top, life.bottom, grow(b.rect, PAD))), None)
+                if life is not None:
+                    yield self.found("bar_on_participant", elements,
+                                     (p.x, max(b.top, life.dash_top), p.x, min(b.bottom, life.bottom)),
                                      f"막대가 다른 참여자 '{p.participant.name}'의 생명선(x {fmt_num(p.x)})을 덮거나 {PAD}px "
                                      f"안으로 붙는다: {self.bar(b)}.")
 
@@ -307,14 +323,18 @@ class _Scene:
         return bool(alts) if f is None else any(g is f for g in alts)
 
     def bars_off_lifelines(self) -> Iterator[Finding]:
-        """막대 가운데는 생명선에서 깊이 × NEST만큼 오른쪽이고, 깊이 d(>0) 막대가 시작할 때는 같은 생명선에 깊이 d-1 막대가
-        열려 있다(그래서 옆으로 비킨다)."""
+        """막대 가운데는 생명선에서 깊이 × NEST만큼 오른쪽이고, 막대는 위아래로 그 참여자의 생명선 하나 안에 든다(alt 칸마다 다시
+        만든 참여자는 생명선이 끊긴 곳이 있다). 깊이 d(>0) 막대가 시작할 때는 같은 생명선에 깊이 d-1 막대가 열려 있다(그래서 옆으로
+        비킨다)."""
         for b in self.lay.bars:
             p = self.parts[self.index[b.owner]]
             if not _on(b.x, p.x + NEST * b.depth):
                 yield self.found("bar_off_lifeline", (self.who(b.owner),), b.rect,
                                  f"막대 가운데(x {fmt_num(b.x)})가 생명선(x {fmt_num(p.x)})에서 깊이 {b.depth} × {NEST}px 비킨 "
                                  f"자리가 아니다: {self.bar(b)}.")
+            if not any(life.dash_top - EPS <= b.top and b.bottom <= life.bottom + EPS for life in p.lives):
+                yield self.found("bar_off_lifeline", (self.who(b.owner),), b.rect,
+                                 f"막대가 생명선(y {self.lifelines(p)}) 하나 안에 들지 않는다: {self.bar(b)}.")
             if b.depth and not any(o.top - EPS <= b.top < o.bottom - EPS for o in self.stacked.get((b.owner, b.depth - 1), ())):
                 yield self.found("bar_off_lifeline", (self.who(b.owner),), b.rect,
                                  f"옆으로 비킨 막대(깊이 {b.depth})가 시작할 때 바깥 막대(깊이 {b.depth - 1})가 열려 있지 않다: "
@@ -342,25 +362,25 @@ class _Scene:
 
     def message_ends(self) -> Iterator[Finding]:
         """선 끝은 그 높이에 그 생명선의 막대가 있으면 그 막대 변에 바깥에서, 없으면 생명선에 닿는다. 만드는 메시지의 화살촉은
-        만들어지는 머리 변에 닿는다. 막대 변에 닿아도 선이 그 막대를 지나 맞은편 변에 닿거나, 그 끝이 더 옆으로 비킨 막대(위에
+        그 메시지가 만든 머리(Life.made_by) 변에 닿는다. 막대 변에 닿아도 선이 그 막대를 지나 맞은편 변에 닿거나, 그 끝이 더 옆으로 비킨 막대(위에
         그려진다) 안이면 건다 — 바깥 막대를 지나 안쪽 막대 변에 닿는 것은 겹친 막대를 그리는 보통 모양이다. 그 밖에 다른 생명선의
         막대 안이나 변 바로 앞에서 멈추는 끝도 건다."""
-        for m in self.lay.messages:
+        for k, m in enumerate(self.lay.messages):
             for which, x, name in (("시작", m.start, m.message.source), ("끝", m.end, m.message.target)):
                 p = self.parts[self.index[name]]
                 at = f"{_message(m)}의 선 {which}(x {fmt_num(x)}, y {fmt_num(m.y)})"
                 elements = (m.owner, self.who(name))
                 where = (x, m.y, x, m.y)
                 if which == "끝" and m.message.kind == "create":
-                    h = p.head
-                    if not (h[1] <= m.y <= h[3] and (_on(x, h[0]) or _on(x, h[2]))):
-                        yield self.found("message_off_bar", elements, where, f"{at}이 만들어지는 머리 변에 닿지 않는다: "
-                                                                            f"{self.head(p)}.")
+                    made = [h for life, h in zip(p.lives, p.heads) if life.made_by == k]
+                    if not any(h[1] <= m.y <= h[3] and (_on(x, h[0]) or _on(x, h[2])) for h in made):
+                        what = ", ".join(self.head(p, h) for h in made) or f"참여자 '{name}'에 그런 머리가 없다"
+                        yield self.found("message_off_bar", elements, where, f"{at}이 이 메시지가 만든 머리 변에 닿지 않는다: "
+                                                                            f"{what}.")
                     continue
-                if not p.dash_top - EPS <= m.y <= p.bottom + EPS:
+                if not any(life.dash_top - EPS <= m.y <= life.bottom + EPS for life in p.lives):
                     yield self.found("message_off_bar", elements, where,
-                                     f"{at}이 참여자 '{name}'의 생명선 밖에 있다(생명선은 y {fmt_num(p.dash_top)}~"
-                                     f"{fmt_num(p.bottom)}).")
+                                     f"{at}이 참여자 '{name}'의 생명선 밖에 있다(생명선은 y {self.lifelines(p)}).")
                     continue
                 own = [b for b in self.bars_of.get(name, ()) if _holds(b, m.y)]
                 on = [b for b in own if _on(x, b.rect[0]) or _on(x, b.rect[2])]
@@ -422,13 +442,14 @@ class _Scene:
         for m in self.lay.messages:
             x0, x1 = sorted((m.start, m.end))
             for i, p in enumerate(self.parts):
-                if _crosses(m.y, x0, x1, p.head):
-                    yield self.found("line_through_participant", (m.owner, f"participants[{i}]"),
-                                     (max(x0, p.head[0]), m.y, min(x1, p.head[2]), m.y),
-                                     f"{_message(m)}의 선이 머리를 지난다: {self.head(p)}.")
-                elif _overlap(m.arrow, p.head):
-                    yield self.found("line_through_participant", (m.owner, f"participants[{i}]"), between(m.arrow, p.head),
-                                     f"{_message(m)}의 화살촉이 머리에 닿는다: {self.head(p)}.")
+                for h in p.heads:
+                    if _crosses(m.y, x0, x1, h):
+                        yield self.found("line_through_participant", (m.owner, f"participants[{i}]"),
+                                         (max(x0, h[0]), m.y, min(x1, h[2]), m.y),
+                                         f"{_message(m)}의 선이 머리를 지난다: {self.head(p, h)}.")
+                    elif _overlap(m.arrow, h):
+                        yield self.found("line_through_participant", (m.owner, f"participants[{i}]"), between(m.arrow, h),
+                                         f"{_message(m)}의 화살촉이 머리에 닿는다: {self.head(p, h)}.")
 
     # -------- 프레임·ref
 
@@ -532,22 +553,27 @@ class _Scene:
         for f, edges, sides in self.lines:
             for i, p in enumerate(self.parts):
                 elements = (f.owner, f"participants[{i}]")
-                if f.covers:  # 흰 ref 상자는 머리를 가리고, 프레임은 테두리 선만 머리를 지날 수 있다
-                    if _overlap(f.rect, p.head):
-                        yield self.found("frame_on_participant", elements, between(f.rect, p.head),
-                                         f"{_frame(f)} 상자가 머리를 가린다: {self.head(p)}.")
-                else:
+                for h in p.heads:
+                    if f.covers:  # 흰 ref 상자는 머리를 가리고, 프레임은 테두리 선만 머리를 지날 수 있다
+                        if _overlap(f.rect, h):
+                            yield self.found("frame_on_participant", elements, between(f.rect, h),
+                                             f"{_frame(f)} 상자가 머리를 가린다: {self.head(p, h)}.")
+                        continue
                     for y, edge in edges:
-                        if _crosses(y, f.left, f.right, p.head):
-                            yield self.found("frame_on_participant", elements, (p.head[0], y, p.head[2], y),
-                                             f"{_frame(f)}의 {edge}(y {fmt_num(y)})이 머리를 지난다: {self.head(p)}.")
+                        if _crosses(y, f.left, f.right, h):
+                            yield self.found("frame_on_participant", elements, (h[0], y, h[2], y),
+                                             f"{_frame(f)}의 {edge}(y {fmt_num(y)})이 머리를 지난다: {self.head(p, h)}.")
                     for x, side in sides:
-                        if _crosses_v(x, f.top, f.bottom, p.head):
-                            yield self.found("frame_on_participant", elements, (x, p.head[1], x, p.head[3]),
-                                             f"{_frame(f)}의 {side}(x {fmt_num(x)})이 머리를 지난다: {self.head(p)}.")
+                        if _crosses_v(x, f.top, f.bottom, h):
+                            yield self.found("frame_on_participant", elements, (x, h[1], x, h[3]),
+                                             f"{_frame(f)}의 {side}(x {fmt_num(x)})이 머리를 지난다: {self.head(p, h)}.")
                 for x, side in sides:  # ref 상자 옆 변도 그 밖의 생명선과 한 선으로 보일 수 있다
-                    if abs(x - p.x) < PAD - EPS and f.top < p.bottom and p.dash_top < f.bottom:
-                        yield self.found("frame_on_participant", elements, (x, max(f.top, p.dash_top), x, min(f.bottom, p.bottom)),
+                    if abs(x - p.x) >= PAD - EPS:
+                        continue
+                    life = next((life for life in p.lives if f.top < life.bottom and life.dash_top < f.bottom), None)
+                    if life is not None:
+                        yield self.found("frame_on_participant", elements,
+                                         (x, max(f.top, life.dash_top), x, min(f.bottom, life.bottom)),
                                          f"{_frame(f)}의 {side}(x {fmt_num(x)})이 참여자 '{p.participant.name}'의 생명선"
                                          f"(x {fmt_num(p.x)})에 {PAD}px 안으로 붙어 한 선으로 보인다.")
 
@@ -557,7 +583,7 @@ class _Scene:
         for f in self.lay.frames:
             tag = f.tag
             for i, p in enumerate(self.parts):
-                if _crosses_v(p.x, p.dash_top, p.bottom, grow(tag, PAD)):
+                if any(_crosses_v(p.x, life.dash_top, life.bottom, grow(tag, PAD)) for life in p.lives):
                     yield self.found("tag_on_lifeline", (f.owner, f"participants[{i}]"), (p.x, tag[1], p.x, tag[3]),
                                      f"{_frame(f)}의 꼬리표(자리 {fmt_rect(tag)})가 참여자 '{p.participant.name}'의 "
                                      f"생명선(x {fmt_num(p.x)})을 가린다.")
@@ -598,9 +624,10 @@ class _Scene:
     def texts_on_participants(self) -> Iterator[Finding]:
         for t in self.over_texts:
             for i, p in enumerate(self.parts):
-                if _overlap(t.area, p.head):
-                    yield self.found("text_on_participant", (t.element, f"participants[{i}]"), between(t.area, p.head),
-                                     f"글자가 머리에 겹친다: {t.title}, {self.head(p)}.")
+                for h in p.heads:
+                    if _overlap(t.area, h):
+                        yield self.found("text_on_participant", (t.element, f"participants[{i}]"), between(t.area, h),
+                                         f"글자가 머리에 겹친다: {t.title}, {self.head(p, h)}.")
 
     def texts_on_lifelines(self) -> Iterator[Finding]:
         """메시지 글자가 그 메시지가 건너는 사이 생명선 밖의 생명선(보내고 받는 생명선 포함)을 가린다."""
@@ -613,7 +640,7 @@ class _Scene:
             for i, p in enumerate(self.parts):
                 if lo < i < hi:
                     continue
-                if _crosses_v(p.x, p.dash_top, p.bottom, a):
+                if any(_crosses_v(p.x, life.dash_top, life.bottom, a) for life in p.lives):
                     yield self.found("text_on_lifeline", (t.element, f"participants[{i}]"), (p.x, a[1], p.x, a[3]),
                                      f"글자가 그 메시지가 건너지 않는 생명선을 가린다: {t.title}, 참여자 "
                                      f"'{p.participant.name}'의 생명선(x {fmt_num(p.x)}).")
@@ -635,7 +662,8 @@ class _Scene:
             box = n.rect
             hits: list[tuple[str, str]] = []
             for i, p in enumerate(self.parts):
-                if _overlap(box, p.head) or _crosses_v(p.x, p.dash_top, p.bottom, box):
+                if (any(_overlap(box, h) for h in p.heads)
+                        or any(_crosses_v(p.x, life.dash_top, life.bottom, box) for life in p.lives)):
                     hits.append((f"participants[{i}]", f"참여자 '{p.participant.name}'의 머리·생명선"))
             hits += [(self.who(b.owner), self.bar(b)) for b in self.lay.bars if _overlap(box, b.rect)]
             for m in self.lay.messages:

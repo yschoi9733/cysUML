@@ -210,19 +210,29 @@ class Label:
 
 
 @dataclass(frozen=True)
+class Life:
+    """머리 하나와 그 밑 생명선. top은 머리 윗변(만들어지는 생명선은 만드는 메시지 높이로 내려온다), dash_top·bottom은 점선의
+    위아래 끝이고, made_by는 이 생명선을 만든 메시지 자리다(처음부터 있는 참여자는 None)."""
+
+    top: float
+    dash_top: float
+    bottom: float
+    made_by: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class PlacedParticipant:
-    """top은 머리 윗변(만들어지는 생명선은 만드는 메시지 높이로 내려온다), dash_top·bottom은 점선의 위아래 끝이다."""
+    """lives는 머리와 생명선을 위부터 담는다. 대개 하나이고, alt 칸마다 다시 만드는 참여자만 만드는 메시지마다 하나다 — 앞 칸에서
+    만든 생명선은 다음 칸 나눔선에서 끝나고, 마지막에 만든 생명선만 그림 끝까지 간다."""
 
     participant: Participant
     x: float
     width: float
-    top: float
-    dash_top: float
-    bottom: float
+    lives: tuple[Life, ...]
 
     @cached_property
-    def head(self) -> Box:
-        return _head_box(self.participant, self.x, self.width, self.top)
+    def heads(self) -> tuple[Box, ...]:
+        return tuple(_head_box(self.participant, self.x, self.width, life.top) for life in self.lives)
 
 
 def _head_box(p: Participant, x: float, width: float, top: float) -> Box:
@@ -376,6 +386,12 @@ def _wrapped(s: str) -> bool:
     return False
 
 
+def _alt_branch(fragments, k: int) -> Optional[tuple[int, int]]:
+    """messages[k]가 든 alt 칸 (fragments 안의 자리, 칸 자리). alt 밖이면 None. 입력 읽기와 배치가 같은 것을 쓴다."""
+    return next(((i, j) for i, f in enumerate(fragments) if f.kind == "alt" for j, b in enumerate(f.branches)
+                 if b.first <= k <= b.last), None)
+
+
 class _SeqReader(Reader):
     def position(self, v, path: str, upper: int) -> Optional[int]:
         """messages 안의 자리(0~upper의 정수)."""
@@ -484,6 +500,24 @@ class _SeqReader(Reader):
             return None
         return Fragment(kind, tuple(branches), index)
 
+    def recreated(self, name: str, ks: list[int], fragments: list[Fragment], talks: list[tuple[int, str]]) -> None:
+        """같은 참여자를 다시 만드는 메시지(ks[1:])는 앞서 만든 메시지와 같은 alt의 다른 칸에 있어야 한다. 앞 칸에서 만든 생명선은
+        그 칸과 함께 끝나므로, 그 칸이 끝난 뒤 다시 만들기 전에는 그 참여자가 메시지를 주고받지 않는다."""
+        last = ks[0]
+        for k in ks[1:]:
+            a, b = _alt_branch(fragments, last), _alt_branch(fragments, k)
+            if a is None or b is None or a[0] != b[0] or a[1] == b[1]:
+                self.fail(_at(_at("messages", k), "to"),
+                          f"{_show(name)}는 messages[{last}]에서 이미 만들었다 — 다시 만드는 것은 같은 alt의 다른 칸에서만 한다")
+                continue
+            f, j = fragments[a[0]], a[1]
+            for i, key in talks:
+                if f.branches[j].last < i < k:
+                    self.fail(_at(_at("messages", i), key),
+                              f"{_show(name)}의 생명선은 frames[{f.index}].branches[{j}]와 함께 끝나 messages[{k}]에서 다시 "
+                              "만들기 전에는 없다")
+            last = k
+
     def diagram(self, data) -> Optional[Diagram]:
         o = self.obj(data, "", DIAGRAM_FIELDS, ("participants",))
         if o is None:
@@ -515,8 +549,9 @@ class _SeqReader(Reader):
         raw_m = lists["messages"]
         n = len(raw_m)
         messages = []
-        created: dict[str, int] = {}
+        created: dict[str, list[int]] = {}  # 다시 만드는 메시지가 맞는지는 프레임을 읽은 뒤 본다(recreated)
         used: dict[str, int] = {}
+        talks: dict[str, list[tuple[int, str]]] = defaultdict(list)  # 참여자 → 주고받은 (메시지 자리, "from"·"to")
         for i, v in enumerate(raw_m):
             path = _at("messages", i)
             source, target, m = self.message(v, path)
@@ -528,23 +563,29 @@ class _SeqReader(Reader):
                     if kinds.get(target) == "actor":
                         self.fail(_at(path, "to"), "액터는 만들 수 없다 — 만드는 메시지는 생명선(kind 'lifeline')에 보낸다")
                     elif target in created:
-                        self.fail(_at(path, "to"), f"{_show(target)}는 messages[{created[target]}]에서 이미 만들었다")
+                        created[target].append(i)
                     elif target in used:
                         self.fail(_at(path, "to"), f"{_show(target)}는 messages[{used[target]}]에서 이미 메시지를 주고받았다 — "
                                                    "만드는 메시지를 그보다 앞에 둔다")
                     else:
-                        created[target] = i
+                        created[target] = [i]
                 messages.append(m)
                 used.setdefault(source, i)
                 used.setdefault(target, i)
+                talks[source].append((i, "from"))
+                talks[target].append((i, "to"))
 
         frames = [self.frame(v, _at("frames", i), n, i) for i, v in enumerate(lists["frames"])]
         fragments = sorted((f for f in frames if isinstance(f, Fragment)), key=lambda f: (f.first, f.index))
         refs = [f for f in frames if isinstance(f, Ref)]
         reach: Optional[Fragment] = None  # 앞선 프레임 가운데 가장 아래까지 덮는 것
+        # 만드는 메시지가 어느 alt 칸인지 가릴 수 없으면(ref가 아닌 프레임이 틀렸거나 겹친다) 다시 만들기는 그 오류를 고친 뒤에 본다
+        unsure = any(f is None and not (isinstance(v, dict) and v.get("kind") == "ref")
+                     for f, v in zip(frames, lists["frames"]))
         for f in fragments:
             if reach is not None and f.first <= reach.last:
                 self.fail(_at("frames", f.index), f"frames[{reach.index}]와 덮는 메시지가 겹친다 — 프레임 안에 프레임을 넣지 않는다")
+                unsure = True
             if reach is None or f.last > reach.last:
                 reach = f
         for r in refs:
@@ -552,6 +593,9 @@ class _SeqReader(Reader):
             if f is not None:
                 self.fail(_at(_at("frames", r.index), "before"),
                           f"frames[{f.index}](messages[{f.first}]~[{f.last}]) 안이다 — 프레임 안에 ref를 넣지 않는다")
+        if not unsure:
+            for name, ks in created.items():
+                self.recreated(name, ks, fragments, talks[name])
         notes = [self.text(v, _at("notes", i)) for i, v in enumerate(lists["notes"])]
         return Diagram(tuple(p for _, p in read if p is not None), tuple(messages), tuple(fragments), tuple(refs),
                        tuple(s for s in notes if s is not None))
@@ -802,8 +846,14 @@ class _Plan:
     bars: list[_Bar]
     attach: list[tuple[Optional[_Bar], Optional[_Bar]]]  # 메시지마다 (선이 시작하는 막대, 화살촉이 닿는 막대)
     at: list[int]                                          # 메시지마다 그 일의 차례
-    created: dict[int, int]                                # 만들어지는 참여자 → 만드는 메시지 자리
+    created: dict[int, tuple[int, ...]]                    # 만들어지는 참여자 → 만드는 메시지 자리(alt 칸마다 다시 만들면 여럿)
+    ends: dict[int, int]                                   # 앞 칸에서 만드는 메시지 자리 → 그 생명선이 끝나는 칸 나눔의 차례
     spanning: list[tuple[int, ...]]                        # 메시지마다, 사이 생명선 가운데 막대가 그 높이를 지나는 것
+
+    def alive(self, z: int, k: int) -> bool:
+        """messages[k] 높이에 생명선 z가 있는지 — 만들기 전과, 앞 칸에서 만든 생명선이 끝난 뒤 다시 만들기 전에는 없다."""
+        return z not in self.created or any(c < k and (c not in self.ends or self.at[k] < self.ends[c])
+                                            for c in self.created[z])
 
 
 def _events(d: Diagram) -> list[_Event]:
@@ -892,12 +942,22 @@ def _plan(d: Diagram) -> _Plan:
     for b in sorted(bars, key=lambda b: (b.top, order[id(b)])):
         b.depth = max((o.depth + 1 for o in bars if o.life == b.life and (o.top, order[id(o)]) < (b.top, order[id(b)])
                        and _ends_after(o, b.top)), default=0)
-    created = {index[m.target]: k for k, m in enumerate(d.messages) if m.kind == "create"}
+    created: dict[int, list[int]] = defaultdict(list)
+    for k, m in enumerate(d.messages):
+        if m.kind == "create":
+            created[index[m.target]].append(k)
+    # 다시 만드는 참여자의 앞 생명선은 그 칸 다음 칸 나눔선에서 끝난다(parse가 같은 alt의 다른 칸인지 확인했다)
+    dividers = {(ev.item, ev.branch): e for e, ev in enumerate(events) if ev.kind == "branch"}
+    ends = {}
+    for ks in created.values():
+        for k in ks[:-1]:
+            i, j = _alt_branch(d.fragments, k)
+            ends[k] = dividers[(i, j + 1)]
     spanning = []
     for k, m in enumerate(d.messages):
         lo, hi = sorted((index[m.source], index[m.target]))
         spanning.append(tuple(sorted({b.life for b in bars if lo < b.life < hi and b.top < at[k] and _ends_after(b, at[k])})))
-    return _Plan(index, actor, events, bars, attach, at, created, spanning)
+    return _Plan(index, actor, events, bars, attach, at, {z: tuple(ks) for z, ks in created.items()}, ends, spanning)
 
 
 # ---------------------------------------------------------------- 2. 가로
@@ -1021,7 +1081,7 @@ class _Placer:
         self.obstacles: list[Box] = []
         self.floor = 0.0
         self.bottoms: dict[int, float] = {}
-        self.heads: dict[int, float] = {}   # 만들어진 참여자 → 머리 윗변
+        self.heads: dict[int, float] = {}   # 만드는 메시지 자리 → 그 메시지가 만든 머리 윗변
         self.messages: list[PlacedMessage] = []
         self.frames: dict[int, _FrameParts] = {}
         self.refs: list[tuple[Ref, float]] = []
@@ -1138,14 +1198,14 @@ class _Placer:
         return py + REF_H + REF_AFTER
 
     def _label_x(self, k: int, lines: list[str], mid: float) -> float:
-        """글자 가운데 x. 사이 생명선(아직 만들어지지 않은 것은 빼고)으로 나눈 칸 가운데 글자 상자가 들어가는 칸에, 없으면
+        """글자 가운데 x. 사이 생명선(그 높이에 없는 것은 빼고)으로 나눈 칸 가운데 글자 상자가 들어가는 칸에, 없으면
         막대가 지나는 사이 생명선으로만 나눈 칸에(지나는 점선은 흰 바탕으로 지운다) 선 가운데에 가장 가깝게 놓는다."""
         left_off, right_off = _extent(lines)
         m = self.d.messages[k]
         s, t = self.index[m.source], self.index[m.target]
         lo, hi = sorted((s, t))
         c = self.cols
-        existing = [z for z in range(lo + 1, hi) if self.plan.created.get(z, -1) < k]
+        existing = [z for z in range(lo + 1, hi) if self.plan.alive(z, k)]
         for inner in (existing, list(self.plan.spanning[k])):
             bounds = [lo, *inner, hi]
             best = None
@@ -1194,7 +1254,7 @@ class _Placer:
         for (x0, dy0, x1_, dy1), _ in pieces:
             self._add((x0, y + dy0, x1_, y + dy1))
         if m.kind == "create":
-            self.heads[t] = y - HEAD_H / 2
+            self.heads[k] = y - HEAD_H / 2
         self.messages.append(PlacedMessage(m, f"messages[{k}]", y, x1, x2,
                                            tuple(Label(text, x, y + dy, bg=True) for text, x, dy in labels_rel)))
 
@@ -1265,9 +1325,14 @@ class _Placer:
         life_end = max([self.floor] + [b.bottom for b in bars]) + LIFE_TAIL
         participants = []
         for i, p in enumerate(d.participants):
-            top = self.heads.get(i, 0.0)
-            dash_top = top + (ACTOR_H if p.kind == "actor" else HEAD_H)
-            participants.append(PlacedParticipant(p, c.x[i], c.width[i], top, dash_top, life_end))
+            dash = ACTOR_H if p.kind == "actor" else HEAD_H
+            if i in self.plan.created:
+                lives = tuple(Life(self.heads[k], self.heads[k] + dash,
+                                   self.ys[self.plan.ends[k]] if k in self.plan.ends else life_end, k)
+                              for k in self.plan.created[i])
+            else:
+                lives = (Life(0.0, dash, life_end),)
+            participants.append(PlacedParticipant(p, c.x[i], c.width[i], lives))
         right = max(c.x[i] + max(c.width[i] / 2, c.right_ext[i]) for i in range(len(c.x))) + FRAME_RIGHT
         for part in self.frames.values():
             for cond in part.conditions:
@@ -1313,18 +1378,20 @@ def _draw_tag(c: Canvas, f: Framed) -> None:
 
 
 def _draw_participant(c: Canvas, p: PlacedParticipant) -> None:
-    x, top, name, o = p.x, p.top, p.participant.name, p.participant.name
-    if p.participant.kind == "actor":
-        c.ellipse(x - 6, top, 12, 12, owner=o)
-        c.line([(x, top + 12), (x, top + 24)], owner=o)
-        c.line([(x - 9, top + 16), (x + 9, top + 16)], owner=o)
-        c.line([(x, top + 24), (x - 9, top + 37)], owner=o)
-        c.line([(x, top + 24), (x + 9, top + 37)], owner=o)
-        c.text(x, top + ACTOR_NAME, name, bold=True, anchor="mm", owner=o)
-    else:
-        c.rect(x - p.width / 2, top, p.width, HEAD_H, owner=o)
-        c.text(x, top + HEAD_NAME, name, bold=True, anchor="mm", owner=o)
-    c.line([(x, p.dash_top), (x, p.bottom)], dash=LIFE_DASH, owner=o)
+    x, name, o = p.x, p.participant.name, p.participant.name
+    for life in p.lives:
+        top = life.top
+        if p.participant.kind == "actor":
+            c.ellipse(x - 6, top, 12, 12, owner=o)
+            c.line([(x, top + 12), (x, top + 24)], owner=o)
+            c.line([(x - 9, top + 16), (x + 9, top + 16)], owner=o)
+            c.line([(x, top + 24), (x - 9, top + 37)], owner=o)
+            c.line([(x, top + 24), (x + 9, top + 37)], owner=o)
+            c.text(x, top + ACTOR_NAME, name, bold=True, anchor="mm", owner=o)
+        else:
+            c.rect(x - p.width / 2, top, p.width, HEAD_H, owner=o)
+            c.text(x, top + HEAD_NAME, name, bold=True, anchor="mm", owner=o)
+        c.line([(x, life.dash_top), (x, life.bottom)], dash=LIFE_DASH, owner=o)
 
 
 def _draw_message(c: Canvas, m: PlacedMessage) -> None:
