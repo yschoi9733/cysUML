@@ -3,7 +3,7 @@
 교류도는 도구가 배치하므로 불합격은 cysUML의 배치 버그다. 그래도 그 그림을 쓸 수 있게, 항목마다 입력에서 무엇을 바꾸면 비켜
 가는지(참여자 순서, 글자 줄이기, 그림 나누기)를 힌트로 준다 — 교류도는 좌표를 받지 않으므로 "어디로 옮겨라"가 아니다.
 
-그리기(draw)는 배치 결과를 그대로 옮겨 그리므로 배치 결과(Drawing.layout)로 본다. 불합격 종류는 KINDS에 낸 차례대로 있고,
+그리기(draw)는 배치 결과를 그대로 옮겨 그리므로 배치 결과(Drawing.layout)로 본다. 불합격 종류는 KINDS에 결과 순서대로 있고,
 그림 크기는 알림으로만 준다. 종류 이름은 뜻이 다르면 클래스도 검사(classcheck.KINDS)와 겹치지 않게 짓는다.
 
 글자는 줄 상자와, 흰 바탕을 까는 글자(Label.bg — 메시지 글자·조건)면 그 바탕이 지우는 곳(canvas.background — 잉크 둘레
@@ -41,7 +41,7 @@ END_SNAP = 0.6    # 메시지 선 끝이 막대 변에서 이만큼 안이면 �
 FRAME_LINE_CLEAR = ARROW_HALF + PAD  # 메시지 선과 프레임 가로 선 사이 — 화살촉도 프레임 선에서 PAD 이상 떨어진다
 MESSAGE_GAP = 2 * ARROW_HALF + PAD   # 가로로 겹쳐 지나는 두 메시지 선 사이 — 화살촉끼리도 PAD 이상 떨어진다
 
-KINDS = (  # 불합격 종류(이 차례로 낸다)
+KINDS = (  # 불합격 종류(이 순서로 낸다)
     "participant_overlap",       # 머리끼리 겹치거나 머리가 다른 생명선을 가린다
     "bar_on_participant",        # 막대가 머리에 걸치거나 다른 생명선을 덮는다
     "bar_overlap",               # 한 생명선의 같은 깊이 막대끼리 붙거나, 다른 생명선의 막대끼리 겹친다
@@ -129,8 +129,9 @@ def check(drawing: Drawing) -> Report:
 
 
 def find(layout: Layout) -> tuple[Finding, ...]:
-    """배치 결과에서 불합격 항목을 KINDS 차례로 찾는다(check가 쓴다). 규칙(_Scene.RULES)은 KINDS 차례로 돌며 하나가 한 종류만
-    내지만, 규칙을 더하다 차례가 어긋나도 KINDS 차례로 내게 종류 번호로 한 번 더 정렬한다(한 종류 안의 차례는 그대로)."""
+    """배치 결과에서 불합격 항목을 KINDS 순서로 찾는다(check가 쓴다). 검사 순서(_Scene.RULES)는 결과 순서(KINDS)와 같고 규칙
+    하나가 한 종류만 내지만, 규칙을 더하다 두 순서가 어긋나도 결과 순서로 내게 종류 번호로 한 번 더 정렬한다(한 종류 안의 순서는
+    그대로)."""
     scene = _Scene(layout)
     failures = [f for rule in scene.RULES for f in rule(scene)]
     failures.sort(key=lambda f: ORDER[f.kind])
@@ -220,8 +221,8 @@ class _Scene:
         for b in lay.bars:
             by_owner[b.owner].append(b)
             by_depth[(b.owner, b.depth)].append(b)
-        self.bars_of = dict(by_owner)    # 생명선마다 그 막대(lay.bars 차례)
-        self.stacked = dict(by_depth)    # (생명선, 깊이)마다 그 막대(lay.bars 차례)
+        self.bars_of = dict(by_owner)    # 생명선마다 그 막대(lay.bars 순서)
+        self.stacked = dict(by_depth)    # (생명선, 깊이)마다 그 막대(lay.bars 순서)
         self.touching: list[list[int]] = [[] for _ in lay.bars]      # 막대마다 선 끝이 그 변에 바깥에서 닿는 메시지
         self.touched: list[list[int]] = [[] for _ in lay.messages]   # 메시지마다 그 선 끝이 변에 바깥에서 닿는 막대
         for i, b in enumerate(lay.bars):
@@ -669,7 +670,7 @@ class _Scene:
                                  f"노트 글자가 노트 {n.owner}(자리 {fmt_rect(n.rect)}) "
                                  f"밖으로 나가거나 접힌 귀에 닿는다: '{n.text}'(자리 {fmt_rect(box)}).")
 
-    RULES = (  # KINDS 차례이고, 규칙 하나가 한 종류를 낸다
+    RULES = (  # 검사 순서 — 결과 순서(KINDS)와 같고, 규칙 하나가 한 종류를 낸다
         participant_overlaps, bars_on_participants, bar_overlaps, bars_off_lifelines, bar_ends, message_ends,
         lines_at_bar_ends, line_overlaps, lines_through_participants, frames_cutting_bars, bars_outside_frames,
         frame_overlaps, messages_in_refs, lines_on_frames, frames_on_participants, tags_on_lifelines,
