@@ -3,6 +3,8 @@ name = "cysuml"
 version = "0.1.0"
 description = "MCP server that draws document-ready UML diagrams: the AI lays them out, cysUML draws and checks them"
 requires-python = ">=3.10"
+license = "MIT AND OFL-1.1"
+license-files = ["LICENSE", "src/cysuml/fonts/*-LICENSE.txt"]
 dependencies = [
     "fonttools>=4.38",
     "mcp>=2.3.0",
