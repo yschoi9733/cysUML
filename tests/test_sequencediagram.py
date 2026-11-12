@@ -625,6 +625,8 @@ def test_measured_boxes_follow_a_replaced_layout():
     assert replace(n, left=n.left + 5, top=n.top + 7).label.box == shift(n.label.box)
     assert replace(u, x=u.x + 5, top=u.top + 7).head == shift(u.head)
     assert replace(m, end=m.end + 5, y=m.y + 7).arrow == (m.arrow[0] + 5, m.arrow[1] + 7, m.arrow[2] + 5, m.arrow[3] + 7)
+    b = lay.bars[0]
+    assert replace(b, x=b.x + 5, top=b.top + 7, bottom=b.bottom + 7).rect == shift(b.rect)
 
 
 def test_reply_without_name_has_no_label():

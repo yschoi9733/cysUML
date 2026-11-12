@@ -248,7 +248,7 @@ class PlacedBar:
     continued: bool = False
     closer: Optional[int] = None
 
-    @property
+    @cached_property
     def rect(self) -> Box:
         return self.x - ACT_W / 2, self.top, self.x + ACT_W / 2, self.bottom
 
