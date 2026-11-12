@@ -285,6 +285,8 @@ class Framed:
     top: float
     right: float
     bottom: float
+    kind: ClassVar[str]  # 하위 클래스가 정한다 — 값을 두지 않아야 하위 클래스의 dividers 필드에 기본값으로 잡히지 않는다
+    dividers: ClassVar[tuple[float, ...]]
     covers: ClassVar[bool] = False
 
     @cached_property
@@ -1297,10 +1299,10 @@ def layout(diagram: Diagram) -> Layout:
 # ---------------------------------------------------------------- 그리기
 
 
-def _draw_tag(c: Canvas, tag: Box, op: str, owner: str) -> None:
-    left, top, right, bottom = tag
-    c.poly([(left, top), (right, top), (right, top + TAG_SIDE), (right - TAG_CUT, bottom), (left, bottom)], owner=owner)
-    c.text(left + TAG_TEXT[0], top + TAG_TEXT[1], op, bold=True, owner=owner)
+def _draw_tag(c: Canvas, f: Framed) -> None:
+    left, top, right, bottom = f.tag
+    c.poly([(left, top), (right, top), (right, top + TAG_SIDE), (right - TAG_CUT, bottom), (left, bottom)], owner=f.owner)
+    c.text(left + TAG_TEXT[0], top + TAG_TEXT[1], f.kind, bold=True, owner=f.owner)
 
 
 def _draw_participant(c: Canvas, p: PlacedParticipant) -> None:
@@ -1353,10 +1355,10 @@ def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
         c.rect(b.x - ACT_W / 2, b.top, ACT_W, b.bottom - b.top, owner=b.owner)
     for r in lay.refs:
         c.rect(r.left, r.top, r.right - r.left, r.bottom - r.top, owner=r.owner)
-        _draw_tag(c, r.tag, r.kind, r.owner)
+        _draw_tag(c, r)
         c.text(r.name.x, r.name.y, r.name.text, anchor=r.name.anchor, bg=r.name.bg, owner=r.owner)
     for f in lay.frames:
-        _draw_tag(c, f.tag, f.kind, f.owner)
+        _draw_tag(c, f)
         for lab in f.conditions:
             c.text(lab.x, lab.y, lab.text, anchor=lab.anchor, bg=lab.bg, owner=f.owner)
     for m in lay.messages:

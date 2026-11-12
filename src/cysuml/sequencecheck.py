@@ -204,7 +204,7 @@ class _Scene:
         self.parts = lay.participants
         self.index = {p.participant.name: i for i, p in enumerate(self.parts)}
         self.framed: list[Framed] = sorted([*lay.frames, *lay.refs], key=lambda f: f.top)
-        self.lines = [(f, self.edges(f), self.sides(f)) for f in self.framed]  # 프레임·ref마다 가로 선과 옆 변
+        self.lines = [(f, self.edges(f), self.sides(f)) for f in self.framed]
         texts = []
         for k, m in enumerate(lay.messages):
             texts += [_label(m.owner, f"{_message(m)}의 글자", lab, True, k) for lab in m.labels]
@@ -212,7 +212,7 @@ class _Scene:
             texts.append(_tag(f))
             texts += [_label(f.owner, f"{_frame(f)}의 조건", lab, True) for lab in f.conditions]
         for r in lay.refs:
-            texts += [_tag(r), _label(r.owner, f"{_frame(r)}의 이름", r.name, not r.covers)]
+            texts += [_tag(r), _label(r.owner, f"{_frame(r)}의 이름", r.name, False)]
         texts += [_label(n.owner, f"노트 {n.owner}의 글자", n.label, True) for n in lay.notes]
         self.texts = texts
         self.over_texts = [t for t in texts if t.over_bars]
@@ -221,8 +221,8 @@ class _Scene:
         for b in lay.bars:
             by_owner[b.owner].append(b)
             by_depth[(b.owner, b.depth)].append(b)
-        self.bars_of = dict(by_owner)    # 생명선마다 그 막대(lay.bars 순서)
-        self.stacked = dict(by_depth)    # (생명선, 깊이)마다 그 막대(lay.bars 순서)
+        self.bars_of = dict(by_owner)    # 막대는 lay.bars 순서 그대로
+        self.stacked = dict(by_depth)
         self.touching: list[list[int]] = [[] for _ in lay.bars]      # 막대마다 선 끝이 그 변에 바깥에서 닿는 메시지
         self.touched: list[list[int]] = [[] for _ in lay.messages]   # 메시지마다 그 선 끝이 변에 바깥에서 닿는 막대
         for i, b in enumerate(lay.bars):
