@@ -212,11 +212,12 @@ class Label:
 @dataclass(frozen=True)
 class Life:
     """머리 하나와 그 밑 생명선. top은 머리 윗변(만들어지는 생명선은 만드는 메시지 높이로 내려온다), dash_top·bottom은 점선의
-    위아래 끝이다."""
+    위아래 끝이고, made_by는 이 생명선을 만든 메시지 자리다(처음부터 있는 참여자는 None)."""
 
     top: float
     dash_top: float
     bottom: float
+    made_by: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -385,6 +386,12 @@ def _wrapped(s: str) -> bool:
     return False
 
 
+def _alt_branch(fragments, k: int) -> Optional[tuple[int, int]]:
+    """messages[k]가 든 alt 칸 (fragments 안의 자리, 칸 자리). alt 밖이면 None. 입력 읽기와 배치가 같은 것을 쓴다."""
+    return next(((i, j) for i, f in enumerate(fragments) if f.kind == "alt" for j, b in enumerate(f.branches)
+                 if b.first <= k <= b.last), None)
+
+
 class _SeqReader(Reader):
     def position(self, v, path: str, upper: int) -> Optional[int]:
         """messages 안의 자리(0~upper의 정수)."""
@@ -496,18 +503,14 @@ class _SeqReader(Reader):
     def recreated(self, name: str, ks: list[int], fragments: list[Fragment], talks: list[tuple[int, str]]) -> None:
         """같은 참여자를 다시 만드는 메시지(ks[1:])는 앞서 만든 메시지와 같은 alt의 다른 칸에 있어야 한다. 앞 칸에서 만든 생명선은
         그 칸과 함께 끝나므로, 그 칸이 끝난 뒤 다시 만들기 전에는 그 참여자가 메시지를 주고받지 않는다."""
-        def branch_of(k: int) -> Optional[tuple[Fragment, int]]:
-            return next(((f, j) for f in fragments if f.kind == "alt" for j, b in enumerate(f.branches)
-                         if b.first <= k <= b.last), None)
-
         last = ks[0]
         for k in ks[1:]:
-            a, b = branch_of(last), branch_of(k)
-            if a is None or b is None or a[0] is not b[0] or a[1] == b[1]:
+            a, b = _alt_branch(fragments, last), _alt_branch(fragments, k)
+            if a is None or b is None or a[0] != b[0] or a[1] == b[1]:
                 self.fail(_at(_at("messages", k), "to"),
                           f"{_show(name)}는 messages[{last}]에서 이미 만들었다 — 다시 만드는 것은 같은 alt의 다른 칸에서만 한다")
                 continue
-            f, j = a
+            f, j = fragments[a[0]], a[1]
             for i, key in talks:
                 if f.branches[j].last < i < k:
                     self.fail(_at(_at("messages", i), key),
@@ -944,8 +947,8 @@ def _plan(d: Diagram) -> _Plan:
     ends = {}
     for ks in created.values():
         for k in ks[:-1]:
-            ends[k] = next(dividers[(i, j + 1)] for i, f in enumerate(d.fragments) for j, b in enumerate(f.branches)
-                           if b.first <= k <= b.last)
+            i, j = _alt_branch(d.fragments, k)
+            ends[k] = dividers[(i, j + 1)]
     spanning = []
     for k, m in enumerate(d.messages):
         lo, hi = sorted((index[m.source], index[m.target]))
@@ -1074,7 +1077,7 @@ class _Placer:
         self.obstacles: list[Box] = []
         self.floor = 0.0
         self.bottoms: dict[int, float] = {}
-        self.heads: dict[int, list[float]] = defaultdict(list)  # 만들어진 참여자 → 만드는 메시지마다 머리 윗변
+        self.heads: dict[int, float] = {}   # 만드는 메시지 자리 → 그 메시지가 만든 머리 윗변
         self.messages: list[PlacedMessage] = []
         self.frames: dict[int, _FrameParts] = {}
         self.refs: list[tuple[Ref, float]] = []
@@ -1247,7 +1250,7 @@ class _Placer:
         for (x0, dy0, x1_, dy1), _ in pieces:
             self._add((x0, y + dy0, x1_, y + dy1))
         if m.kind == "create":
-            self.heads[t].append(y - HEAD_H / 2)
+            self.heads[k] = y - HEAD_H / 2
         self.messages.append(PlacedMessage(m, f"messages[{k}]", y, x1, x2,
                                            tuple(Label(text, x, y + dy, bg=True) for text, x, dy in labels_rel)))
 
@@ -1320,8 +1323,9 @@ class _Placer:
         for i, p in enumerate(d.participants):
             dash = ACTOR_H if p.kind == "actor" else HEAD_H
             if i in self.plan.created:
-                lives = tuple(Life(top, top + dash, self.ys[self.plan.ends[k]] if k in self.plan.ends else life_end)
-                              for top, k in zip(self.heads[i], self.plan.created[i]))
+                lives = tuple(Life(self.heads[k], self.heads[k] + dash,
+                                   self.ys[self.plan.ends[k]] if k in self.plan.ends else life_end, k)
+                              for k in self.plan.created[i])
             else:
                 lives = (Life(0.0, dash, life_end),)
             participants.append(PlacedParticipant(p, c.x[i], c.width[i], lives))

@@ -360,19 +360,21 @@ class _Scene:
 
     def message_ends(self) -> Iterator[Finding]:
         """선 끝은 그 높이에 그 생명선의 막대가 있으면 그 막대 변에 바깥에서, 없으면 생명선에 닿는다. 만드는 메시지의 화살촉은
-        만들어지는 머리 변에 닿는다. 막대 변에 닿아도 선이 그 막대를 지나 맞은편 변에 닿거나, 그 끝이 더 옆으로 비킨 막대(위에
+        그 메시지가 만든 머리(Life.made_by) 변에 닿는다. 막대 변에 닿아도 선이 그 막대를 지나 맞은편 변에 닿거나, 그 끝이 더 옆으로 비킨 막대(위에
         그려진다) 안이면 건다 — 바깥 막대를 지나 안쪽 막대 변에 닿는 것은 겹친 막대를 그리는 보통 모양이다. 그 밖에 다른 생명선의
         막대 안이나 변 바로 앞에서 멈추는 끝도 건다."""
-        for m in self.lay.messages:
+        for k, m in enumerate(self.lay.messages):
             for which, x, name in (("시작", m.start, m.message.source), ("끝", m.end, m.message.target)):
                 p = self.parts[self.index[name]]
                 at = f"{_message(m)}의 선 {which}(x {fmt_num(x)}, y {fmt_num(m.y)})"
                 elements = (m.owner, self.who(name))
                 where = (x, m.y, x, m.y)
                 if which == "끝" and m.message.kind == "create":
-                    if not any(h[1] <= m.y <= h[3] and (_on(x, h[0]) or _on(x, h[2])) for h in p.heads):
-                        yield self.found("message_off_bar", elements, where, f"{at}이 만들어지는 머리 변에 닿지 않는다: "
-                                                                            f"{', '.join(self.head(p, h) for h in p.heads)}.")
+                    made = [h for life, h in zip(p.lives, p.heads) if life.made_by == k]
+                    if not any(h[1] <= m.y <= h[3] and (_on(x, h[0]) or _on(x, h[2])) for h in made):
+                        what = ", ".join(self.head(p, h) for h in made) or f"참여자 '{name}'에 그런 머리가 없다"
+                        yield self.found("message_off_bar", elements, where, f"{at}이 이 메시지가 만든 머리 변에 닿지 않는다: "
+                                                                            f"{what}.")
                     continue
                 if not any(life.dash_top - EPS <= m.y <= life.bottom + EPS for life in p.lives):
                     yield self.found("message_off_bar", elements, where,
@@ -564,12 +566,12 @@ class _Scene:
                             yield self.found("frame_on_participant", elements, (x, h[1], x, h[3]),
                                              f"{_frame(f)}의 {side}(x {fmt_num(x)})이 머리를 지난다: {self.head(p, h)}.")
                 for x, side in sides:  # ref 상자 옆 변도 그 밖의 생명선과 한 선으로 보일 수 있다
-                    for life in p.lives:
-                        if abs(x - p.x) < PAD - EPS and f.top < life.bottom and life.dash_top < f.bottom:
-                            yield self.found("frame_on_participant", elements,
-                                             (x, max(f.top, life.dash_top), x, min(f.bottom, life.bottom)),
-                                             f"{_frame(f)}의 {side}(x {fmt_num(x)})이 참여자 '{p.participant.name}'의 생명선"
-                                             f"(x {fmt_num(p.x)})에 {PAD}px 안으로 붙어 한 선으로 보인다.")
+                    along = [life for life in p.lives if f.top < life.bottom and life.dash_top < f.bottom]
+                    if abs(x - p.x) < PAD - EPS and along:
+                        yield self.found("frame_on_participant", elements,
+                                         (x, max(f.top, along[0].dash_top), x, min(f.bottom, along[-1].bottom)),
+                                         f"{_frame(f)}의 {side}(x {fmt_num(x)})이 참여자 '{p.participant.name}'의 생명선"
+                                         f"(x {fmt_num(p.x)})에 {PAD}px 안으로 붙어 한 선으로 보인다.")
 
     def tags_on_lifelines(self) -> Iterator[Finding]:
         """프레임 꼬리표가 생명선 점선을 덮거나 그 변이 PAD 안으로 붙는다(머리는 text_on_participant가 본다). 프레임 꼬리표만

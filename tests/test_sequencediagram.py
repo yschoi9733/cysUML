@@ -29,7 +29,8 @@ def overlap(a, b, pad=0.0):
     return a[0] - pad < b[2] and b[0] < a[2] + pad and a[1] - pad < b[3] and b[1] < a[3] + pad
 
 
-CREATE_B = {"from": "A", "to": "B", "kind": "create"}
+def make(a, b, name=None):
+    return {"from": a, "to": b, "kind": "create", **({"name": name} if name else {})}
 
 
 def problems(data):
@@ -80,21 +81,21 @@ def test_frames_are_read_by_kind():
     ({"participants": life("A", "B"), "messages": [call("B", "A"), {"from": "A", "to": "B", "kind": "create"}]},
      "messages[1].to: 'B'는 messages[0]에서 이미 메시지를 주고받았다"),
     # 다시 만드는 것은 같은 alt의 다른 칸에서만 — 한 칸 안, alt 밖에서 만든 뒤, 다른 alt의 칸은 입력 오류다
-    ({"participants": life("A", "B"), "messages": [CREATE_B] * 3,
+    ({"participants": life("A", "B"), "messages": [make("A", "B")] * 3,
       "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 1}, {"condition": "y", "first": 2, "last": 2}]}]},
      "messages[1].to: 'B'는 messages[0]에서 이미 만들었다 — 다시 만드는 것은 같은 alt의 다른 칸에서만 한다"),
-    ({"participants": life("A", "B"), "messages": [CREATE_B, call("A", "B"), CREATE_B],
+    ({"participants": life("A", "B"), "messages": [make("A", "B"), call("A", "B"), make("A", "B")],
       "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 1}, {"condition": "y", "first": 2, "last": 2}]}]},
      "messages[2].to: 'B'는 messages[0]에서 이미 만들었다"),
-    ({"participants": life("A", "B", "C"), "messages": [CREATE_B, call("A", "C"), call("A", "C"), CREATE_B],
+    ({"participants": life("A", "B", "C"), "messages": [make("A", "B"), call("A", "C"), call("A", "C"), make("A", "B")],
       "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 0}, {"condition": "y", "first": 1, "last": 1}]},
                  {"kind": "alt", "branches": [{"condition": "x", "first": 2, "last": 2}, {"condition": "y", "first": 3, "last": 3}]}]},
      "messages[3].to: 'B'는 messages[0]에서 이미 만들었다"),
     # 앞 칸에서 만든 생명선은 그 칸과 함께 끝난다 — 다음 칸에서 다시 만들기 전에는 주고받지 않는다
-    ({"participants": life("A", "B"), "messages": [CREATE_B, call("B", "A"), CREATE_B],
+    ({"participants": life("A", "B"), "messages": [make("A", "B"), call("B", "A"), make("A", "B")],
       "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 0}, {"condition": "y", "first": 1, "last": 2}]}]},
      "messages[1].from: 'B'의 생명선은 frames[0].branches[0]와 함께 끝나 messages[2]에서 다시 만들기 전에는 없다"),
-    ({"participants": life("A", "B"), "messages": [CREATE_B, call("A", "B"), CREATE_B],
+    ({"participants": life("A", "B"), "messages": [make("A", "B"), call("A", "B"), make("A", "B")],
       "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 0}, {"condition": "y", "first": 1, "last": 1},
                                               {"condition": "z", "first": 2, "last": 2}]}]},
      "messages[1].to: 'B'의 생명선은 frames[0].branches[0]와 함께 끝나 messages[2]에서"),
@@ -182,7 +183,7 @@ def test_a_broken_message_does_not_count_as_using_a_participant():
 
 def test_recreating_waits_until_the_frames_are_right():
     # 프레임이 틀리면 만드는 메시지가 어느 칸인지 가릴 수 없다 — 프레임 오류만 알리고, 다시 만들기는 그 오류를 고친 뒤에 본다
-    found = problems({"participants": life("A", "B"), "messages": [CREATE_B] * 2,
+    found = problems({"participants": life("A", "B"), "messages": [make("A", "B")] * 2,
                       "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 1}]}]})
     assert list(found) == ["frames[0].branches: alt는 칸이 둘 이상이어야 한다 — 칸이 하나면 opt를 쓴다"]
 
@@ -434,10 +435,6 @@ def test_created_lifeline_head_comes_down_to_the_create_message():
     assert bars_of(lay, "B")[0].top == lay.messages[1].y  # 만드는 메시지는 막대를 열지 않는다
 
 
-def make(a, b, name=None):
-    return {"from": a, "to": b, "kind": "create", **({"name": name} if name else {})}
-
-
 def alt_of(*spans):
     return {"kind": "alt", "branches": [{"condition": f"c{j}", "first": a, "last": b} for j, (a, b) in enumerate(spans)]}
 
@@ -459,6 +456,7 @@ def test_recreated_lifeline_has_a_head_in_each_branch():
     made = [lay.messages[1], lay.messages[4]]
     assert [one.top for one in c.lives] == [m.y - S.HEAD_H / 2 for m in made]
     assert [one.dash_top for one in c.lives] == [m.y + S.HEAD_H / 2 for m in made]
+    assert [one.made_by for one in c.lives] == [1, 4] and lay.participants[0].lives[0].made_by is None
     assert first.bottom == divider < second.top
     assert second.bottom == lay.participants[0].lives[0].bottom
     assert all(m.end == c.x - c.width / 2 for m in made)

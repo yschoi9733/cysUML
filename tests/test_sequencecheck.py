@@ -283,6 +283,15 @@ def test_bar_where_a_recreated_lifeline_is_missing_is_caught(recreated):
     assert any(f.kind == "bar_off_lifeline" and "하나 안에 들지 않는다" in f.problem for f in found)
 
 
+def test_create_message_reaching_a_head_it_did_not_make_is_caught(recreated):
+    # 다시 만드는 messages[4]를 첫 머리 높이로 올리면 화살촉이 같은 참여자의 머리 변에 닿지만, 그 머리는 messages[1]이 만들었다
+    first, _ = part(recreated, "C").heads
+    m = recreated.messages[4]
+    found = SC.find(swap(recreated, "messages", m, replace(m, y=(first[1] + first[3]) / 2)))
+    assert any(f.kind == "message_off_bar" and "이 메시지가 만든 머리" in f.problem and f.elements[0] == "messages[4]"
+               for f in found)
+
+
 def test_first_life_running_through_the_next_head_is_caught(recreated):
     c = part(recreated, "C")
     first, second = c.lives
