@@ -568,8 +568,10 @@ class _Scene:
                             yield self.found("frame_on_participant", elements, (x, h[1], x, h[3]),
                                              f"{_frame(f)}의 {side}(x {fmt_num(x)})이 머리를 지난다: {self.head(p, h)}.")
                 for x, side in sides:  # ref 상자 옆 변도 그 밖의 생명선과 한 선으로 보일 수 있다
+                    if abs(x - p.x) >= PAD - EPS:
+                        continue
                     life = next((life for life in p.lives if f.top < life.bottom and life.dash_top < f.bottom), None)
-                    if abs(x - p.x) < PAD - EPS and life is not None:
+                    if life is not None:
                         yield self.found("frame_on_participant", elements,
                                          (x, max(f.top, life.dash_top), x, min(f.bottom, life.bottom)),
                                          f"{_frame(f)}의 {side}(x {fmt_num(x)})이 참여자 '{p.participant.name}'의 생명선"
