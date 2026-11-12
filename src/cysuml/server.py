@@ -1,4 +1,4 @@
-"""MCP 서버: 클래스도를 그리는 도구를 stdio로 내놓는다.
+"""MCP 서버: 클래스도·교류도를 그리는 도구를 stdio로 내놓는다.
 
 도구는 그린 PNG를 파일로 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이 너무 커서 PNG로 못
 그리거나, 저장할 폴더에 쓸 수 없으면 저장하지 않고 오류 결과(isError)로 돌려준다 — AI가 읽고 고칠 수 있게 예외 대신 결과로 낸다.
@@ -14,15 +14,18 @@ import threading
 import unicodedata
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Callable, Optional, TypeVar
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent
 from PIL import Image
 from pydantic import Field, WithJsonSchema
 
-from . import classcheck, classdiagram
+from . import classcheck, classdiagram, sequencecheck, sequencediagram
 from .canvas import MIN_SCALE, SCALE
+from .classdiagram import InputError
+from .report import Report, fmt_rect
+from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
 DEFAULT_DIR = "diagrams"
@@ -43,26 +46,47 @@ KIND_NAMES = {  # 불합격 종류(classcheck.KINDS)를 도구 설명에 쓰는 
     "text_overlap": "선 글자끼리 겹침",
 }
 
-FLOW = """그리는 흐름 — 검사에 합격할 때까지 되풀이한다:
+CLASS_FLOW = """클래스도 그리는 흐름 — 검사에 합격할 때까지 되풀이한다:
 1. 상자 자리(left·top)와, 필요하면 관계선의 꺾는 점(via)을 정해 그린다.
 2. 돌려받은 검사 결과와 그림을 본다. 불합격 항목마다 걸린 요소, 자리(논리 좌표 왼, 위, 폭×높이), 고치는 법이 붙는다. \
 고치는 법은 종류마다 다르니(상자를 옮긴다, 꺾는 점을 고친다, 두 상자를 떼어 놓는다 등) 항목에 적힌 대로 고친다.
 3. 고친 입력을 같은 file_name으로 다시 그린다(파일을 덮어쓴다).
 선끼리 엇갈린 곳과 그림 크기는 알림이라 불합격이 아니다. 다만 엇갈림은 적을수록 읽기 좋다."""
 
-TIPS = """배치 요령:
+CLASS_TIPS = """클래스도 배치 요령:
 - 연결이 가장 많은 클래스를 가운데에 둔다.
 - 상속·실체화는 부모를 위에, 자식들을 그 아래 한 줄에 둔다.
 - 엇갈림이나 불합격이 나오면 먼저 상자 순서와 자리를 바꾸고, 그래도 안 되면 꺾는 점(via)을 준다.
 - 상자 사이는 관계 이름·다중도 글자가 들어갈 만큼 띄운다. 가로 80px·세로 60px쯤에서 시작하고, 글자가 길면 더 띄운다.
 - 상자 크기는 도구가 글자에 맞춰 늘린다(폭은 90px 이상). 그린 크기는 결과의 "상자 자리"에서 보고 다음 배치에 쓴다."""
 
-INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그린다. 배치는 부르는 AI가 하고, cysUML은 받은 좌표대로 그린 뒤 \
-선이 상자나 글자를 지나는지 검사해 그림과 함께 돌려준다. 클래스도는 draw_class_diagram으로 그린다.
+# 교류도 배치 버그를 비켜 가는 법
+SEQUENCE_WAY_AROUND = "참여자 순서나 메시지 차례, 프레임이 덮는 범위(first·last·칸·before)를 바꾸거나, 글자를 줄이거나, 그림을 나눈다"
 
-{FLOW}
+SEQUENCE_FLOW = f"""교류도 그리는 흐름:
+1. 참여자 차례, 메시지 차례, 프레임이 덮는 메시지 범위를 정해 그린다. 좌표는 주지 않는다 — 생명선 간격, 메시지 높이, \
+활성 막대는 도구가 정한다.
+2. 돌려받은 검사 결과와 그림을 본다. 교류도는 도구가 배치하므로 불합격은 cysUML의 배치 버그다. 그래도 그 그림이 필요하면 \
+항목마다 붙은 힌트대로 입력을 바꿔 비켜 간다 — {SEQUENCE_WAY_AROUND}. 배치하지 못했다는 오류가 와도 같다.
+3. 고친 입력을 같은 file_name으로 다시 그린다(파일을 덮어쓴다).
+그림 크기는 알림이라 불합격이 아니다. 다만 개수 한도 안이어도 그림이 너무 크면 PNG로 그리지 못해 오류가 되니, 메시지가 많아 \
+그림이 길면 나눈다."""
 
-{TIPS}"""
+INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리고, 선이 상자나 글자를 지나는지 검사해 그림과 함께 돌려준다.
+- 클래스도는 draw_class_diagram으로 그린다. 배치는 부르는 AI가 하고, cysUML은 받은 좌표대로 그린다.
+- 교류도는 draw_sequence_diagram으로 그린다. 배치는 cysUML이 하고, AI는 참여자·메시지·프레임의 차례만 준다.
+
+{CLASS_FLOW}
+
+{CLASS_TIPS}
+
+{SEQUENCE_FLOW}"""
+
+COMMON_INPUT = f"""- file_name: 저장할 파일 이름(확장자 없이). 같은 이름이면 덮어쓴다.
+- out_dir: 저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/이고, 상대 경로도 서버 작업 폴더 기준이다.
+- scale: 출력 배율(기본 {SCALE:g}, {MIN_SCALE:g} 이상). 보통은 주지 않는다."""
+
+IMAGE_RESULT = f"- 그림: 저장한 PNG. 긴 변이 {MAX_IMAGE_EDGE}px를 넘으면 그 길이로 줄여 돌려준다(저장한 파일은 줄이지 않는다)."
 
 CLASS_TOOL = f"""클래스도를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 상자는 준 왼쪽 위(left·top) 그대로, \
 관계선은 준 꺾는 점(via)을 따라 그리고, 상자 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다.
@@ -87,21 +111,55 @@ static이 true면 밑줄을 긋는다.
 (집합·합성은 "to"·"none"만).
   - via: 꺾는 점 [[x, y], …]. 선은 상자 가운데에서 첫 꺾는 점(없으면 상대 상자 가운데)으로 가는 선이 상자 변과 만나는 곳에서 \
 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다.
-- file_name: 저장할 파일 이름(확장자 없이). 같은 이름이면 덮어쓴다.
-- out_dir: 저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/이고, 상대 경로도 서버 작업 폴더 기준이다.
-- scale: 출력 배율(기본 {SCALE:g}, {MIN_SCALE:g} 이상). 보통은 주지 않는다.
+{COMMON_INPUT}
 
 결과
 - 글: 검사 결과, 상자마다 그린 자리와 크기, 저장한 파일 경로와 픽셀 크기.
-- 그림: 저장한 PNG. 긴 변이 {MAX_IMAGE_EDGE}px를 넘으면 그 길이로 줄여 돌려준다(저장한 파일은 줄이지 않는다).
+{IMAGE_RESULT}
 - classes·relations·file_name이 틀리면 그리지 않고 틀린 곳을 classes[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
 그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.
 
 불합격(선이 상자나 글자를 지나는 등 문서에 넣을 수 없는 그림) {len(KIND_NAMES)}가지: {", ".join(KIND_NAMES.values())}.
 
-{FLOW}
+{CLASS_FLOW}
 
-{TIPS}"""
+{CLASS_TIPS}"""
+
+SEQUENCE_TOOL = f"""교류도를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 교류도는 도구가 배치한다 — 좌표는 받지 \
+않고, 생명선 간격과 메시지 높이를 글자 폭에 맞춰 정하고 활성 막대를 메시지에서 잇는다.
+
+입력
+- participants: 참여자 목록(하나 이상, {MAX_PARTICIPANTS}개까지). 이 차례로 왼쪽부터 놓는다.
+  - name(필수): 메시지가 이 이름으로 참여자를 가리키므로 서로 달라야 한다.
+  - kind: "lifeline"(기본)·"actor".
+- messages: 메시지 목록(없어도 된다, {MAX_MESSAGES}개까지). 이 차례로 위에서부터 놓는다.
+  - from·to(필수): 참여자 이름. 자기 자신에게 보내는 메시지는 받지 않는다 — 그 일은 notes에 적는다.
+  - kind: "call"(기본, 호출)·"reply"(반환, 점선)·"create"(생명선을 만든다 — 그 생명선의 머리가 이 메시지 높이에 놓인다).
+  - name: 메시지 글자. call은 꼭 준다(부르는 연산). reply는 돌려주는 값이 있을 때, create는 «create» 밑에 한 줄 더 쓸 때만 준다.
+  - 반환(reply)은 나를 부른 쪽으로 보낸다 — A가 B를 불렀으면 B에서 A로. 거꾸로 보내도 그려지지만 뜻이 틀린다.
+  - create는 액터에 보내지 못하고, 그 생명선이 주고받는 첫 메시지여야 한다.
+  - 활성 막대는 도구가 잇는다. 대개 생명선을 부르면 열리고, 그 생명선이 반환하거나 부른 쪽이 다음 메시지를 보내면 닫힌다\
+(액터가 받는 호출과 프레임 둘레는 규칙이 따로 있다).
+- frames: 프레임 목록(없어도 된다, {MAX_FRAMES}개까지). 메시지는 messages 안의 자리(0부터)로 가리킨다. 프레임은 그림 전체 폭으로 \
+그리고, 프레임끼리 덮는 메시지가 겹치면 안 된다(프레임 안에 프레임·ref를 넣지 않는다).
+  - kind(필수): "loop"·"opt"·"alt"·"ref".
+  - loop·opt: first·last(필수, 덮는 첫 메시지와 끝 메시지), condition(조건).
+  - alt: branches(필수, 칸 둘 이상). 칸마다 condition·first·last를 모두 주고, 칸은 빈틈없이 이어 붙인다(다음 칸 first는 앞 칸 \
+last+1). 마지막 칸 조건은 흔히 "else"다.
+  - ref: name(필수, 상자에 쓸 이름), before(필수, 이 자리 메시지 바로 앞에 놓는다 — 메시지 수와 같으면 맨 뒤).
+  - condition은 대괄호 없이 쓴다(도구가 씌운다).
+- notes: 노트 글자 목록({MAX_NOTES}개까지). 그림 아래에 차례대로 모은다.
+{COMMON_INPUT}
+
+결과
+- 글: 검사 결과, 저장한 파일 경로와 픽셀 크기. 검사 항목은 메시지·프레임·노트를 입력 안의 자리(messages[3]·frames[0]·notes[0])로, \
+참여자를 이름으로 가리킨다.
+{IMAGE_RESULT}
+- 입력이 틀리면 그리지 않고 틀린 곳을 messages[2].to 꼴 자리와 함께 모두 모아 오류로 돌려준다. 그림이 너무 커서 PNG로 그릴 수 \
+없거나, 저장할 폴더에 쓸 수 없거나, 도구가 배치하지 못했을 때도 오류로 돌려준다.
+
+{SEQUENCE_FLOW}"""
+
 
 def _version() -> str:
     try:
@@ -183,45 +241,41 @@ def _save(png: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[Path]
     return path, None
 
 
-def _boxes(drawing: classdiagram.Drawing) -> str:
-    return "상자 자리(왼, 위, 폭×높이): " + ", ".join(f"{p.box.name}({classdiagram.fmt_rect(p.rect)})"
-                                               for p in drawing.layout.boxes)
+def _boxes(drawing: classdiagram.Drawing) -> list[str]:
+    return ["상자 자리(왼, 위, 폭×높이): " + ", ".join(f"{p.box.name}({fmt_rect(p.rect)})" for p in drawing.layout.boxes)]
 
 
-@mcp.tool(name="draw_class_diagram", description=CLASS_TOOL)
-def draw_class_diagram(
-        file_name: Annotated[str, Field(description="저장할 파일 이름(확장자 없이). 같은 이름이면 덮어쓴다.")],
-        classes: Annotated[Any, WithJsonSchema(
-            {"type": "array", "items": {"type": "object"}, "description": "상자 목록(하나 이상). 필드는 도구 설명에 있다."})],
-        relations: Annotated[Any, WithJsonSchema(
-            {"type": "array", "items": {"type": "object"}, "description": "관계 목록. 필드는 도구 설명에 있다."})] = None,
-        out_dir: Annotated[Optional[str], Field(
-            description=f"저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/.")] = None,
-        scale: Annotated[float, Field(ge=MIN_SCALE, allow_inf_nan=False,
-                                      description=f"출력 배율(기본 {SCALE:g}). 보통은 주지 않는다.")] = SCALE,
-) -> CallToolResult:
-    # classes·relations는 모양을 검사하지 않고 받는다 — 파서가 자리 붙은 오류를 한 번에 모아 알린다
+D = TypeVar("D", classdiagram.Drawing, sequencediagram.Drawing)
+
+
+def _draw(file_name: str, render: Callable[[], D], check: Callable[[D], Report], out_dir: Optional[str],
+          extra_lines: Optional[Callable[[D], list[str]]] = None) -> CallToolResult:
+    """render()로 그려 check로 검사하고 저장해 돌려준다. extra_lines(그린 것)는 검사 결과 뒤에 붙이는 줄이다. file_name
+    문제는 그림 입력 오류와 함께 모아 알린다."""
     name, problem = _file_name(file_name)
     problems = [problem] if problem else []
-    data = {"classes": classes} if relations is None else {"classes": classes, "relations": relations}
     with _drawing:
         try:
-            drawing = classdiagram.render(data, scale)
-        except classdiagram.InputError as e:
+            drawing = render()
+        except InputError as e:
             problems += e.problems
+        except LayoutError as e:  # file_name 문제가 함께 있으면 그것부터 알린다
+            if not problems:
+                return _error(f"교류도를 배치하지 못했다 — {e}. 파일은 저장하지 않았다. 입력은 맞는데 cysUML이 자리를 찾지 "
+                              f"못한 것이라, 비켜 가려면 {SEQUENCE_WAY_AROUND}.")
         if problems:
             return _error(f"입력 오류 — {len(problems)}건\n" + "\n".join(f"- {p}" for p in problems))
-        report = classcheck.check(drawing)
+        report = check(drawing)
+        extra = extra_lines(drawing) if extra_lines else []
         if report.png_size is None:
-            return _error("그림이 너무 커서 PNG를 그리지 않았다(파일도 저장하지 않았다).\n"
-                          + report.summary() + "\n" + _boxes(drawing))
+            return _error("\n".join(["그림이 너무 커서 PNG를 그리지 않았다(파일도 저장하지 않았다).", report.summary(), *extra]))
         img = drawing.canvas.to_image()
     full = _png(img)
     path, problem = _save(full, out_dir, name)
     if problem:
-        return _error(problem + "\n\n" + report.summary() + "\n" + _boxes(drawing))
+        return _error("\n".join([problem, "", report.summary(), *extra]))
     shown = _shrink(img)
-    lines = [report.summary(), _boxes(drawing), f"저장한 파일: {path} ({img.width}×{img.height}px)"]
+    lines = [report.summary(), *extra, f"저장한 파일: {path} ({img.width}×{img.height}px)"]
     if shown is not img:
         lines.append(f"돌려준 그림은 긴 변을 {MAX_IMAGE_EDGE}px로 줄였다({shown.width}×{shown.height}px). "
                      "원래 크기는 저장한 파일에 있다.")
@@ -230,3 +284,40 @@ def draw_class_diagram(
         TextContent(type="text", text="\n".join(lines)),
         ImageContent(type="image", data=data_b64, mime_type="image/png"),
     ])
+
+
+# 그림 입력(classes·messages 등)은 모양을 검사하지 않고 받는다 — 파서가 자리 붙은 오류를 한 번에 모아 알린다
+def _listed(description: str, item: str = "object") -> WithJsonSchema:
+    return WithJsonSchema({"type": "array", "items": {"type": item}, "description": description})
+
+
+FileName = Annotated[str, Field(description="저장할 파일 이름(확장자 없이). 같은 이름이면 덮어쓴다.")]
+OutDir = Annotated[Optional[str], Field(description=f"저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/.")]
+Scale = Annotated[float, Field(ge=MIN_SCALE, allow_inf_nan=False, description=f"출력 배율(기본 {SCALE:g}). 보통은 주지 않는다.")]
+
+
+@mcp.tool(name="draw_class_diagram", description=CLASS_TOOL)
+def draw_class_diagram(
+        file_name: FileName,
+        classes: Annotated[Any, _listed("상자 목록(하나 이상). 필드는 도구 설명에 있다.")],
+        relations: Annotated[Any, _listed("관계 목록. 필드는 도구 설명에 있다.")] = None,
+        out_dir: OutDir = None,
+        scale: Scale = SCALE,
+) -> CallToolResult:
+    data = {"classes": classes} if relations is None else {"classes": classes, "relations": relations}
+    return _draw(file_name, lambda: classdiagram.render(data, scale), classcheck.check, out_dir, _boxes)
+
+
+@mcp.tool(name="draw_sequence_diagram", description=SEQUENCE_TOOL)
+def draw_sequence_diagram(
+        file_name: FileName,
+        participants: Annotated[Any, _listed("참여자 목록(하나 이상). 필드는 도구 설명에 있다.")],
+        messages: Annotated[Any, _listed("메시지 목록. 필드는 도구 설명에 있다.")] = None,
+        frames: Annotated[Any, _listed("프레임 목록. 필드는 도구 설명에 있다.")] = None,
+        notes: Annotated[Any, _listed("노트 글자 목록. 그림 아래에 모은다.", "string")] = None,
+        out_dir: OutDir = None,
+        scale: Scale = SCALE,
+) -> CallToolResult:
+    given = {"messages": messages, "frames": frames, "notes": notes}
+    data = {"participants": participants, **{k: v for k, v in given.items() if v is not None}}
+    return _draw(file_name, lambda: sequencediagram.render(data, scale), sequencecheck.check, out_dir)
