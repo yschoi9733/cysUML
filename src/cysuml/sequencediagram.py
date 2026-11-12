@@ -579,9 +579,13 @@ class _SeqReader(Reader):
         fragments = sorted((f for f in frames if isinstance(f, Fragment)), key=lambda f: (f.first, f.index))
         refs = [f for f in frames if isinstance(f, Ref)]
         reach: Optional[Fragment] = None  # 앞선 프레임 가운데 가장 아래까지 덮는 것
+        # 만드는 메시지가 어느 alt 칸인지 가릴 수 없으면(ref가 아닌 프레임이 틀렸거나 겹친다) 다시 만들기는 그 오류를 고친 뒤에 본다
+        unsure = any(f is None and not (isinstance(v, dict) and v.get("kind") == "ref")
+                     for f, v in zip(frames, lists["frames"]))
         for f in fragments:
             if reach is not None and f.first <= reach.last:
                 self.fail(_at("frames", f.index), f"frames[{reach.index}]와 덮는 메시지가 겹친다 — 프레임 안에 프레임을 넣지 않는다")
+                unsure = True
             if reach is None or f.last > reach.last:
                 reach = f
         for r in refs:
@@ -589,7 +593,7 @@ class _SeqReader(Reader):
             if f is not None:
                 self.fail(_at(_at("frames", r.index), "before"),
                           f"frames[{f.index}](messages[{f.first}]~[{f.last}]) 안이다 — 프레임 안에 ref를 넣지 않는다")
-        if None not in frames:  # 프레임이 틀렸으면 어느 칸인지 가릴 수 없다 — 그 오류를 고친 뒤에 본다
+        if not unsure:
             for name, ks in created.items():
                 self.recreated(name, ks, fragments, talks[name])
         notes = [self.text(v, _at("notes", i)) for i, v in enumerate(lists["notes"])]

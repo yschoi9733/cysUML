@@ -186,6 +186,16 @@ def test_recreating_waits_until_the_frames_are_right():
     found = problems({"participants": life("A", "B"), "messages": [make("A", "B")] * 2,
                       "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 1}]}]})
     assert list(found) == ["frames[0].branches: alt는 칸이 둘 이상이어야 한다 — 칸이 하나면 opt를 쓴다"]
+    found = problems({"participants": life("A", "B"), "messages": [make("A", "B"), call("A", "B"), make("A", "B")],
+                      "frames": [{"kind": "alt", "branches": [{"condition": "x", "first": 0, "last": 0},
+                                                              {"condition": "y", "first": 1, "last": 1}]},
+                                 {"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 1},
+                                                              {"condition": "y", "first": 2, "last": 2}]}]})
+    assert list(found) == ["frames[1]: frames[0]와 덮는 메시지가 겹친다 — 프레임 안에 프레임을 넣지 않는다"]
+    # ref는 칸을 가르는 데 쓰지 않으므로, ref만 틀렸으면 다시 만들기도 함께 본다
+    found = problems({"participants": life("A", "B"), "messages": [make("A", "B")] * 2, "frames": [{"kind": "ref", "name": "R"}]})
+    assert list(found) == ["frames[0]: 'before' 필드가 빠졌다", "messages[1].to: 'B'는 messages[0]에서 이미 만들었다 — 다시 만드는 "
+                           "것은 같은 alt의 다른 칸에서만 한다"]
 
 
 def test_overlapping_frames_are_reported_once_each():
