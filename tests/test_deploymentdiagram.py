@@ -167,7 +167,17 @@ def test_nodes_in_a_row_with_the_same_top_and_height_get_straight_paths():
     straight = draw(same, PATHS)
     assert all(len({y for _, y in r.points}) == 1 for r in straight.layout.relations[:3])
     assert K.check(straight).passed
-    assert "top과 height를 같게 주면 경로가 곧다" in D.TIPS and "다시 늘면 다시 맞춘다" in D.TIPS
+    assert "top과 height를, 세로 한 단에 쌓은 노드는 left와 width를 같게" in D.TIPS and "다시 늘면 다시 맞춘다" in D.TIPS
+
+
+def test_nodes_stacked_in_a_column_with_the_same_left_and_width_get_a_straight_path():
+    # 위아래로 쌓은 두 노드는 이름 길이가 달라 폭이 달라 경로가 비스듬하다 — 넓은 쪽 폭을 다른 노드의 width로 주면 곧다
+    column = [device("PC", 0, 0), device("Application Server", 0, 200)]
+    slanted = draw(column, [path("PC", "Application Server")])
+    assert len({x for x, _ in slanted.layout.relations[0].points}) > 1
+    widest = max(placed(slanted, k).width for k in ("PC", "Application Server"))
+    straight = draw([{**e, "width": widest} for e in column], [path("PC", "Application Server")])
+    assert len({x for x, _ in straight.layout.relations[0].points}) == 1 and K.check(straight).passed
 
 
 @pytest.mark.parametrize("node, top", [(el("node", "N", 0, 0), 52), (device("N", 0, 0), 66),
@@ -312,6 +322,20 @@ def test_bend_from_above_does_not_reach_a_deeper_end():
     r = report([sender, *OUTER], [deploy("w", "Svc", via=tip_bend(OUTER, sender))])
     assert ("line_through_name", ("w->Svc", "Tomcat")) in [(f.kind, f.elements) for f in r.failures]
     assert "끝 요소가 더 깊으면 위에 두지 않는다" in D.TIPS
+
+
+@pytest.mark.parametrize("name, label, left", [("order.war", "deploy", 305), ("w", "two-lines", 330)])
+def test_sender_near_the_top_right_corner_moves_20px_off_the_bevel(name, label, left):
+    # 바깥 노드(오른변 260) 오른쪽 위에서 꺾는 점으로 가는 선이 45°쯤이면 오른쪽 위 모서리의 비스듬한 두께 띠 선을 따라간다.
+    # 보내는 요소를 어느 쪽으로든 20px 옮기면 합격한다
+    make, lines = LABELS[label]
+
+    def sent(at):
+        sender = above(OUTER, el("artifact", name, 0, 0), at, above_gap(lines))
+        return report([sender, *OUTER], [make(name, "Tomcat", via=tip_bend(OUTER, sender))])
+    assert ("line_along_container", (f"{name}->Tomcat", "App Server")) in [(f.kind, f.elements) for f in sent(left).failures]
+    assert sent(left - 20).passed and sent(left + 20).passed
+    assert "비스듬한 두께 띠 선을 따라가 불합격하면, 보내는 요소를 옆으로 20px쯤 옮긴다" in D.TIPS
 
 
 @pytest.mark.parametrize("side", ["left", "right", "below"])

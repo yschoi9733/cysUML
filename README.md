@@ -102,8 +102,8 @@ the edge of a package it starts or ends in, or through a package's name tab.
 The tool is `draw_deployment_diagram`. It shows which computers (nodes) the software runs on: components and
 artifacts sit inside nodes with `in`, and a node can sit inside another node. It takes the same elements as the package
 diagram tool. A communication path between nodes is an `association` with the protocol as its `name`. This tool draws
-every association without an arrowhead (between classes too) unless `navigable` says otherwise. A «deploy» arrow from an element outside a node is
-a `dependency` with `"stereotype": "deploy"`:
+every association without an arrowhead (between classes too) unless `navigable` says otherwise. A «deploy» arrow from
+an element outside a node is a `dependency` with `"stereotype": "deploy"`:
 
 ```json
 {
@@ -222,8 +222,8 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   탭을 지나면 불합격이다.
 - **배치도**(deployment diagram)는 `draw_deployment_diagram`으로 그린다. 소프트웨어(컴포넌트·아티팩트)가 어느 컴퓨터(노드)에서
   도는지 보인다. 노드 안에 컴포넌트·아티팩트·노드를 `in`으로 넣고, 노드끼리는 통신 경로(`association` — `name`에 HTTPS 같은
-  프로토콜)로 잇고(이 도구는 클래스끼리 이은 것까지 모든 연관을 화살촉 없는 실선으로 그린다 — 필요하면 `navigable`을 준다), 노드 밖 요소에서 노드로 «deploy»(`stereotype`이 `deploy`인 `dependency`)를 긋는다.
-  받는 요소·결과·검사는 패키지도와 같다.
+  프로토콜)로 잇고, 노드 밖 요소에서 노드로 «deploy»(`stereotype`이 `deploy`인 `dependency`)를 긋는다. 이 도구는 클래스끼리
+  이은 것까지 모든 연관을 화살촉 없는 실선으로 그린다(필요하면 `navigable`을 준다). 받는 요소·결과·검사는 패키지도와 같다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
   프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
   파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면
