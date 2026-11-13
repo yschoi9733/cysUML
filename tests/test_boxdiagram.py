@@ -648,9 +648,29 @@ def test_open_end_shape_whose_middle_point_goes_into_its_element_fails():
     assert f.kind == "head_under_own_box" and "갈고리" in f.problem
 
 
-def test_end_segment_shorter_than_the_gap_is_an_input_error():
-    with pytest.raises(InputError, match=r"to 쪽 끝 구간 길이 3가 끝 모양 길이와 띄운 거리\(6\)보다 짧다"):
-        socket_drawing(via=[[-3, 12]])
+@pytest.mark.parametrize("via, problem", [
+    ([[-3, 12]], r"to 쪽 끝 구간 길이 3가 끝 모양 길이와 띄운 거리\(6\)보다 길지 않다"),
+    # 띄운 거리와 꼭 같아도 — 당긴 선 끝이 앞 점에 겹쳐 길이 0인 선이 되므로 입력 오류다
+    ([[-6, 12]], r"to 쪽 끝 구간 길이 6가 끝 모양 길이와 띄운 거리\(6\)보다 길지 않다"),
+])
+def test_end_segment_not_longer_than_the_gap_is_an_input_error(via, problem):
+    with pytest.raises(InputError, match=problem):
+        socket_drawing(via=via)
+
+
+def test_only_the_end_with_a_gap_speaks_of_the_gap():
+    # from 쪽은 마름모(길이 18, 띄우지 않음), to 쪽은 소켓(띄움 6). 첫 구간 10이 모자란 from 쪽 글에는 띄운 거리가 없다
+    both = B.Spec(SHAPES, {**RELATIONS, "has": B.RelationType("소켓 집합", start=B.OPEN_DIAMOND, end=SOCKET)})
+    with pytest.raises(InputError) as e:
+        draw([dot("Api", 0, 0, name_side="right"), el("class", "A", -200, -12)],
+             [rel("has", "A", "Api", via=[[-100, 12], [-50, 12]])], spec=both)
+    assert e.value.problems == ("relations[0]: from 쪽 끝 구간 길이 10가 끝 모양 길이(18)보다 짧다 — 첫 꺾는 점을 요소에서 더 "
+                                "떼어 놓는다",)
+
+
+def test_a_straight_line_exactly_as_long_as_the_gap_is_an_input_error_not_a_crash():
+    with pytest.raises(InputError, match=r"선 길이 6가 양 끝 모양 길이와 띄운 거리\(0\+6\)보다 길지 않다"):
+        draw([dot("Api", 0, 0, name_side="right"), el("class", "A", -96, -12)], [rel("uses", "A", "Api")], spec=SOCKET_SPEC)
 
 
 def test_shape_sets_the_gap_between_itself_and_its_outside_name():

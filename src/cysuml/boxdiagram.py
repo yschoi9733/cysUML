@@ -812,16 +812,28 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
     lengths = [math.dist(p, q) for p, q in zip(points, points[1:])]
     head, tail = shape_lengths(r, t)
     gaps = (t.start.gap if t.start else 0.0, t.end.gap if t.end else 0.0)
-    need_what = "끝 모양 길이와 띄운 거리" if any(gaps) else "끝 모양 길이"
     head, tail = head + gaps[0], tail + gaps[1]
-    if len(lengths) == 1 and lengths[0] < head + tail:
-        problems.append(f"{path}: 선 길이 {fmt_num(lengths[0])}가 양 {need_what}({fmt_num(head)}+{fmt_num(tail)})보다 짧다 — "
-                        f"{w.noun}를 더 떼어 놓는다")
-    elif len(lengths) > 1:
-        for length, need, key, which in ((lengths[0], head, "from", "첫"), (lengths[-1], tail, "to", "마지막")):
-            if length < need:
-                problems.append(f"{path}: {key} 쪽 끝 구간 길이 {fmt_num(length)}가 {need_what}({fmt_num(need)})보다 짧다 — "
-                                f"{which} 꺾는 점을 {w.noun}에서 더 떼어 놓는다")
+
+    def short(length: float, need: float, gap: float) -> Optional[str]:
+        """끝 구간이 모자라면 그 글. 선 끝을 띄우는 끝은 끝 모양 길이와 띄운 거리를 다 쓰고도 길이가 남아야 한다 — 같으면 당긴 선
+        끝이 앞 점에 겹쳐 길이 0인 선이 된다."""
+        if gap:
+            return f"끝 모양 길이와 띄운 거리({fmt_num(need)})보다 길지 않다" if length <= need else None
+        return f"끝 모양 길이({fmt_num(need)})보다 짧다" if length < need else None
+
+    if len(lengths) == 1:
+        if any(gaps) and lengths[0] <= head + tail:
+            problems.append(f"{path}: 선 길이 {fmt_num(lengths[0])}가 양 끝 모양 길이와 띄운 거리({fmt_num(head)}+{fmt_num(tail)})보다 "
+                            f"길지 않다 — {w.noun}를 더 떼어 놓는다")
+        elif lengths[0] < head + tail:
+            problems.append(f"{path}: 선 길이 {fmt_num(lengths[0])}가 양 끝 모양 길이({fmt_num(head)}+{fmt_num(tail)})보다 짧다 — "
+                            f"{w.noun}를 더 떼어 놓는다")
+    else:
+        for length, need, gap, key, which in ((lengths[0], head, gaps[0], "from", "첫"),
+                                              (lengths[-1], tail, gaps[1], "to", "마지막")):
+            if (why := short(length, need, gap)) is not None:
+                problems.append(f"{path}: {key} 쪽 끝 구간 길이 {fmt_num(length)}가 {why} — {which} 꺾는 점을 {w.noun}에서 더 "
+                                "떼어 놓는다")
     if sum(lengths) > MAX_LINE:
         problems.append(f"{path}: 선 길이 {fmt_num(sum(lengths))}가 {MAX_LINE}을 넘는다 — {w.noun}를 가까이 모은다")
     return (None if problems else _shorten(points, *gaps)), problems

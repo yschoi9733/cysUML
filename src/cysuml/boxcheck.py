@@ -460,9 +460,10 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box], w: Words
 
 
 def _lines_through_names(relations: list[_Relation], boxes: list[_Box], w: Words) -> Iterator[Finding]:
-    """선이 끝 요소의 몸통 밖 이름 칸(패키지 탭·모양 밖 이름)이나, 끝을 품은 요소의 이름 칸을 지나거나 BOX_CLEARANCE 안으로
-    붙는다. 끝 요소의 몸통 안 이름 칸은 보지 않는다 — 선 끝과 끝 모양은 그 칸 쪽 테두리에 닿아도 되고, 칸 안으로 들어가는 선은
-    입력 오류(선이 끝 요소 안을 지난다)나 선 끝 모양이 그 요소 안으로 들어간 것으로 따로 걸린다."""
+    """선이 끝 요소의 몸통 밖 자리(패키지 탭·모양 밖 이름 같은 이름 칸, UML 1 표기 컴포넌트의 부품 네모)나, 끝을 품은 요소의
+    이름 칸을 지나거나 BOX_CLEARANCE 안으로 붙는다. 글은 그 자리를 NameZone.what으로 부른다. 끝 요소의 몸통 안 이름 칸은 보지
+    않는다 — 선 끝과 끝 모양은 그 칸 쪽 테두리에 닿아도 되고, 칸 안으로 들어가는 선은 입력 오류(선이 끝 요소 안을 지난다)나 선 끝
+    모양이 그 요소 안으로 들어간 것으로 따로 걸린다."""
     found = _Places()
     for b in boxes:
         for r in relations:
