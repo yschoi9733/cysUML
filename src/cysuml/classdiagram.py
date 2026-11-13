@@ -233,12 +233,13 @@ RELATIONS = {
 GENERALIZATION, REALIZATION = "generalization", "realization"
 SAME_KIND = {"abstract": "class"}  # 상속에서 같은 종류로 치는 요소 종류
 NOT_INHERITED = {  # 상속의 끝이 될 수 없는 요소 종류 → (부르는 말, 고치는 법)
-    "package": ("패키지", "패키지 사이는 dependency로 잇는다(«import» 등은 stereotype으로 단다)"),
+    "package": ("패키지", "패키지가 끝인 관계는 dependency로 긋는다(패키지 사이 «import» 등은 stereotype으로 단다)"),
     "lollipop": ("제공 인터페이스 원", "인터페이스 사이 상속은 kind 'interface' 상자끼리 긋는다"),
 }
 REALIZED = ("interface", "lollipop", "component")  # 실체화가 가도 알리지 않는 요소 종류(클래스가 컴포넌트를 실현하는 것은 맞는 쓰임)
-TO_REALIZATION = {  # 이 종류로 가는 종류가 다른 상속은 실체화를 뜻했을 수 있다 → 고치는 법 앞말
+TO_REALIZATION = {  # 이 종류로 가는 틀린 상속은 실체화를 뜻했을 수 있다 → 고치는 법 앞말
     "interface": "인터페이스를 구현하는 것이면",
+    "lollipop": "인터페이스를 구현하는 것이면",
     "component": "클래스가 컴포넌트를 실현하는 것이면",
 }
 INTERFACES = ("interface", "lollipop")  # 실체화의 from이 되면 알리는 종류(인터페이스는 다른 것을 구현하지 않는다)
@@ -251,6 +252,12 @@ def _topic(key: str) -> str:
 
 def _same_kind(a: str, b: str) -> bool:
     return SAME_KIND.get(a, a) == SAME_KIND.get(b, b)
+
+
+def _realizable(s: str, t: str) -> bool:
+    """s 종류가 t 종류로 가는 실체화가 알림 없이 받아지는지 — 고치는 법이 실체화를 권하거나 방향을 바꾸라고 할 때 그대로 따라도
+    다시 걸리지 않는지 본다."""
+    return s not in INTERFACES and s not in NOT_INHERITED and t in REALIZED
 
 
 def _realizes(spec: Spec) -> str:
@@ -324,15 +331,17 @@ class ClassRules(Rules):
     @staticmethod
     def _generalization(r: Reader, path: str, rel: B.Relation, s: str, t: str) -> bool:
         """상속의 두 끝 종류를 본다. 맞으면 True, 틀렸으면 알리고 False."""
+        why = TO_REALIZATION.get(t) if _realizable(s, t) else None
+        to_realization = f"{why} kind를 'realization'으로 바꾼다"
         for key, kind in ((rel.source, s), (rel.target, t)):
             if kind in NOT_INHERITED:
                 name, fix = NOT_INHERITED[kind]
-                r.fail(path, f"{name}({_show(key)}){B.josa(name, '은', '는')} 상속의 끝이 될 수 없다 — {fix}")
+                r.fail(path, f"{name}({_show(key)}){B.josa(name, '은', '는')} 상속의 끝이 될 수 없다 — "
+                             f"{to_realization if why else fix}")
                 return False
         if _same_kind(s, t):
             return True
-        why = TO_REALIZATION.get(t)
-        tail = f". {why} kind를 'realization'으로 바꾼다" if why else ". from·to나 요소의 kind를 고친다"
+        tail = f". {to_realization}" if why else ". from·to나 요소의 kind를 고친다"
         r.fail(path, f"상속의 두 끝 종류가 다르다({_topic(rel.source)} {s!r}, {_topic(rel.target)} {t!r}) — 상속은 같은 "
                      f"종류끼리 긋는다(class와 abstract는 같은 종류로 친다){tail}")
         return False
@@ -344,7 +353,8 @@ class ClassRules(Rules):
         if s in INTERFACES:
             problem = f"실체화를 하는 {noun} {_topic(rel.source)} 인터페이스다(kind {s!r})."
             hint = ("인터페이스끼리는 kind를 'generalization'으로 바꾼다." if s == t == "interface" else
-                    f"{_realizes(spec)} — 방향이 거꾸로면 from과 to를 바꾼다.")
+                    f"{_realizes(spec)} — 방향이 거꾸로면 from과 to를 바꾼다." if _realizable(t, s) else
+                    f"{_realizes(spec)} — 다른 뜻이면 dependency를 쓴다.")
         elif s in NOT_INHERITED:
             name, fix = NOT_INHERITED[s]
             problem, hint = f"{name}({_show(rel.source)}){B.josa(name, '은', '는')} 실체화하지 않는다.", f"{fix}."
@@ -367,7 +377,7 @@ class ClassRules(Rules):
             f"  - 규칙: 상속은 같은 종류끼리 긋는다({groups})."
             + (f" {never}는 상속의 끝이 될 수 없다." if never else "")
             + " 클래스가 인터페이스를 구현하는 것은 realization이다. 종류가 다른 상속, 고리를 이루는 상속(A가 B를, B가 다시 A를 "
-            "상속하는 것 — 여러 단계도), 자기 자신으로 가는 상속·실체화는 입력 오류다.",
+            "상속하는 것 — 여러 단계도), 자기 자신으로 가는 상속·실체화(꺾는 점이 있어도)는 입력 오류다.",
             f"  - 알림: 실체화가 {quiet}가 아닌 {noun}로 가거나 {doers}가 실체화하면 그리되 검사 결과에 알림을 준다(불합격이 "
             "아니다) — 상속 등 다른 관계를 뜻했는지 확인하고, 뜻한 대로면 그대로 둔다."])
 

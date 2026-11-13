@@ -261,15 +261,34 @@ def test_realization_hint_in_tools_with_components_names_component_realization()
                                                  ("package", "class", "a")])
 def test_packages_are_never_an_end_of_inheritance(module, source, target, end):
     assert problems(module, [el(source, "a", 0), el(target, "b", 0, 200)], [rel("generalization", "a", "b")]) == (
-        f"relations[0]: 패키지({end!r})는 상속의 끝이 될 수 없다 — 패키지 사이는 dependency로 잇는다(«import» 등은 "
-        "stereotype으로 단다)",)
+        f"relations[0]: 패키지({end!r})는 상속의 끝이 될 수 없다 — 패키지가 끝인 관계는 dependency로 긋는다(패키지 사이 "
+        "«import» 등은 stereotype으로 단다)",)
 
 
-@pytest.mark.parametrize("source, target, end", [("lollipop", "lollipop", "a"), ("interface", "lollipop", "b")])
+@pytest.mark.parametrize("source, target, end", [("lollipop", "lollipop", "a"), ("interface", "lollipop", "b"),
+                                                 ("lollipop", "class", "a")])
 def test_provided_interface_balls_are_never_an_end_of_inheritance(source, target, end):
     assert problems(CD, [el(source, "a", 0), el(target, "b", 300)], [rel("generalization", "a", "b")]) == (
         f"relations[0]: 제공 인터페이스 원({end!r})은 상속의 끝이 될 수 없다 — 인터페이스 사이 상속은 kind 'interface' 상자끼리 "
         "긋는다",)
+
+
+@pytest.mark.parametrize("source", ["class", "component"])
+def test_inheritance_into_a_ball_points_to_realization_which_then_passes_quietly(source):
+    elements = [el(source, "Impl", 250), el("lollipop", "Api", 0)]
+    (p,) = problems(CD, elements, [rel("generalization", "Impl", "Api")])
+    assert p.endswith("상속의 끝이 될 수 없다 — 인터페이스를 구현하는 것이면 kind를 'realization'으로 바꾼다")
+    r = report(CD, elements, [rel("realization", "Impl", "Api")])
+    assert r.passed and r.notices == (), r.summary()
+
+
+@pytest.mark.parametrize("target", ["package", "lollipop", "interface"])
+def test_interface_realization_hint_swaps_ends_only_when_the_swap_passes(target):
+    # 인터페이스 -> 클래스는 방향만 거꾸로다. 인터페이스 -> 패키지·원·인터페이스는 바꿔도 다시 걸리므로 바꾸라고 하지 않는다
+    swapped = report(CD, [el("interface", "I", 0), el("class", "C", 300)], [rel("realization", "I", "C")]).notices[0]
+    assert swapped.hint.endswith("방향이 거꾸로면 from과 to를 바꾼다.")
+    (n,) = report(CD, [el("lollipop", "I", 0), el(target, "X", 300)], [rel("realization", "I", "X")]).notices
+    assert "from과 to를 바꾼다" not in n.hint and n.hint.endswith("다른 뜻이면 dependency를 쓴다.")
 
 
 @pytest.mark.parametrize("target", ["component", "lollipop", "interface"])
