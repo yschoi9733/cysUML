@@ -67,7 +67,8 @@ def crossing_hint(w: Words) -> str:
 
 
 def bend_away(w: Words) -> str:
-    """화살촉 쪽 끝 구간을 꺾을 때 꺾는 점을 뗄 거리. 도구 설명(guide.arrow_bend)과 제 화살촉에 닿는 항목의 고치는 법이 함께 쓴다."""
+    """화살촉 쪽 끝 구간을 꺾을 때 꺾는 점을 뗄 거리. 도구 설명(guide.arrow_bend)과, 선이 끝에 단 화살촉에 닿는 항목의 고치는 법이
+    함께 쓴다."""
     return (f"화살촉 쪽 끝 구간을 꺾을 때는 그 꺾는 점을 {w.noun} {w.edge}에서 {ARROW_BEND}px 이상 뗀다(앞 구간이 화살촉 쪽으로 "
             "비스듬히 되돌아오면 더 뗀다)")
 

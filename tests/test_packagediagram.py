@@ -525,7 +525,7 @@ def test_icon_kinds_sit_in_packages_and_nodes_and_the_outer_element_covers_them(
         assert i.rect[3] + B.NEST_PAD <= o.inner[3]
 
 
-# ---------------------------------------------------------------- 제 화살촉 옆을 지나는 선
+# ---------------------------------------------------------------- 끝에 단 화살촉 옆을 지나는 선
 
 
 @pytest.mark.parametrize("end, passed", [(10, False), (11, True)])
