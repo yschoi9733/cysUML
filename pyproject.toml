@@ -2,6 +2,7 @@
 name = "cysuml"
 version = "0.1.0"
 description = "MCP server that draws document-ready UML diagrams: the AI lays them out, cysUML draws and checks them"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT AND OFL-1.1"
 license-files = ["LICENSE", "src/cysuml/fonts/*-LICENSE.txt"]
@@ -10,6 +11,10 @@ dependencies = [
     "mcp>=2.3.0",
     "pillow>=10.1.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/yschoi9733/cysUML"
+Issues = "https://github.com/yschoi9733/cysUML/issues"
 
 [project.scripts]
 cysuml = "cysuml.__main__:main"
