@@ -35,10 +35,10 @@ jobs:
             exit 1
           fi
       - run: uv build
-      - name: 빌드한 휠을 설치한 환경에서 테스트(지원하는 가장 낮은 파이썬 3.10과 러너 기본 파이썬)
-        run: |
-          uv run --isolated --no-project --python 3.10 --with dist/*.whl --with pytest pytest
-          uv run --isolated --no-project --with dist/*.whl --with pytest pytest
+      - name: 빌드한 휠을 설치한 환경에서 테스트
+        run: uv run --isolated --no-project --with dist/*.whl --with pytest pytest
+      - name: 지원하는 가장 낮은 파이썬 3.10과 pyproject.toml 의존성 하한에서 테스트
+        run: uv run --isolated --python 3.10 --resolution lowest-direct --no-editable pytest
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist

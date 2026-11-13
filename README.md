@@ -2,15 +2,15 @@
 
 An MCP server for document-ready UML diagrams: the AI lays them out, cysUML draws and checks them.
 
-[한국어 안내](https://github.com/yschoi9733/cysUML#한국어)
+[한국어 안내](#한국어)
 
 Auto-layout tools are quick, but lines often run through boxes and labels, and the result is hard to fix by hand.
 cysUML takes the other way round: your AI assistant decides where every box goes, cysUML draws exactly that and
 checks the drawing. If a line crosses a box or a label, the check fails and says what to move. The assistant fixes
 the layout and draws again until the check passes.
 
-- Several kinds of UML diagram; the list is under [Use](https://github.com/yschoi9733/cysUML#use). Sequence diagrams
-  are laid out by cysUML from the order of participants and messages, and checked the same way.
+- Several kinds of UML diagram; the list is under [Use](#use). Sequence diagrams are laid out by cysUML from the order
+  of participants and messages, and checked the same way.
 - PNG output. The fonts are bundled, so every machine draws the same picture, Korean text included.
 
 ## Install
@@ -43,8 +43,8 @@ claude mcp add cysuml -- uvx cysuml
 }
 ```
 
-**Versions.** `uvx cysuml` runs the newest release; uv looks for one each time the client starts the server. To stay
-on one version, put it after the name: `uvx cysuml@0.1.0` (in JSON, `"args": ["cysuml@0.1.0"]`). The releases are
+**Versions.** `uvx cysuml` runs the newest release: each time the client starts the server, uv asks PyPI and reuses
+the answer for up to ten minutes. To stay on one version, put it after the name: `uvx cysuml@0.1.0` (in JSON, `"args": ["cysuml@0.1.0"]`). The releases are
 listed in the [release history](https://pypi.org/project/cysuml/#history).
 
 ## Use
@@ -321,8 +321,7 @@ AI가 배치하고 도구가 그리는, 문서용 UML 그림 MCP 서버다.
 상자 자리를 정하면 cysUML은 그대로 그리고 그림을 검사한다. 선이 상자나 글자를 지나면 불합격이고, 무엇을 옮길지 알려 준다.
 어시스턴트는 배치를 고쳐 합격할 때까지 다시 그린다.
 
-- 여러 UML 그림을 그린다(목록은 아래 [쓰기](https://github.com/yschoi9733/cysUML#쓰기)). 교류도는 참여자·메시지 차례를 받아
-  cysUML이 배치하고, 똑같이 검사한다.
+- 여러 UML 그림을 그린다(목록은 아래 [쓰기](#쓰기)). 교류도는 참여자·메시지 차례를 받아 cysUML이 배치하고, 똑같이 검사한다.
 - PNG로 낸다. 글꼴을 함께 넣어 어느 컴퓨터에서든 같은 그림이 나오고, 한글도 그린다.
 
 ### 설치
@@ -338,8 +337,8 @@ uvx cysuml
 
 - **Claude Code:** `claude mcp add cysuml -- uvx cysuml`
 - **다른 클라이언트:** 위 영어 안내의 JSON 설정에 같은 명령을 넣는다.
-- **버전:** `uvx cysuml`은 가장 새 버전을 띄운다. 클라이언트가 서버를 띄울 때마다 uv가 새 버전이 있는지 본다. 한 버전에
-  머물려면 이름 뒤에 버전을 붙인다 — `uvx cysuml@0.1.0`(JSON에서는 `"args": ["cysuml@0.1.0"]`). 나온 버전은
+- **버전:** `uvx cysuml`은 가장 새 버전을 띄운다. 클라이언트가 서버를 띄울 때마다 uv가 PyPI에 묻고, 받은 답은 10분까지 다시
+  쓴다. 한 버전에 머물려면 이름 뒤에 버전을 붙인다 — `uvx cysuml@0.1.0`(JSON에서는 `"args": ["cysuml@0.1.0"]`). 나온 버전은
   [PyPI 릴리스 기록](https://pypi.org/project/cysuml/#history)에 있다.
 
 ### 쓰기
