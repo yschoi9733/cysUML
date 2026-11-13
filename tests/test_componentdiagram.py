@@ -1,6 +1,9 @@
 """컴포넌트도: 제공 인터페이스 원과 그 막대·쓰는 쪽 화살표·소켓, 아티팩트의 «manifest», 아이콘 표기 그림, 클래스 실현 그림, 연관
 기본 방향."""
+import json
 import math
+import re
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +14,8 @@ from cysuml import server
 from cysuml.boxdiagram import LABEL_LINE, HeadMark, NameZone
 from cysuml.canvas import Ellipse, Line, Polygon, Text
 from cysuml.parsing import InputError
+
+README = Path(__file__).resolve().parent.parent / "README.md"
 
 
 def el(kind, name, left, top, **more):
@@ -277,7 +282,7 @@ def test_socket_is_a_half_circle_around_the_ball_and_its_line_stops_short_of_the
     # 쓰는 쪽(왼쪽) 절반만 감싼다 — 양 끝은 원 바로 위·아래, 가운데는 선 끝
     ends = sorted((arc.points[0], arc.points[-1]), key=lambda p: p[1])
     assert ends == [pytest.approx((c[0], c[1] - C.SOCKET)), pytest.approx((c[0], c[1] + C.SOCKET))]
-    assert all(p[0] <= c[0] + 1e-9 for p in arc.points) and r.points[-1] in arc.points
+    assert all(p[0] <= c[0] + 1e-9 for p in arc.points) and any(math.dist(r.points[-1], p) < 1e-9 for p in arc.points)
 
 
 def test_socket_with_bends_keeps_its_half_circle_on_the_ball_center():
@@ -392,6 +397,15 @@ def chain(name_side="bottom"):
         elements.append(el("lollipop", f"Api{i + 1}", cx - off[0], 224 - off[1], name_side=name_side))
         relations += [rel("association", f"Comp{i + 1}", f"Api{i + 1}"), rel("requires", f"Comp{i + 2}", f"Api{i + 1}")]
     return elements, relations
+
+
+def test_readme_billing_example_draws_every_line_straight():
+    # README 예시는 합격만 test_server가 본다 — 교재 그림처럼 모든 구간이 가로·세로로 곧은지는 여기서 본다
+    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
+    (data,) = [b for b in blocks if b.get("file_name") == "billing"]
+    d = C.render({k: v for k, v in data.items() if k != "file_name"})
+    for r in d.layout.relations:
+        assert all(a[0] == b[0] or a[1] == b[1] for a, b in zip(r.points, r.points[1:])), r.owner
 
 
 def test_icon_components_balls_sockets_and_page_artifacts_pass():

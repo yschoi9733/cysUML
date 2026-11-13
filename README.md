@@ -152,18 +152,18 @@ the same tool draws a textbook-style picture of UML 1 components and folded-page
 {
   "file_name": "billing",
   "elements": [
-    {"kind": "artifact_icon", "name": "Billing.exe", "left": 30, "top": 0, "name_side": "right"},
+    {"kind": "artifact_icon", "name": "Billing.exe", "left": 38, "top": 0, "name_side": "right"},
     {"kind": "component_icon", "name": "Billing", "left": 0, "top": 110},
     {"kind": "lollipop", "name": "IBilling", "left": 190, "top": 124},
     {"kind": "component_icon", "name": "Register", "stereotype": "component", "left": 320, "top": 103},
     {"kind": "component_icon", "name": "Course", "left": 0, "top": 260},
-    {"kind": "artifact_icon", "name": "Course.dll", "left": 34, "top": 380}
+    {"kind": "artifact_icon", "name": "Course.dll", "left": 24, "top": 380}
   ],
   "relations": [
     {"kind": "dependency", "from": "Billing.exe", "to": "Billing", "stereotype": "manifest"},
     {"kind": "association", "from": "Billing", "to": "IBilling"},
     {"kind": "requires", "from": "Register", "to": "IBilling"},
-    {"kind": "dependency", "from": "Register", "to": "Course", "via": [[360, 284]]},
+    {"kind": "dependency", "from": "Register", "to": "Course", "via": [[385, 284]]},
     {"kind": "dependency", "from": "Course.dll", "to": "Course", "stereotype": "manifest"}
   ]
 }
