@@ -71,8 +71,8 @@ def _socket(c: Canvas, tip: Point, frm: Point, at_: Point, o: str) -> Line:
 
 
 # 길이는 반원 꼭대기에서 꺾는 점까지 둘 거리다 — 원 쪽 끝 구간이 띄운 거리(SOCKET_GAP)에 이만큼 더 길어야 해서, 끝 구간과 직각으로
-# 꺾은 앞 구간도 반원에서 이만큼 떨어진다. 검사는 선이 제 열린 끝 모양에 닿을 때만 보므로, 길이가 없으면 1px 옆을 따라가는 선이
-# 합격했다(실측)
+# 꺾은 앞 구간도 반원에서 이만큼 떨어진다. 길이가 없으면 그 앞 구간이 반원 꼭대기 1px 옆을 지나 검사에 걸리는데(boxcheck.OVERLAP_GAP),
+# 이 흔한 꺾음은 입력에서 먼저 막아 꺾는 점을 얼마나 뗄지 알린다
 SOCKET_HEAD = EndShape("소켓 반원", SOCKET_GAP, _socket, gap=SOCKET_GAP)
 REQUIRES = "requires"
 RELATIONS = {**CLASS_RELATIONS, REQUIRES: RelationType("소켓", end=SOCKET_HEAD, role="인터페이스를 쓰는 쪽")}

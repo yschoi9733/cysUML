@@ -216,12 +216,13 @@ class _Relation:
     def over_own(self, head: _Head) -> list[Segment]:
         """이 선이 제 선 끝 모양 head를 지나는 구간들. 그 모양이 얹힌 끝 구간은 빼고, 삼각형·마름모는 안쪽으로 OWN_MARGIN 넘게
         들어간 구간만 친다 — 테두리에 닿거나 따라가는 것(끝 구간이 모양 길이와 같은 직교 꺾음, 밑변으로 올라와 붙는 꺾음)은 선이
-        모양에 이어진 것이다. 화살촉은 갈래가 끝 구간(화살촉 길이 이상)보다 짧아, 다른 구간이 닿으면 정말 지난 것이다."""
+        모양에 이어진 것이다. 열린 모양(화살촉·소켓 반원)은 끝 구간에만 붙어 있어, 다른 구간이 다른 관계의 선처럼 OVERLAP_GAP 안으로
+        다가오면 모양과 선이 한데 붙어 보인다(끝 구간이 화살촉 길이와 같은 직각 꺾음은 갈래 끝 옆 1.2px을 지난다)."""
         end = 0 if math.dist(head.tip, self.points[0]) <= LINE_EPS else len(self.path) - 1
         rest = [s for i, s in enumerate(self.path) if i != end]
         if head.closed:
             return [s for s in rest if enters(s, head.points, OWN_MARGIN)]
-        return [s for s in rest if head.touches([s])]
+        return [s for s in rest if head.near([s])]
 
 
 @dataclass(frozen=True, eq=False)
