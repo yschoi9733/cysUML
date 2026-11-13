@@ -11,8 +11,8 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
-from cysuml import (boxcheck, boxdiagram, classcheck, deploymentdiagram, guide, packagediagram, sequencecheck,
-                    sequencediagram, server, usecasediagram)
+from cysuml import (activitydiagram, boxcheck, boxdiagram, classcheck, deploymentdiagram, guide, packagediagram,
+                    sequencecheck, sequencediagram, server, statediagram, usecasediagram)
 from cysuml.canvas import SCALE
 from cysuml.report import Finding
 
@@ -62,6 +62,8 @@ TOOLS = [  # 도구 → 필수 입력, 객체 목록 입력, 문자열 목록 �
     ("draw_package_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_deployment_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_use_case_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_state_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_activity_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_sequence_diagram", ["file_name", "participants"], ("participants", "messages", "frames"), ("notes",)),
 ]
 EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 더한다
@@ -69,6 +71,8 @@ EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 �
     "packages": "draw_package_diagram",
     "deployment": "draw_deployment_diagram",
     "use-cases": "draw_use_case_diagram",
+    "order-states": "draw_state_diagram",
+    "order-flow": "draw_activity_diagram",
     "checkout": "draw_sequence_diagram",
 }
 PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 그 도구의 말
@@ -76,6 +80,8 @@ PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야
     "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
     "draw_deployment_diagram": (deploymentdiagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
     "draw_use_case_diagram": (usecasediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
+    "draw_state_diagram": (statediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
+    "draw_activity_diagram": (activitydiagram.TIPS, activitydiagram.KINDS, boxdiagram.ELEMENT_WORDS),
 }
 
 
