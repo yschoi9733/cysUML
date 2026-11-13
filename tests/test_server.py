@@ -161,10 +161,13 @@ def test_relation_fields_follow_the_relation_kinds_a_tool_takes():
     assert "공유 줄기" not in guide.relation_fields(plain)
 
 
-@pytest.mark.parametrize("name", TRUNK_TOOLS)
-def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
+def test_tools_with_trunk_relations():
     assert TRUNK_TOOLS == ["draw_class_diagram", "draw_package_diagram", "draw_component_diagram", "draw_deployment_diagram",
                            "draw_use_case_diagram"]  # 상태도·액티비티도는 전이·흐름뿐이라 없다
+
+
+@pytest.mark.parametrize("name", TRUNK_TOOLS)
+def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     # 도구 설명에 관계 필드가 그대로 들어가는 것은 test_each_tool_carries_its_flow_and_tips_…가 본다
     spec = PLACED_TOOLS[name][2]
     trunks = [t for t in spec.relations.values() if t.trunk]
@@ -182,14 +185,16 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
                    "    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다",
                    "자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다"):
         assert phrase in text, phrase
+    outside = any(s.outside_name for s in spec.shapes.values())
+    within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if outside else ""
+    named = ", 부모의 모양 밖 이름이 오른쪽에 있거나" if outside else ""
     two = ("    - 같은 부모로 상속·실체화가 함께 오면 종류마다 줄기를 따로 둔다",
-           f"세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭) + {guide.TRUNK_SIDE}, 줄기 높이 y2 = y + {guide.TRUNK_SPLIT}"
+           f"세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {guide.TRUNK_SIDE}, 줄기 높이 y2 = y + {guide.TRUNK_SPLIT}"
            "(첫 줄기보다 아래, 자식 쪽)",
            "via에 [자식 가운데 x, y2], [x2, y2], [x2, 부모 가운데 y] 세 점을 주어",
            "자식 가운데 x가 x2와 같으면 [x2, 부모 가운데 y] 하나만 준다.",
-           f"걸리거나, 부모 오른쪽 {edge}에 다른 선이 닿거나, 첫 종류 자식의 가운데 x가 x2에서 {guide.TRUNK_NEAR}px 안이면 "
-           f"왼쪽으로 거울처럼 x2 = 부모 왼쪽 {edge}의 "
-           f"x(왼) − {guide.TRUNK_SIDE}로 두어",
+           f"걸리거나, 부모 오른쪽 {edge}에 다른 선이 닿거나{named}, 첫 종류 자식의 가운데 x가 x2에서 {guide.TRUNK_NEAR}px "
+           f"안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 {edge}의 x(왼{within}) − {guide.TRUNK_SIDE}로 두어",
            f"왼쪽도 그렇게 막히면 걸린 {noun}를 옮기거나 자식 차례를 바꾼다.",
            f"y2가 자식 {noun}들의 위 {edge}보다 {guide.TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
            f"{guide.TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다.")
@@ -198,7 +203,6 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     # 가운데는 그 도구의 결과에 덧붙는 것으로 셈한다 — 패키지를 받는 도구는 향하는 점, 모양 밖 이름이 있는 도구(유즈케이스도의
     # 액터·컴포넌트도의 막대사탕)는 모양 자리
     aims = any(boxdiagram.aims_off_center(s) for s in spec.shapes.values())
-    outside = any(s.outside_name for s in spec.shapes.values())
     assert ("향하는 점이 덧붙어 있으면 그 점을 쓴다" in text) == aims == ("package" in spec.shapes)
     assert ("모양 자리가 덧붙어 있으면 모양 자리로 셈한다" in text) == outside
     assert ('모양 밖 이름은 name_side "left"·"right"로 옆에 쓴다 — 위·아래면 줄기가 이름을 지난다' in text) == outside
@@ -230,7 +234,7 @@ def middles(name, field, args):
         left, top, width, height = map(float, nums[4:8] if nums[4] else nums[:4])
         aim = tuple(map(float, nums[8:])) if nums[8] else (left + width / 2, top + height / 2)
         out[key] = ((left, top, width, height), *aim, bool(nums[8]))
-    assert set(out) == {b["name"] for b in args[field]}, text(r)
+    assert set(out) == {b.get("id", b.get("name")) for b in args[field]}, text(r)
     return out
 
 
@@ -334,6 +338,38 @@ def test_two_kinds_to_one_parent_given_as_the_description_says_pass(tmp_path, na
     assert passed.startswith("합격"), passed
     assert together.startswith("불합격")
 
+
+
+@pytest.mark.parametrize("name_side, chosen, other", [("right", "left", "right"), ("left", "right", "left")])
+def test_second_trunk_goes_away_from_the_parent_name_outside_the_shape(tmp_path, name_side, chosen, other):
+    """컴포넌트도의 막대사탕처럼 이름을 모양 밖 옆에 쓰는 부모 — 설명대로 둘째 줄기는 이름 반대쪽 변(이름이 오른쪽이면 왼쪽 거울)에
+    모으고 x2는 모양 자리로 셈한다. 이름 쪽 변으로 모으면 그 이름을 지난다."""
+    parent = {"kind": "lollipop", "id": "P", "name": "Payment API", "left": 200, "top": 0, "name_side": name_side}
+    first = {"file_name": "trunk", "elements": [parent], "out_dir": str(tmp_path)}
+    (left, top, width, height), px, py, _ = middles("draw_component_diagram", "elements", first)["P"]
+    y = top + height + 30
+    kinds = (R, G, R, G)
+    boxes = [parent] + [{"kind": "component", "name": f"C{i}", "left": x, "top": top + height + 60, "width": 140}
+                        for i, x in enumerate(TWO_KINDS[1])]
+    args = {"file_name": "trunk", "elements": boxes, "out_dir": str(tmp_path)}
+    m = middles("draw_component_diagram", "elements", args)
+
+    def draw_to(side):
+        x2 = left + width + guide.TRUNK_SIDE if side == "right" else left - guide.TRUNK_SIDE
+        relations = []
+        for i, k in enumerate(kinds):
+            cx = m[f"C{i}"][1]
+            if k == kinds[0]:
+                via = [[px, y]] if cx == px else [[cx, y], [px, y]]
+            else:
+                via = [[x2, py]] if cx == x2 else [[cx, y + guide.TRUNK_SPLIT], [x2, y + guide.TRUNK_SPLIT], [x2, py]]
+            relations.append({"kind": k, "from": f"C{i}", "to": "P", "via": via})
+        (r,) = run(server.mcp, ("draw_component_diagram", {**args, "relations": relations}))[2]
+        return text(r)
+
+    assert draw_to(chosen).startswith("합격"), draw_to(chosen)
+    crossed = draw_to(other)
+    assert crossed.startswith("불합격") and "이름 칸" in crossed
 
 @pytest.mark.parametrize("side", ["right", "left"])
 def test_two_kinds_to_a_package_parent_pass_on_either_side(tmp_path, side):

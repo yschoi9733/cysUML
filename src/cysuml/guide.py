@@ -210,14 +210,17 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
              f"그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다."]
     if len(types) > 1:
         labels = _joined(t.label for t in types)
+        within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if shape else ""
+        named = ", 부모의 모양 밖 이름이 오른쪽에 있거나" if shape else ""
         lines += [f"    - 같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오면 종류마다 줄기를 따로 둔다. 한 종류는 위대로 아래 "
-                  f"{edge}에 모은다. 다른 종류는 세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭) + {TRUNK_SIDE}, 줄기 높이 "
+                  f"{edge}에 모은다. 다른 종류는 세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {TRUNK_SIDE}, 줄기 높이 "
                   f"y2 = y + {TRUNK_SPLIT}(첫 줄기보다 아래, 자식 쪽)로 정하고 자식마다 via에 [자식 가운데 x, y2], [x2, y2], "
                   f"[x2, 부모 가운데 y] 세 점을 주어 부모 오른쪽 {edge}에 모은다. 자식 가운데 x가 x2와 같으면 [x2, 부모 가운데 y] "
                   f"하나만 준다.",
                   f"    - x2 줄(y2에서 부모 가운데 y까지)에 다른 {noun}{josa(noun, '이', '가')} 걸리거나, 부모 오른쪽 {edge}에 다른 "
-                  f"선이 닿거나, 첫 종류 자식의 가운데 x가 x2에서 {TRUNK_NEAR}px 안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 {edge}의 x(왼) − {TRUNK_SIDE}로 두어 왼쪽 "
-                  f"{edge}에 모은다. 왼쪽도 그렇게 막히면 걸린 {noun}{josa(noun, '을', '를')} 옮기거나 자식 차례를 바꾼다.",
+                  f"선이 닿거나{named}, 첫 종류 자식의 가운데 x가 x2에서 {TRUNK_NEAR}px 안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 "
+                  f"{edge}의 x(왼{within}) − {TRUNK_SIDE}로 두어 왼쪽 {edge}에 모은다. 왼쪽도 그렇게 막히면 걸린 "
+                  f"{noun}{josa(noun, '을', '를')} 옮기거나 자식 차례를 바꾼다.",
                   f"    - 두 줄기를 둘 때는 y2가 자식 {noun}들의 위 {edge}보다 {TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
                   f"{TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다."]
     return "\n".join(lines)
