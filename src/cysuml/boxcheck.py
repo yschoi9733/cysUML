@@ -327,13 +327,15 @@ def _owners(*groups: Iterable[_Relation]) -> tuple[str, ...]:
 
 
 def _box_overlaps(boxes: list[_Box], lay: Layout, w: Words) -> Iterator[Finding]:
-    """품고 품긴 사이(여러 겹 포함)가 아닌 두 요소가 겹치거나 BOX_CLEARANCE 안으로 붙었다. 자리(모양 밖 이름까지)로 본다."""
+    """품고 품긴 사이(여러 겹 포함)가 아닌 두 요소가 겹치거나 BOX_CLEARANCE 안으로 붙었다. 자리(모양 밖 이름까지)를 이루는
+    사각형들(PlacedBox.parts — 패키지는 탭과 몸통)로 본다."""
     fit = "글자와 안의 요소에" if lay.spec.extended else "글자에"
     for i, a in enumerate(boxes):
         for b in boxes[i + 1:]:
             if a.name in lay.ancestors(b.name) or b.name in lay.ancestors(a.name):
                 continue
-            g = axis_gap(a.rect, b.rect)
+            g, pa, pb = min(((axis_gap(pa, pb), pa, pb) for pa in a.placed.parts for pb in b.placed.parts),
+                            key=operator.itemgetter(0))
             if g > BOX_CLEARANCE:
                 continue
             what = (f"{w.noun}끼리 겹친다" if g < -LINE_EPS else f"{w.noun}끼리 맞닿았다" if round1(g) == 0
@@ -345,7 +347,7 @@ def _box_overlaps(boxes: list[_Box], lay: Layout, w: Words) -> Iterator[Finding]
                 if (lay.spec.extended and outer.placed.shape.holds and o[0] <= inner.rect[0] and o[1] <= inner.rect[1]
                         and inner.rect[2] <= o[2] and inner.rect[3] <= o[3]):
                     hint += f" {inner.name}를 {outer.name} 안에 두려면 {inner.name}의 in에 {outer.name}를 준다."
-            yield Finding("box_overlap", (a.name, b.name), between(a.rect, b.rect), f"{what}: {a.title}, {b.title}.", hint)
+            yield Finding("box_overlap", (a.name, b.name), between(pa, pb), f"{what}: {a.title}, {b.title}.", hint)
 
 
 def _inner_off_area(boxes: list[_Box], lay: Layout, w: Words) -> Iterator[Finding]:

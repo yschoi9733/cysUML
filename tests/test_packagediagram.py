@@ -113,6 +113,21 @@ def test_dependency_from_above_onto_the_body_right_of_the_tab_passes():
     assert K.check(d).passed
 
 
+def test_packages_stacked_top_to_bottom_pass_with_a_straight_dependency():
+    # 기본 크기 패키지 몸통은 탭 폭의 두 배보다 넓어, 위에 같은 자리로 쌓은 패키지에서 곧게 내려오는 선이 탭 오른쪽에 닿는다
+    d = draw([el("package", "a", 0, 0), el("package", "b", 0, 150)], [rel("dependency", "a", "b")])
+    b = placed(d, "b")
+    assert b.width / 2 >= b.zones[0].rect[2] + 10
+    assert K.check(d).passed, K.check(d).summary()
+
+
+def test_element_right_of_a_package_tab_does_not_overlap_the_package():
+    # 탭 오른쪽 빈 곳은 패키지가 아니다 — 몸통 윗변 6px 위에 놓인 요소는 패키지와 겹치지 않는다
+    assert report([el("package", "p", 0, 0, width=300), el("component", "c", 150, -30)]).passed
+    (f,) = report([el("package", "p", 0, 0, width=300), el("component", "c", 30, -30)]).failures
+    assert f.kind == "box_overlap" and f.where == (30, 0, 50, 18)
+
+
 def test_overlapping_elements_inside_a_package_fail_but_holder_and_held_do_not():
     r = report([el("package", "P", 0, 0), inside("P", "class", "A", 20, 44), inside("P", "class", "B", 80, 60)])
     (f,) = r.failures
@@ -298,6 +313,10 @@ def test_package_tool_input_errors():
     with pytest.raises(InputError) as e:
         draw([el("class", "A", 0, 0), inside("A", "class", "B", 20, 44), el("usecase", "U", 0, 200)])
     assert [p.split(":")[0] for p in e.value.problems] == ["elements[2].kind", "elements[1].in"]
+    # kind가 빠져도(모든 종류가 이름을 받으므로) 이름이 빠진 것을 함께 알린다
+    with pytest.raises(InputError) as e:
+        draw([{"left": 0, "top": 0}])
+    assert e.value.problems == ("elements[0]: 'name' 필드가 빠졌다", "elements[0]: 'kind' 필드가 빠졌다")
 
 
 def test_result_lists_the_place_of_every_element_by_key():

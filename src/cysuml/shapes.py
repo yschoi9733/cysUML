@@ -12,7 +12,9 @@ from .geom import Border, PolygonBorder, RectBorder, Segment
 from .text import Box
 
 TAB_MIN = 50       # 패키지 탭의 최소 폭
-TAB_STEP = 30      # 패키지 몸통이 탭보다 적어도 이만큼 넓다(탭 오른쪽 몸통 윗변에 선이 닿을 자리)
+# 패키지 몸통은 탭 폭의 두 배보다 적어도 이만큼 넓다 — 선이 향하는 몸통 가운데가 탭 오른쪽 끝에서 TAB_STEP/2 오른쪽에 와서
+# (검사 여유 4px보다 넓다) 위에 같은 폭으로 쌓은 패키지에서 곧게 내려오는 선이 탭을 지나지 않는다
+TAB_STEP = 20
 PACKAGE_BODY = 40  # 비어 있는 패키지 몸통의 높이
 BOX_BODY = 24      # 컴포넌트·아티팩트에서 머리 칸 밖에 더하는 높이(이름 한 줄이면 클래스 기본 높이 48)
 ICON_ROOM = 16     # 컴포넌트·아티팩트 아이콘이 이름과 겹치지 않게 머리 칸 좌우에 더하는 폭
@@ -33,7 +35,12 @@ class PackageShape(Shape):
 
     def size(self, e: Element) -> tuple[float, float]:
         _, tab_w, tab_h = self._tab(e)
-        return max(MIN_WIDTH, tab_w + TAB_STEP), tab_h + PACKAGE_BODY
+        return max(MIN_WIDTH, 2 * tab_w + TAB_STEP), tab_h + PACKAGE_BODY
+
+    def parts(self, e: Element, rect: Box) -> tuple[Box, ...]:
+        """탭과 몸통 — 탭 오른쪽 빈 곳은 패키지가 아니다."""
+        _, tab_w, tab_h = self._tab(e)
+        return (rect[0], rect[1], rect[0] + tab_w, rect[1] + tab_h), (rect[0], rect[1] + tab_h, rect[2], rect[3])
 
     def insets(self, e: Element) -> Box:
         return 0.0, self._tab(e)[2], 0.0, 0.0

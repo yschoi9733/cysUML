@@ -21,7 +21,7 @@ DEFAULT_DIR = "diagrams"
 KIND_NAMES = {  # 불합격 종류(boxcheck.KINDS)를 도구 설명에 쓰는 말
     "box_overlap": "요소끼리 겹치거나 붙음",
     "inner_off_area": "안의 요소가 바깥 요소의 칸 밖으로 나가거나 테두리·이름 칸에 붙음",
-    "line_through_box": "선이 양 끝도 끝을 품은 요소도 아닌 요소를 지나감",
+    "line_through_box": "선이 그 선과 상관없는 요소를 지나감",
     "line_through_name": "선이 끝 요소나 끝을 품은 요소의 이름 칸을 지나감",
     "line_along_container": "선이 끝을 품은 요소의 테두리를 따라감",
     "line_along_own_box": "선이 제 끝 요소 테두리에 붙어 감",

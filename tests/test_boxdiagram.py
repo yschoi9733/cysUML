@@ -324,6 +324,7 @@ def test_keys_point_to_nameless_two_line_and_same_named_elements():
     (el("oval", 3, 0, 0), "elements[0].name: 문자열이나 줄마다 문자열인 목록이어야 한다"),
     (el("triangle", "x", 0, 0), "elements[0].kind: 'class' · 'abstract'"),
     ({"name": "x", "left": 0, "top": 0}, "elements[0]: 'kind' 필드가 빠졌다"),
+    ({"kind": "oval", "left": 0, "top": 0}, "elements[0]: 'name' 필드가 빠졌다"),
     (el("oval", "x", 0, 0, name_side="top"), "elements[0].name_side: 모르는 필드다"),
     (el("dot", "x", 0, 0, name_side="up"), "elements[0].name_side: 'bottom' · 'top' · 'left' · 'right'"),
     (el("dot", "x", 0, 0, width=40), "elements[0].width: 모르는 필드다"),

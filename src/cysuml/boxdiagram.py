@@ -133,6 +133,11 @@ class Shape:
         """안에 요소를 두는 모양의 테두리 선 — 그 안의 요소를 잇는 선이 건너도 되지만 따라가면 안 되고, 선 글자가 겹치면 안 되는 선."""
         return self.border(e, rect).edges()
 
+    def parts(self, e: Element, rect: T.Box) -> tuple[T.Box, ...]:
+        """요소끼리 겹치는지 볼 때 자리를 이루는 사각형들. 기본은 자리 하나이고, 자리 안에 요소가 아닌 빈 곳이 있는 모양(패키지 탭
+        오른쪽)은 나눠 넘긴다. 모양 밖 이름이 있는 요소는 모양과 이름을 함께 덮는 자리 하나로 본다."""
+        return (rect,)
+
     def draw(self, c: Canvas, p: PlacedBox) -> None:
         raise NotImplementedError
 
@@ -245,7 +250,7 @@ class Diagram:
 @dataclass(frozen=True)
 class PlacedBox:
     """자리를 잡은 요소. rect는 자리(모양 밖 이름까지 덮는다), shape_rect는 모양 자리, inner는 안의 요소를 둘 칸(안에 요소를 둘 수
-    없는 모양은 None), zones는 이름 칸, frame은 안에 요소를 두는 모양의 테두리 선이다."""
+    없는 모양은 None), zones는 이름 칸, frame은 안에 요소를 두는 모양의 테두리 선, parts는 겹침을 볼 때 자리를 이루는 사각형들이다."""
 
     box: Element
     shape: Shape = field(compare=False, repr=False)
@@ -256,6 +261,11 @@ class PlacedBox:
     inner: Optional[T.Box] = None
     frame: tuple[Segment, ...] = ()
     name_at: tuple[tuple[float, float], ...] = ()  # 모양 밖 이름 줄마다 가운데
+    parts: tuple[T.Box, ...] = ()
+
+    def __post_init__(self):
+        if not self.parts:
+            object.__setattr__(self, "parts", (self.rect,))
 
     @property
     def key(self) -> str:
@@ -309,14 +319,14 @@ class Layout:
         """안에 다른 요소를 품은 요소의 열쇠."""
         return frozenset(p.box.parent for p in self.boxes if p.box.parent is not None)
 
+    @cached_property
+    def _lineage(self) -> dict[str, tuple[str, ...]]:
+        parent_of = {p.key: p.box.parent for p in self.boxes}
+        return {key: tuple(ancestors(parent_of, key)) for key in parent_of}
+
     def ancestors(self, key: str) -> tuple[str, ...]:
         """key를 품은 요소들(바로 품은 것부터 바깥으로)."""
-        out = []
-        parent = self.by_key[key].box.parent
-        while parent is not None:
-            out.append(parent)
-            parent = self.by_key[parent].box.parent
-        return tuple(out)
+        return self._lineage[key]
 
     def holders(self, r: Relation) -> frozenset[str]:
         """관계의 끝 요소를 품은 요소들."""
@@ -346,6 +356,17 @@ class Drawing:
 
 
 # ---------------------------------------------------------------- 입력 읽기
+
+
+def ancestors(parent_of: Mapping[str, Optional[str]], key: str) -> list[str]:
+    """key를 품은 요소들(바로 품은 것부터 바깥으로). parent_of는 열쇠 → 품은 요소의 열쇠다. 모르는 열쇠나 고리(in이 서로를
+    가리킨다)에 닿으면 거기서 멈춘다."""
+    out: list[str] = []
+    up = parent_of.get(key)
+    while up is not None and up in parent_of and up != key and up not in out:
+        out.append(up)
+        up = parent_of[up]
+    return out
 
 
 def josa(word: str, with_final: str, without_final: str) -> str:
@@ -419,7 +440,8 @@ class _Reader(Reader):
         peek = v.get("kind", spec.default_kind)
         shape = spec.shapes.get(peek) if isinstance(peek, str) else None
         fields = spec.element_fields(shape)
-        named = shape.named if shape is not None else not spec.extended
+        # 모양을 모르면(kind가 없거나 틀렸다) 이름 없는 모양이 하나도 없을 때만 이름이 빠졌다고 함께 알린다
+        named = shape.named if shape is not None else all(s.named for s in spec.shapes.values())
         required = ("name",) * named + ("kind",) * (spec.default_kind is None) + ("left", "top")
         before = len(self.problems)
         self.obj(v, path, fields, required)
@@ -515,6 +537,7 @@ class _Reader(Reader):
         before = len(self.problems)
         field_ = self.spec.list_field
         by_key = {e.key: e for _, e in read}
+        parent_of = {e.key: e.parent for _, e in read}
         for path, e in read:
             if e.parent is None:
                 continue
@@ -530,10 +553,8 @@ class _Reader(Reader):
                 self.fail(where, f"{field_}[{seen[e.parent]}]({by_key[e.parent].kind!r})는 안에 요소를 둘 수 없다 — 안에 "
                                  f"요소를 두는 종류: {holders or '없음'}")
             else:
-                chain, up = [e.key], e.parent
-                while up is not None and up not in chain and up in by_key:
-                    chain.append(up)
-                    up = by_key[up].parent
+                chain = [e.key, *ancestors(parent_of, e.key)]
+                up = parent_of.get(chain[-1])
                 if up in chain:
                     self.fail(where, f"in이 고리를 이룬다({' → '.join(_show(k) for k in chain + [up])})")
         return len(self.problems) == before
@@ -565,15 +586,7 @@ class _Reader(Reader):
                 seen[key] = i
         read = [(path, e) for path, (_, _, e) in got if e is not None]
         nested = self._parents(read, seen)
-        by_key = {e.key: e for _, e in read}
-
-        def ancestors(key: str) -> list[str]:
-            out, up = [], by_key[key].parent
-            while up is not None and up in by_key and up not in out:
-                out.append(up)
-                up = by_key[up].parent
-            return out
-
+        parent_of = {e.key: e.parent for _, e in read}
         relations = []
         for i, v in enumerate(self.items(o["relations"], "relations") if "relations" in o else []):
             path = _at("relations", i)
@@ -583,9 +596,10 @@ class _Reader(Reader):
                 self._missing(_at(path, key), n, seen)
             if r is None or missing:
                 continue
-            if nested and r.source in by_key and r.target in by_key and (
-                    r.source in ancestors(r.target) or r.target in ancestors(r.source)):
-                inner, outer = (r.target, r.source) if r.source in ancestors(r.target) else (r.source, r.target)
+            if nested and r.source in parent_of and r.target in parent_of and (
+                    r.source in ancestors(parent_of, r.target) or r.target in ancestors(parent_of, r.source)):
+                inner, outer = ((r.target, r.source) if r.source in ancestors(parent_of, r.target)
+                                else (r.source, r.target))
                 self.fail(path, f"한 끝({_show(inner)})이 다른 끝({_show(outer)}) 안에 있다 — 품은 {w.noun}와 그 안의 "
                                 f"{w.noun}는 선으로 잇지 않는다")
                 continue
@@ -766,20 +780,13 @@ def _outside_name(e: Element, w: float, h: float) -> tuple[float, float, Point, 
 
 def _place(spec: Spec, diagram: Diagram) -> tuple[PlacedBox, ...]:
     """요소 크기와 자리. 안의 요소부터 재서 바깥 요소가 안의 요소와 제 이름 칸을 NEST_PAD 여백을 두고 덮도록 오른쪽·아래로 늘린다."""
-    by_key = {e.key: e for e in diagram.boxes}
-
-    def depth(e: Element) -> int:
-        n, up = 0, e.parent
-        while up is not None:
-            n, up = n + 1, by_key[up].parent
-        return n
-
+    parent_of = {e.key: e.parent for e in diagram.boxes}
     children: dict[str, list[Element]] = {}
     for e in diagram.boxes:
         if e.parent is not None:
             children.setdefault(e.parent, []).append(e)
     done: dict[str, PlacedBox] = {}
-    for e in sorted(diagram.boxes, key=depth, reverse=True):
+    for e in sorted(diagram.boxes, key=lambda e: len(ancestors(parent_of, e.key)), reverse=True):
         shape = spec.shapes[e.kind]
         w, h = shape.size(e)
         offset: Point = (0.0, 0.0)
@@ -787,12 +794,11 @@ def _place(spec: Spec, diagram: Diagram) -> tuple[PlacedBox, ...]:
         if shape.outside_name and e.name:
             sw, sh = w, h
             w, h, offset, zone = _outside_name(e, sw, sh)
-        if shape.holds:
-            il, it, ir, ib = shape.insets(e)
-            for c in children.get(e.key, []):
-                cr = done[c.key].rect
-                w = max(w, cr[2] + NEST_PAD + ir - e.left)
-                h = max(h, cr[3] + NEST_PAD + ib - e.top)
+        insets = shape.insets(e) if shape.holds else (0.0, 0.0, 0.0, 0.0)
+        for c in children.get(e.key, []):
+            cr = done[c.key].rect
+            w = max(w, cr[2] + NEST_PAD + insets[2] - e.left)
+            h = max(h, cr[3] + NEST_PAD + insets[3] - e.top)
         w, h = max(e.min_width, w), max(e.min_height, h)
         rect = (e.left, e.top, e.left + w, e.top + h)
         if zone is not None:
@@ -807,10 +813,10 @@ def _place(spec: Spec, diagram: Diagram) -> tuple[PlacedBox, ...]:
         inner = None
         frame: tuple[Segment, ...] = ()
         if shape.holds:
-            il, it, ir, ib = shape.insets(e)
-            inner = (rect[0] + il, rect[1] + it, rect[2] - ir, rect[3] - ib)
+            inner = (rect[0] + insets[0], rect[1] + insets[1], rect[2] - insets[2], rect[3] - insets[3])
             frame = tuple(shape.frame(e, rect))
-        done[e.key] = PlacedBox(e, shape, rect, rect, shape.border(e, rect), tuple(shape.name_zones(e, rect)), inner, frame)
+        done[e.key] = PlacedBox(e, shape, rect, rect, shape.border(e, rect), tuple(shape.name_zones(e, rect)), inner, frame,
+                                parts=tuple(shape.parts(e, rect)))
     return tuple(done[e.key] for e in diagram.boxes)
 
 
