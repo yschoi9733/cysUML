@@ -291,6 +291,20 @@ def test_socket_with_bends_keeps_its_half_circle_on_the_ball_center():
     assert math.dist(r.points[-1], c) == pytest.approx(C.SOCKET)  # 마지막 구간도 원 가운데를 향한다
 
 
+@pytest.mark.parametrize("dx, ok", [(16, False), (20, False), (21, True)])
+def test_bend_next_to_a_socket_must_clear_its_half_circle(dx, ok):
+    # 원 왼쪽 dx에 꺾는 점을 두고 위에서 곧게 내려와 꺾어 들어온다. 원 쪽 끝 구간(dx − 10)이 띄운 거리 5와 소켓 반원 길이 5를
+    # 더한 10보다 길어야 한다 — 16이면 세로 구간이 반원 꼭대기(dx 15) 1px 옆을 지나 반원과 한데 붙어 보인다
+    c = ball_center(name_side="right")
+    data = ([el("lollipop", "Api", 0, 0, name_side="right"), el("component", "U", c[0] - dx - 45, c[1] - 250)],
+            [rel("requires", "U", "Api", via=[[c[0] - dx, c[1]]])])
+    if ok:
+        assert report(*data).passed
+    else:
+        with pytest.raises(InputError, match=r"to 쪽 끝 구간 길이 .*끝 모양 길이와 띄운 거리를 더한 길이\(10\)보다 길지 않다"):
+            draw(*data)
+
+
 @pytest.mark.parametrize("side", ["bottom", "top"])
 def test_bar_ball_and_socket_in_a_straight_line_pass_with_the_name_beside(side):
     assert socket_and("association", 0, name_side=side).passed

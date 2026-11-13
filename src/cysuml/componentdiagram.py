@@ -9,12 +9,12 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Union
+from typing import Any
 
 from . import boxdiagram as B
 from .boxcheck import BOX_CLEARANCE, KINDS
 from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Element, EndShape, PlacedBox, RelationType, Shape, Spec, floored
-from .canvas import SCALE, Canvas, Line, Point, Polygon
+from .canvas import SCALE, Canvas, Line, Point
 from .classdiagram import RELATIONS as CLASS_RELATIONS
 from .geom import Border, EllipseBorder
 from .guide import (COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, flow, places_result,
@@ -60,16 +60,19 @@ class LollipopShape(Shape):
 LOLLIPOP = LollipopShape()
 
 
-def _socket(c: Canvas, tip: Point, frm: Point, at_: Point, o: str) -> Union[Line, Polygon]:
-    """소켓 반원: 원 가운데(at_ — 원이 선을 향하게 한 점)를 가운데로, 선 끝(tip)을 지나 원을 감싸는 반원. 선 끝은 원 둘레에서
-    SOCKET_GAP 앞이라 반지름이 SOCKET이고, 양 끝은 선과 직각인 쪽이다 — 꺾는 점을 준 소켓도 반원 가운데가 원 가운데와 같다."""
-    r = math.dist(at_, tip)
+def _socket(c: Canvas, tip: Point, frm: Point, at_: Point, o: str) -> Line:
+    """소켓 반원: 원 가운데(at_ — 원이 선을 향하게 한 점)를 가운데로 한 반지름 SOCKET 반원. 원 쪽 끝 구간은 원 가운데를 향하고
+    선 끝(tip)은 원 둘레에서 SOCKET_GAP 앞이라 반원 꼭대기가 선 끝이고, 양 끝은 선과 직각인 쪽이다 — 꺾는 점을 준 소켓도 반원
+    가운데가 원 가운데와 같다."""
     th = math.atan2(tip[1] - at_[1], tip[0] - at_[0])
-    return c.line([(at_[0] + r * math.cos(th + a), at_[1] + r * math.sin(th + a))
+    return c.line([(at_[0] + SOCKET * math.cos(th + a), at_[1] + SOCKET * math.sin(th + a))
                    for a in (math.pi * (k / ARC_STEPS - 0.5) for k in range(ARC_STEPS + 1))], owner=o)
 
 
-SOCKET_HEAD = EndShape("소켓 반원", 0, _socket, gap=SOCKET_GAP)
+# 길이는 반원 꼭대기에서 꺾는 점까지 둘 거리다 — 원 쪽 끝 구간이 띄운 거리(SOCKET_GAP)에 이만큼 더 길어야 해서, 끝 구간과 직각으로
+# 꺾은 앞 구간도 반원에서 이만큼 떨어진다. 검사는 선이 제 열린 끝 모양에 닿을 때만 보므로, 길이가 없으면 1px 옆을 따라가는 선이
+# 합격했다(실측)
+SOCKET_HEAD = EndShape("소켓 반원", SOCKET_GAP, _socket, gap=SOCKET_GAP)
 REQUIRES = "requires"
 RELATIONS = {**CLASS_RELATIONS, REQUIRES: RelationType("소켓", end=SOCKET_HEAD, role="인터페이스를 쓰는 쪽")}
 
@@ -113,7 +116,8 @@ SOCKET_INPUT = f"""  - 이 도구는 관계 kind "{REQUIRES}"(소켓)도 받는�
 "lollipop")으로 긋는 실선인데, 원 둘레에서 {SOCKET_GAP}px 앞에서 멈추고 그 끝에 원을 감싸는 반원(반지름 {SOCKET:g}px — 원과 같은 \
 가운데)이 붙는다. 반원은 쓰는 쪽 절반을 감싸고 맞은편이 열려 있다. to가 원이 아니거나 from이 원이면 입력 오류다. name·stereotype·via를 \
 받고, from_multiplicity·to_multiplicity·navigable은 받지 않는다. 꺾는 점을 주면 원 쪽 끝 구간이 원 가운데를 향하고 반원도 그 구간 \
-쪽에 붙는다."""
+쪽에 붙는다. 그 끝 구간은 원 둘레에서 {SOCKET_GAP + SOCKET_HEAD.length:g}px보다 길어야 한다(꺾는 점을 반원에서 \
+{SOCKET_HEAD.length:g}px 넘게 뗀다)."""
 
 TIPS = f"""컴포넌트도 배치 요령:
 - 제공 인터페이스는 원(lollipop)으로 그린다 — 제공하는 컴포넌트에서 원으로 association을 긋고(이 도구의 연관 기본 방향은 "none"이라 \
