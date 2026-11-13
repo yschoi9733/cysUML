@@ -254,7 +254,7 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
 
 def spacing_tips(spec: Spec, label: str, size_note: str = "") -> str:
     """(아) 배치 요령 끝 두 항목. label은 선 글자 이름("관계 이름·스테레오타입"·"전이" 등), size_note는 크기 문장에 붙이는
-    괄호 말이다. 안에 요소를 두는 모양이 있는 도구면 크기가 안의 요소에도 맞춰 는다고 적는다. noun(요소·상자)은 받침이 없어
+    괄호 말이다. 안에 요소를 두는 모양이 있는 도구면 크기가 안의 요소에도 맞춰 늘어난다고 적는다. noun(요소·상자)은 받침이 없어
     조사가 그대로 맞는다(Words가 막는다)."""
     noun = spec.words.noun
     inner = f"와 안의 {noun}" if _holds(spec) else ""
