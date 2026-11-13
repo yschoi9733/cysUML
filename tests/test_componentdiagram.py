@@ -159,6 +159,22 @@ def test_arrows_into_one_circle_need_room_between_them(gap, passed):
     assert passed or kinds(r) == ["head_overlap"]
 
 
+@pytest.mark.parametrize("gap, passed", [(10, False), (40, True)])
+def test_arrow_into_a_circle_needs_room_from_the_bar(gap, passed):
+    # 막대는 원 아래(270°)에서, 쓰는 쪽은 그보다 gap만큼 돈 쪽에서 온다. 이름은 왼쪽. 두 컴포넌트가 겹치지 않게 멀리 둔다
+    d = draw([el("lollipop", "Api", 0, 0, name_side="left")])
+    api = placed(d, "Api")
+    cx, cy = (api.shape_rect[0] + api.shape_rect[2]) / 2, (api.shape_rect[1] + api.shape_rect[3]) / 2
+    ends = []
+    for name, a in (("P", 270), ("U", 270 + gap)):
+        x, y = cx + 700 * math.cos(math.radians(a)), cy - 700 * math.sin(math.radians(a))
+        ends.append(el("component", name, x - 45, y - 24))
+    r = report([el("lollipop", "Api", 0, 0, name_side="left"), *ends],
+               [rel("association", "P", "Api"), rel("dependency", "U", "Api")])
+    assert r.passed == passed, r.summary()
+    assert passed or kinds(r) == ["line_through_head"]
+
+
 # ---------------------------------------------------------------- 막대사탕 모양·자리
 
 
