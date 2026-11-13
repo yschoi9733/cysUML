@@ -559,20 +559,30 @@ def test_short_end_segment_error_tells_the_bend_distance_only_for_an_arrowhead()
         draw([el("class", "B", 0, 0), el("class", "A", -50, 200)],
              [rel("dependency", "A", "B", via=[[-5, 24]]), rel("generalization", "A", "B", via=[[-5, 30]])])
     arrow, triangle = e.value.problems
-    assert arrow.startswith("relations[0]: to 쪽 끝 구간 길이 5가 끝 모양 길이(10)보다 짧다")
-    assert arrow.endswith(f"더 떼어 놓는다(화살촉 쪽 끝 구간을 꺾으면 {K.ARROW_BEND}px 이상)")
-    assert triangle.startswith("relations[1]: to 쪽") and triangle.endswith("더 떼어 놓는다")
+    assert arrow == (f"relations[0]: to 쪽 끝 구간 길이 5가 끝 모양 길이(10)보다 짧다 — 마지막 꺾는 점을 요소에서 {K.ARROW_BEND}px "
+                     "이상 떼어 놓는다")
+    assert triangle.startswith("relations[1]: to 쪽") and triangle.endswith("마지막 꺾는 점을 요소에서 더 떼어 놓는다")
 
 
-def test_hint_tells_the_bend_distance_only_when_a_longer_end_segment_would_help():
-    # 앞 구간이 직각에서 화살촉 쪽으로 60° 더 기울면 권하는 거리(ARROW_BEND)로도 갈래 끝에 붙는다. 꺾는 점이 이미 그만큼 떨어져
-    # 있으니 고치는 법은 거리를 다시 말하지 않는다
+def test_hint_tells_the_bend_distance_when_the_bent_segment_meets_its_arrowhead():
+    # 앞 구간이 직각에서 화살촉 쪽으로 60° 더 기울면 권하는 거리(ARROW_BEND)로도 갈래 끝에 붙는다. 꺾는 점을 더 떼면 풀리니 고치는
+    # 법은 거리와 "비스듬히 되돌아오면 더"를 함께 말한다
     corner = (-K.ARROW_BEND, 24)
     p = (corner[0] + 20 * math.sin(math.radians(60)), corner[1] + 20 * math.cos(math.radians(60)))
     r = report([el("class", "B", 0, 0), el("class", "A", p[0] - 300, p[1] + 176)],
                [rel("dependency", "A", "B", via=[list(p), list(corner)])])
     (f,) = r.failures
     assert f.kind == "line_through_head" and "화살촉" in f.problem
+    assert K.bend_away(P.SPEC.words) in f.hint
+
+
+def test_hint_leaves_out_the_bend_distance_when_a_far_segment_meets_its_arrowhead():
+    # 끝 구간은 60px이고, 그보다 앞의 세로 구간(x −9)이 B 앞 화살촉의 갈래 끝(x ≈ −8.83) 곁을 지난다. 꺾는 점을 떼어도 안 풀린다
+    r = report([el("class", "B", 0, 0), el("class", "A", -350, -150)],
+               [rel("dependency", "A", "B", via=[[-9, -60], [-9, 100], [-60, 100], [-60, 24]])])
+    assert "line_through_head" in kinds(r)
+    (f,) = [f for f in r.failures if f.kind == "line_through_head"]
+    assert "선이 제 선 끝 모양에 닿는다" in f.problem
     assert K.bend_away(P.SPEC.words) not in f.hint
 
 

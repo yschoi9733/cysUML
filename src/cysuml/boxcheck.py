@@ -18,8 +18,8 @@ import operator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
-from .boxdiagram import (ARROW_BEND, ARROW_HEAD, BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, Layout, NameZone, PlacedBox, PlacedRelation,
-                         Words, josa)
+from .boxdiagram import (ARROW_BEND, ARROW_HEAD, BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, Layout, NameZone, PlacedBox,
+                         PlacedRelation, Words, josa)
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
                    grow, hits, inside, meets, outline, overlap, span)
@@ -229,13 +229,12 @@ class _Relation:
         """선 끝 모양 head가 얹힌 끝 구간의 차례(path)."""
         return 0 if math.dist(head.tip, self.points[0]) <= LINE_EPS else len(self.path) - 1
 
-    def bent_short(self, head: _Head, hit: tuple[Segment, ...]) -> bool:
-        """화살촉이 얹힌 끝 구간이 ARROW_BEND보다 짧고, 그 끝 구간과 꺾여 이어진 앞 구간이 화살촉에 닿았는지 — 꺾는 점을 더 떼면
-        풀리는 경우다."""
+    def bent_beside(self, head: _Head, hit: tuple[Segment, ...]) -> bool:
+        """화살촉이 얹힌 끝 구간과 꺾여 이어진 앞 구간이 그 화살촉에 닿았는지 — 꺾는 점을 끝 요소에서 더 떼면 풀리는 경우다(멀리 있는
+        다른 구간이 화살촉을 지나는 것은 꺾는 점을 떼어도 안 풀린다)."""
         end = self._end_of(head)
         nxt = 1 if end == 0 else end - 1
-        return (head.name == ARROW_HEAD.name and len(self.path) > 1 and math.dist(*self.path[end]) < ARROW_BEND - PLACE_EPS
-                and self.path[nxt] in hit)
+        return head.name == ARROW_HEAD.name and len(self.path) > 1 and any(_same(self.path[nxt], s) for s in hit)
 
 
 @dataclass(frozen=True, eq=False)
@@ -646,7 +645,7 @@ def _lines_through_heads(relations: list[_Relation], pairs: Pairs, near: dict[fr
         if own:
             problem = f"선이 제 선 끝 모양에 닿는다: {_titles(passers)}, {h.name}(자리 {fmt_rect(where)})."
             hint = "꺾는 점(via)을 고쳐 선이 제 선 끝 모양을 비켜 가게 한다" + (
-                f" — {bend_away(w)}." if any(r.bent_short(h, hit) for r in passers) else ".")
+                f" — {bend_away(w)}." if any(r.bent_beside(h, hit) for r in passers) else ".")
         else:
             whose = "·".join(f"관계 {o.name}" for o in sorted(owners, key=_index))
             problem = f"선이 다른 관계의 선 끝 모양에 닿는다: {_titles(passers)}, {whose}의 {h.name}(자리 {fmt_rect(where)})."

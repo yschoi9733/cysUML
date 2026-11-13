@@ -821,14 +821,9 @@ class _Spots:
         return best[1]
 
 
-def shape_lengths(r: Relation, t: RelationType) -> tuple[float, float]:
-    """선 처음(from)과 끝(to)에 그리는 모양이 선을 따라 차지하는 길이."""
-    start, end = (_end_shape(r, t, key) for key in ("from", "to"))
-    return (start.length if start else 0), (end.length if end else 0)
-
-
 def _end_shape(r: Relation, t: RelationType, key: str) -> Optional[EndShape]:
-    """선 처음(from)이나 끝(to)에 그리는 모양."""
+    """선 처음(from)이나 끝(to)에 그리는 모양. 고정 모양이 있는 종류는 그 쪽 방향(navigable)을 읽기에서 받지 않으므로 둘 중 하나다
+    (_draw_relation과 같은 모양)."""
     fixed = t.start if key == "from" else t.end
     return fixed or (ARROW_HEAD if t.navigable and r.navigable in (key, "both") else None)
 
@@ -864,9 +859,9 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
             problems.append(f"{path}: 선이 {key} {w.noun} {_show(p_.key)}({fmt_rect(p_.border.bounds)}) 안을 지난다 — 꺾는 점을 그 "
                             f"{w.noun} 밖으로 돌린다")
     lengths = [math.dist(p, q) for p, q in zip(points, points[1:])]
-    head, tail = shape_lengths(r, t)
-    gaps = (t.start.gap if t.start else 0.0, t.end.gap if t.end else 0.0)
-    head, tail = head + gaps[0], tail + gaps[1]
+    shapes = (_end_shape(r, t, "from"), _end_shape(r, t, "to"))  # 끝 모양 길이와 띄운 거리
+    gaps = tuple(s.gap if s else 0.0 for s in shapes)
+    head, tail = ((s.length if s else 0) + g for s, g in zip(shapes, gaps))
 
     def short(length: float, needs: tuple[float, ...], gap: bool) -> Optional[str]:
         """구간이 모자라면 그 글. needs는 그 구간이 품어야 할 끝마다의 길이(끝 모양 길이와 띄운 거리)다. 선 끝을 띄우는 끝이 있으면
@@ -882,13 +877,13 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
         if (why := short(lengths[0], (head, tail), any(gaps))) is not None:
             problems.append(f"{path}: 선 길이 {fmt_num(lengths[0])}가 양 {why} — {w.noun}를 더 떼어 놓는다")
     else:
-        arrows = [_end_shape(r, t, "from") is ARROW_HEAD, _end_shape(r, t, "to") is ARROW_HEAD]
-        for length, need, gap, key, which, arrow in ((lengths[0], head, gaps[0], "from", "첫", arrows[0]),
-                                                     (lengths[-1], tail, gaps[1], "to", "마지막", arrows[1])):
+        for length, need, gap, key, which, shape in ((lengths[0], head, gaps[0], "from", "첫", shapes[0]),
+                                                     (lengths[-1], tail, gaps[1], "to", "마지막", shapes[1])):
             if (why := short(length, (need,), bool(gap))) is not None:
-                bend = f"(화살촉 쪽 끝 구간을 꺾으면 {ARROW_BEND}px 이상)" if arrow else ""
-                problems.append(f"{path}: {key} 쪽 끝 구간 길이 {fmt_num(length)}가 {why} — {which} 꺾는 점을 {w.noun}에서 더 "
-                                f"떼어 놓는다{bend}")
+                # 화살촉은 끝 모양 길이만큼만 떼면 꺾은 앞 구간이 갈래 끝에 붙어 검사에 걸리므로 그만큼 떼라고 한다
+                far = f"{ARROW_BEND}px 이상" if shape is ARROW_HEAD else "더"
+                problems.append(f"{path}: {key} 쪽 끝 구간 길이 {fmt_num(length)}가 {why} — {which} 꺾는 점을 {w.noun}에서 {far} "
+                                "떼어 놓는다")
     if sum(lengths) > MAX_LINE:
         problems.append(f"{path}: 선 길이 {fmt_num(sum(lengths))}가 {MAX_LINE}을 넘는다 — {w.noun}를 가까이 모은다")
     return (None if problems else _shorten(points, *gaps)), problems
