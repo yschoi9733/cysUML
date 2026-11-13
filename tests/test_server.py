@@ -73,6 +73,7 @@ EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 �
     "order": "draw_class_diagram",
     "packages": "draw_package_diagram",
     "components": "draw_component_diagram",
+    "billing": "draw_component_diagram",
     "deployment": "draw_deployment_diagram",
     "use-cases": "draw_use_case_diagram",
     "order-states": "draw_state_diagram",

@@ -150,6 +150,33 @@ an arrowhead in this tool unless `navigable` is given, and each user points at t
 It gets back the same things as the package diagram tool, and for each circle the place of the circle alone next to
 the place of the circle with its name. The checks are the same: a line through a circle or its name fails.
 
+A user of an interface can also be drawn as a socket. A `requires` relation from the user to the circle is a solid
+line that stops short of the circle and ends in a half circle wrapped around it (ball and socket). Its `to` must be a
+`lollipop` and its `from` must not be one. A circle takes one socket, since two half circles overlap, so any other
+user points at the circle with a `dependency`. A line that touches a half circle fails. With the icon notations,
+the same tool draws a textbook-style picture of UML 1 components and folded-page artifacts:
+
+```json
+{
+  "file_name": "billing",
+  "elements": [
+    {"kind": "artifact_icon", "name": "Billing.exe", "left": 38, "top": 0, "name_side": "right"},
+    {"kind": "component_icon", "name": "Billing", "left": 0, "top": 110},
+    {"kind": "lollipop", "name": "IBilling", "left": 190, "top": 124},
+    {"kind": "component_icon", "name": "Register", "stereotype": "component", "left": 320, "top": 103},
+    {"kind": "component_icon", "name": "Course", "left": 0, "top": 260},
+    {"kind": "artifact_icon", "name": "Course.dll", "left": 24, "top": 380}
+  ],
+  "relations": [
+    {"kind": "dependency", "from": "Billing.exe", "to": "Billing", "stereotype": "manifest"},
+    {"kind": "association", "from": "Billing", "to": "IBilling"},
+    {"kind": "requires", "from": "Register", "to": "IBilling"},
+    {"kind": "dependency", "from": "Register", "to": "Course", "via": [[385, 284]]},
+    {"kind": "dependency", "from": "Course.dll", "to": "Course", "stereotype": "manifest"}
+  ]
+}
+```
+
 ### Deployment diagrams
 
 The tool is `draw_deployment_diagram`. It shows which computers (nodes) the software runs on: components and
@@ -384,7 +411,10 @@ uvx cysuml
   실현하는 클래스를 그린다. 패키지도 도구가 받는 요소(아이콘 표기 포함)에 더해 `lollipop`(제공 인터페이스 원 — 작은 원과 그 밖에 쓰는
   이름으로 그린다. 이름 쪽은 `name_side`)을 받는다. 제공하는 컴포넌트는 원과 `association`으로 잇고(이 도구에서는 `navigable`을
   주지 않으면 화살촉이 없다), 쓰는 쪽은 원으로 `dependency`를 긋는다. 결과는 패키지도와 같고, 원마다 원만의 자리도 함께
-  돌려준다. 검사도 같고, 선이 원이나 그 이름을 지나면 불합격이다.
+  돌려준다. 검사도 같고, 선이 원이나 그 이름을 지나면 불합격이다. 쓰는 쪽은 소켓으로도 그린다 — 쓰는 쪽에서 원으로
+  `requires`를 그으면 실선이 원 앞에서 멈추고 그 끝에 원을 감싸는 반원이 붙는다. `to`는 원이어야 하고 `from`은 원이 아니어야
+  한다. 한 원에 소켓은 하나이고(반원 둘은 겹친다), 다른 쓰는 쪽은 `dependency`로 원을 가리킨다. 반원에 닿는 선은 불합격이다.
+  아이콘 표기 컴포넌트·아티팩트와 소켓을 함께 쓴 그림이 위 영어 절의 `billing` 예시다.
 - **배치도**(deployment diagram)는 `draw_deployment_diagram`으로 그린다. 소프트웨어(컴포넌트·아티팩트)가 어느 컴퓨터(노드)에서
   도는지 보인다. 노드 안에 컴포넌트·아티팩트·노드를 `in`으로 넣고, 노드끼리는 통신 경로(`association` — `name`에 HTTPS 같은
   프로토콜)로 잇고, 노드 밖 요소에서 노드로 «deploy»(`stereotype`이 `deploy`인 `dependency`)를 긋는다. 이 도구는 클래스끼리
