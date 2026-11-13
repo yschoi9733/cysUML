@@ -376,6 +376,20 @@ def test_wrong_keys_nesting_and_relations(elements, relations, expected):
     assert any(p.startswith(expected) for p in e.value.problems), e.value.problems
 
 
+def test_other_problems_are_told_with_a_wrong_in():
+    # E의 in이 틀려도(클래스 안) C→P(품은 요소와 그 안의 요소) 관계 문제를 함께 알린다
+    with pytest.raises(InputError) as e:
+        draw([el("package", "P", 0, 0), el("class", "C", 20, 44, **{"in": "P"}), el("class", "K", 300, 0),
+              el("class", "E", 320, 44, **{"in": "K"})], [rel("dependency", "C", "P")])
+    assert [p.split(":")[0] for p in e.value.problems] == ["elements[3].in", "relations[0]"]
+
+
+def test_wrong_id_does_not_make_relations_to_the_name_missing():
+    with pytest.raises(InputError) as e:
+        draw([el("class", "A", 0, 0, id=5), el("class", "B", 300, 0)], [rel("dependency", "A", "B")])
+    assert [p.split(":")[0] for p in e.value.problems] == ["elements[0].id"]
+
+
 def test_a_loop_of_in_is_told_once():
     with pytest.raises(InputError) as e:
         draw([el("package", "A", 0, 0, **{"in": "C"}), el("package", "B", 0, 0, **{"in": "A"}),

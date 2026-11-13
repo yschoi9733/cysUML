@@ -348,6 +348,8 @@ def _box_overlaps(boxes: list[_Box], lay: Layout, w: Words) -> Iterator[Finding]
         for b in boxes[i + 1:]:
             if a.name in lay.ancestors(b.name) or b.name in lay.ancestors(a.name):
                 continue
+            if axis_gap(a.rect, b.rect) > BOX_CLEARANCE:  # 조각은 자리 안에 있어 자리끼리 떨어졌으면 조각도 떨어졌다
+                continue
             g, pa, pb = min(((apart(pa, pb), pa.bounds, pb.bounds) for pa in a.placed.parts for pb in b.placed.parts),
                             key=operator.itemgetter(0))
             if g > BOX_CLEARANCE:

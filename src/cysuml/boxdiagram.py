@@ -485,6 +485,8 @@ class _Reader(Reader):
         key, key_path = None, None
         if "id" in o:
             key, key_path = self.text(o["id"], _at(path, "id"), name=True), _at(path, "id")
+            if key is None and name is not None and len(name) == 1:  # 틀린 id는 알렸으니, 이름으로 가리킨 관계를 "없는 요소"로 또 알리지 않는다
+                key, key_path = name[0], _at(path, "name")
         elif name is not None and len(name) == 1:
             key, key_path = name[0], _at(path, "name")
         elif name is not None:
@@ -559,9 +561,8 @@ class _Reader(Reader):
                         f"(있는 {w.noun}: {self._known(seen) or '없음'})")
 
     def _parents(self, read: list[tuple[str, Element]], seen: dict[str, int],
-                 parent_of: dict[str, Optional[str]]) -> bool:
-        """in이 가리키는 요소를 본다. 모두 맞으면 True."""
-        before = len(self.problems)
+                 parent_of: dict[str, Optional[str]]) -> None:
+        """in이 가리키는 요소를 본다."""
         field_ = self.spec.list_field
         by_key = {e.key: e for _, e in read}
         loops: set[frozenset[str]] = set()
@@ -585,7 +586,6 @@ class _Reader(Reader):
                 if parent_of.get(chain[-1]) == e.key and frozenset(chain) not in loops:
                     loops.add(frozenset(chain))
                     self.fail(where, f"in이 고리를 이룬다({' → '.join(_show(k) for k in chain + [e.key])})")
-        return len(self.problems) == before
 
     def diagram(self, data) -> Optional[Diagram]:
         spec, w = self.spec, self.spec.words
@@ -614,8 +614,8 @@ class _Reader(Reader):
                 seen[key] = i
         read = [(path, e) for path, (_, _, e) in got if e is not None]
         parent_of = {e.key: e.parent for _, e in read}
-        nested = self._parents(read, seen, parent_of)
-        lines_of = lineage(parent_of) if nested else {}
+        self._parents(read, seen, parent_of)
+        lines_of = lineage(parent_of)  # in이 틀린 요소가 있어도 맞는 in만으로 잰다(ancestors는 고리·없는 열쇠에서 멈춘다)
         relations = []
         for i, v in enumerate(self.items(o["relations"], "relations") if "relations" in o else []):
             path = _at("relations", i)
