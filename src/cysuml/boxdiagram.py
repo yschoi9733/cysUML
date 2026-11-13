@@ -54,11 +54,17 @@ NAME_SEP = 4        # 모양과 모양 밖 이름 사이
 
 @dataclass(frozen=True)
 class Words:
-    """오류·검사 글의 말. 클래스도는 상자·변·이름, 새 그림 도구는 요소·테두리·열쇠다."""
+    """오류·검사 글의 말. 클래스도는 상자·변·이름, 새 그림 도구는 요소·테두리·열쇠다. noun 뒤 조사는 글마다 받침 없는 말에 맞춰
+    적어 두었으므로(가·를·와·는), noun은 받침 없는 말만 받는다."""
 
     noun: str
     edge: str
     key: str
+
+    def __post_init__(self):
+        last = self.noun[-1:]
+        if "가" <= last <= "힣" and (ord(last) - 0xAC00) % 28:
+            raise ValueError(f"요소를 부르는 말은 받침 없는 말이어야 한다(검사·오류 글의 조사가 그에 맞춰져 있다): {self.noun!r}")
 
 
 BOX_WORDS = Words("상자", "변", "이름")

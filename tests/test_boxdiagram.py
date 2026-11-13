@@ -485,6 +485,13 @@ def test_new_relation_kind_is_drawn_and_checked_without_changing_the_engine():
     assert kinds(r) == ["line_through_head"] and "화살촉" in r.failures[0].problem
 
 
+def test_words_take_only_a_noun_without_a_final_consonant():
+    # 검사·오류 글의 조사(가·를·와·는)가 받침 없는 말에 맞춰져 있다 — "활동가 …", "활동를 …"이 나가지 않게 만들 때 막는다
+    with pytest.raises(ValueError, match="받침 없는 말"):
+        B.Words("활동", "테두리", "열쇠")
+    assert B.Words("노드", "테두리", "열쇠").noun == "노드"
+
+
 def test_spec_refuses_a_navigable_relation_with_its_own_end_shape_and_odd_defaults():
     with pytest.raises(ValueError):
         B.RelationType("x", end=B.ARROW_HEAD, navigable=True)

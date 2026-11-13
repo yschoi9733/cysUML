@@ -46,7 +46,8 @@ PLACED_FLOW = """AI가 배치하는 그림(클래스도·패키지도 등)을 �
 
 def kind_names(kinds: Iterable[str], words: Words = ELEMENT_WORDS) -> list[str]:
     """불합격 종류를 도구 설명에 쓰는 말. "요소"·"테두리"를 그 도구의 말(words — 클래스도는 상자·변)로 바꿔, 도구 설명과 그 도구의
-    검사 글이 같은 말을 쓰게 한다. 클래스도 종류의 이름표에서 바뀌는 자리 뒤 조사는 받침과 상관없는 것(끼리·에)만 쓴다."""
+    검사 글이 같은 말을 쓰게 한다. noun은 받침 없는 말이라(Words가 막는다) "요소" 뒤 조사는 그대로 맞고, 클래스도 종류에서 "테두리"
+    뒤 조사는 받침과 상관없는 "에"뿐이다(중첩 종류의 "테두리를"은 클래스도 도구에 나오지 않는다)."""
     return [KIND_NAMES[k].replace("요소", words.noun).replace("테두리", words.edge) for k in kinds]
 
 
