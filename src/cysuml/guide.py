@@ -154,8 +154,11 @@ def relation_fields(spec: Spec) -> str:
     noun, edge = spec.words.noun, spec.words.edge
     middle, other = ((f"{noun} 가운데", f"상대 {noun} 가운데") if box
                      else (f"{noun} 가운데(요소 종류에 따로 적은 모양은 그 점)", f"상대 {noun}의 그 점"))
+    fixed_ends = _joined(t.label for t in types.values() if not t.reflexive)
+    never_self = f"({fixed_ends}{josa(fixed_ends, '은', '는')} 꺾는 점이 있어도 자기 자신으로 갈 수 없다)" if fixed_ends else ""
     lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "
-                 f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다.")
+                 f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 "
+                 f"한다{never_self}.")
     if rules := spec.rules.guide(spec):
         lines.append(rules)
     return "\n".join(lines)

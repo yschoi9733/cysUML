@@ -174,7 +174,8 @@ FILLED_DIAMOND = EndShape("마름모", DIAMOND, lambda c, tip, frm, o: c.diamond
 class RelationType:
     """관계 종류. start·end는 from·to 쪽 끝에 늘 그리는 모양이다. navigable이면 방향(navigable)을 받아 그 쪽에 화살촉을 그리고,
     multiplicity면 다중도를 받는다. trunk면 자식 여럿의 선이 한 줄기로 모여 한 끝 모양을 함께 쓰는 것(공유 줄기)을 받는다.
-    label(상속 등)과 role(from 쪽이 무엇인지 — 상속은 자식)은 오류 글과 도구 설명(guide.relation_fields)에 쓴다."""
+    reflexive가 아니면 자기 자신으로 가는 관계를 꺾는 점이 있어도 받지 않는다(상속 등). label(상속 등)과 role(from 쪽이 무엇인지
+    — 상속은 자식)은 오류 글과 도구 설명(guide.relation_fields)에 쓴다."""
 
     label: str
     dash: Optional[tuple[float, float]] = None
@@ -184,6 +185,7 @@ class RelationType:
     multiplicity: bool = False
     trunk: bool = False
     role: str = ""
+    reflexive: bool = True
 
     def __post_init__(self):
         if self.navigable and self.end is not None:
@@ -193,16 +195,12 @@ class RelationType:
 class Rules:
     """요소·관계의 짜임이 UML 표기에 맞는지 보는 규칙(Spec.rules). 선이 겹치는지와 달리 자리와 상관없어 읽기 끝에 본다. 틀린 짜임은
     r.fail로 다른 입력 오류와 함께 모아 그리지 않고, 그리되 뜻을 확인해 볼 짜임은 알림(Notice)으로 돌려 검사 결과에 싣는다. 그림
-    모듈은 이것을 이어받아 제 규칙을 정한다."""
-
-    def self_loop(self, spec: Spec, kind: str) -> Optional[str]:
-        """자기 자신으로 갈 수 없는 관계 종류면 그 오류 글, 아니면 None. 끝이 같은 관계를 읽을 때 부른다."""
-        return None
+    모듈은 이것을 이어받아 제 규칙을 정한다. 자기 자신으로 가는 관계를 막는 것은 관계 종류(RelationType.reflexive)가 정한다."""
 
     def check(self, r: Reader, spec: Spec, elements: list[tuple[str, Element]],
               relations: list[tuple[str, Relation]]) -> list[Notice]:
         """읽힌 요소와 관계를 (입력 안의 자리, 값)으로 받아 짜임을 본다. 다른 곳이 틀려 읽히지 않은 요소는 elements에 없으니, 끝 요소를
-        찾지 못한 관계는 건너뛴다(그 문제는 이미 알렸다). 자기 자신으로 가는 관계는 self_loop이 막지 않은 것만 relations에 든다."""
+        찾지 못한 관계는 건너뛴다(그 문제는 이미 알렸다). 자기 자신으로 가는 관계는 그 종류가 받을 때(reflexive)만 relations에 든다."""
         return []
 
     def guide(self, spec: Spec) -> str:
@@ -579,9 +577,9 @@ class _Reader(Reader):
                 self.fail(_at(_at(path, "via"), i), f"앞 꺾는 점과 같다 {q}")
             via.append(q)
         if source is not None and source == target:
-            why = spec.rules.self_loop(spec, kind) if kind is not None else None
-            if why:
-                self.fail(path, why)
+            if t is not None and not t.reflexive:
+                self.fail(path, f"{t.label}{josa(t.label, '은', '는')} 자기 자신으로 갈 수 없다 — from과 to를 다른 "
+                                f"{spec.words.noun}로 고친다")
             elif len(via) < 2:
                 self.fail(path, "자기 자신으로 가는 관계는 꺾는 점(via)이 둘 이상 있어야 고리로 그릴 수 있다")
         if len(self.problems) > before:

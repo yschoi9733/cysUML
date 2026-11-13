@@ -63,21 +63,25 @@ def test_inheritance_between_the_same_kind_reads_and_checks_as_before(source, ta
 
 def test_class_inheriting_an_interface_is_an_input_error_that_points_to_realization():
     (p,) = class_problems([box("Circle", 0), box("Shape", 300, kind="interface")], [rel("generalization", "Circle", "Shape")])
-    assert p == ("relations[0]: 상속의 두 끝 종류가 다르다('Circle'는 'class', 'Shape'는 'interface') — 상속은 같은 종류끼리 "
-                 "긋는다(class와 abstract는 같은 종류로 친다). 인터페이스를 구현하는 것이면 kind를 'realization'으로 바꾼다")
+    assert p == ("relations[0]: 상속의 두 끝 종류가 다르다(from 'Circle': 'class', to 'Shape': 'interface') — 상속은 같은 "
+                 "종류끼리 긋는다(class와 abstract는 같은 종류로 친다). 인터페이스를 구현하는 것이면 kind를 'realization'으로 바꾼다")
 
 
 @pytest.mark.parametrize("source, target", [("interface", "class"), ("class", "enum"), ("enum", "abstract"),
                                             ("interface", "enum")])
 def test_inheritance_between_different_kinds_is_an_input_error(source, target):
     (p,) = class_problems([box("A", 0, kind=source), box("B", 300, kind=target)], [rel("generalization", "A", "B")])
-    assert p.startswith(f"relations[0]: 상속의 두 끝 종류가 다르다('A'는 {source!r}, 'B'는 {target!r})")
+    assert p.startswith(f"relations[0]: 상속의 두 끝 종류가 다르다(from 'A': {source!r}, to 'B': {target!r})")
     assert p.endswith("상속은 같은 종류끼리 긋는다(class와 abstract는 같은 종류로 친다). from·to나 요소의 kind를 고친다")
 
 
-def test_topic_marker_follows_the_last_syllable_of_the_name():
-    (p,) = class_problems([box("주문", 0), box("결제", 300, kind="interface")], [rel("generalization", "주문", "결제")])
-    assert "('주문'은 'class', '결제'는 'interface')" in p
+def test_names_never_take_a_particle_whose_form_depends_on_their_last_sound():
+    # 영어 이름은 받침을 알 수 없어(Circle은, Shape는) 이름 바로 뒤에 은·는·이·가·을·를을 붙이지 않는다
+    classes = [box("Circle", 0), box("Shape", 300), box("Shape2", 600, kind="interface")]
+    (p,) = class_problems(classes, [rel("generalization", "Circle", "Shape2")])
+    (n,) = class_report(classes[:2], [rel("realization", "Circle", "Shape")]).notices
+    for text in (p, n.problem, n.hint):
+        assert not any(f"'{name}'{j}" in text for name in ("Circle", "Shape", "Shape2") for j in "은는이가을를")
 
 
 def test_the_issue_example_now_reports_the_interface_inheriting_a_class():
@@ -85,7 +89,7 @@ def test_the_issue_example_now_reports_the_interface_inheriting_a_class():
     classes = [box("Shape", 150, 0, kind="interface"), box("Circle", 0, 150), box("Canvas", 300, 150)]
     (p,) = class_problems(classes, [rel("generalization", "Shape", "Circle"), rel("realization", "Circle", "Shape"),
                                     rel("realization", "Canvas", "Circle")])
-    assert p.startswith("relations[0]: 상속의 두 끝 종류가 다르다('Shape'는 'interface', 'Circle'는 'class')")
+    assert p.startswith("relations[0]: 상속의 두 끝 종류가 다르다(from 'Shape': 'interface', to 'Circle': 'class')")
 
 
 # ---------------------------------------------------------------- 자기 자신, 고리
@@ -164,7 +168,7 @@ def test_realization_to_a_class_draws_and_passes_with_a_notice():
     assert r.passed
     (n,) = r.notices
     assert n.path == "relations[0]" and n.elements == ("Circle", "Shape")
-    assert n.problem == "실체화가 가는 상자 'Shape'는 인터페이스가 아니다(kind 'class')."
+    assert n.problem == "실체화가 가는 쪽이 인터페이스가 아니다(to 'Shape': 'class')."
     assert n.hint == "상속을 뜻했으면 kind를 'generalization'으로 바꾸고, 인터페이스를 구현하는 것이면 to를 인터페이스로 고친다."
     lines = r.summary().splitlines()
     assert lines[0].startswith("합격")
@@ -178,7 +182,7 @@ def test_realization_to_a_class_draws_and_passes_with_a_notice():
 def test_realization_between_inheritable_kinds_asks_about_inheritance():
     r = class_report([box("A", 0), box("B", 300, kind="abstract")], [rel("realization", "A", "B")])
     (n,) = r.notices
-    assert "(kind 'abstract')" in n.problem and n.hint.startswith("상속을 뜻했으면 kind를 'generalization'으로 바꾸고")
+    assert "(to 'B': 'abstract')" in n.problem and n.hint.startswith("상속을 뜻했으면 kind를 'generalization'으로 바꾸고")
 
 
 def test_realization_hint_never_leads_to_an_input_error():
@@ -192,11 +196,11 @@ def test_realization_hint_never_leads_to_an_input_error():
 def test_realization_made_by_an_interface_has_a_notice_from_its_source():
     same = class_report([box("I", 0, kind="interface"), box("J", 300, kind="interface")], [rel("realization", "I", "J")])
     (n,) = same.notices
-    assert n.problem == "실체화를 하는 상자 'I'는 인터페이스다(kind 'interface')."
+    assert n.problem == "실체화를 하는 쪽이 인터페이스다(from 'I': 'interface')."
     assert n.hint == "인터페이스끼리는 kind를 'generalization'으로 바꾼다."
     turned = class_report([box("Shape", 0, kind="interface"), box("Circle", 300)], [rel("realization", "Shape", "Circle")])
     (n,) = turned.notices
-    assert n.problem.startswith("실체화를 하는 상자 'Shape'는 인터페이스다")
+    assert n.problem.startswith("실체화를 하는 쪽이 인터페이스다(from 'Shape'")
     assert n.hint.endswith("— 방향이 거꾸로면 from과 to를 바꾼다.")
 
 
@@ -231,7 +235,7 @@ def test_inheritance_between_components_artifacts_or_nodes_of_one_kind_reads(mod
 @pytest.mark.parametrize("source, target", [("class", "component"), ("component", "node"), ("artifact", "class")])
 def test_inheritance_across_element_kinds_is_an_input_error(source, target):
     (p,) = problems(P, [el(source, "a", 0), el(target, "b", 400)], [rel("generalization", "a", "b")])
-    assert p.startswith(f"relations[0]: 상속의 두 끝 종류가 다르다('a'는 {source!r}, 'b'는 {target!r})")
+    assert p.startswith(f"relations[0]: 상속의 두 끝 종류가 다르다(from 'a': {source!r}, to 'b': {target!r})")
 
 
 def test_inheritance_into_a_component_points_to_realization():
@@ -240,7 +244,7 @@ def test_inheritance_into_a_component_points_to_realization():
 
 
 @pytest.mark.parametrize("source, target, problem", [
-    ("lollipop", "class", "실체화를 하는 요소 'a'는 인터페이스다(kind 'lollipop')."),
+    ("lollipop", "class", "실체화를 하는 쪽이 인터페이스다(from 'a': 'lollipop')."),
     ("package", "interface", "패키지('a')는 실체화하지 않는다."),
 ])
 def test_realization_made_by_a_ball_or_a_package_has_a_notice(source, target, problem):
@@ -254,7 +258,7 @@ def test_only_classes_realize_components_quietly(source):
     # 아티팩트는 «manifest» 의존으로 컴포넌트를 구현한다 — 클래스·추상 클래스 밖의 실체화는 알리고, 그 상속 오류도 실체화를 권하지 않는다
     elements = [el(source, "a", 0, 250), el("component", "c", 0)]
     (n,) = report(P, elements, [rel("realization", "a", "c")]).notices
-    assert n.problem == "실체화가 가는 요소 'c'는 인터페이스가 아니다(kind 'component')."
+    assert n.problem == "실체화가 가는 쪽이 인터페이스가 아니다(to 'c': 'component')."
     if source != "component":
         (p,) = problems(P, elements, [rel("generalization", "a", "c")])
         assert p.endswith("from·to나 요소의 kind를 고친다")
@@ -265,11 +269,11 @@ def test_inheritance_hint_is_left_out_when_inheriting_would_close_a_cycle():
     # B가 이미 A를 상속하는데 A -> B 실체화를 상속으로 바꾸면 고리 오류가 난다 — 그 말 대신 실체화를 지우라고 한다
     (n,) = class_report([box("A", 0), box("B", 300)], [rel("generalization", "B", "A"),
                                                         rel("realization", "A", "B", via=[[45, -60], [345, -60]])]).notices
-    assert n.hint == ("'B'가 이미 'A'를 상속해 generalization으로 바꾸면 고리가 된다 — 인터페이스를 구현하는 것이면 to를 "
+    assert n.hint == ("to('B')가 이미 from('A')을 상속해 generalization으로 바꾸면 고리가 된다 — 인터페이스를 구현하는 것이면 to를 "
                       "인터페이스로 고치고, 아니면 이 실체화를 지운다.")
     (n,) = class_report([box("I", 0, kind="interface"), box("J", 300, kind="interface")],
                         [rel("generalization", "J", "I"), rel("realization", "I", "J", via=[[45, -60], [345, -60]])]).notices
-    assert n.hint == "'J'가 이미 'I'를 상속해 generalization으로 바꾸면 고리가 된다 — 이 실체화를 지운다."
+    assert n.hint == "to('J')가 이미 from('I')을 상속해 generalization으로 바꾸면 고리가 된다 — 이 실체화를 지운다."
 
 
 def test_realization_hint_in_tools_with_components_names_component_realization():
@@ -305,6 +309,12 @@ def test_inheritance_into_a_ball_points_to_realization_which_then_passes_quietly
     assert r.passed and r.notices == (), r.summary()
 
 
+def test_a_reversed_class_realization_hint_says_to_swap_the_ends():
+    # 컴포넌트 -> 클래스 실체화는 방향만 거꾸로다(클래스가 컴포넌트를 실현) — 의존으로 바꾸라고 하기 전에 방향을 바꾸라고 한다
+    (n,) = report(CD, [el("component", "K", 0), el("class", "X", 0, 200)], [rel("realization", "K", "X")]).notices
+    assert n.hint.endswith("방향이 거꾸로면 from과 to를 바꾼다.")
+
+
 @pytest.mark.parametrize("target", ["package", "lollipop", "interface"])
 def test_interface_realization_hint_swaps_ends_only_when_the_swap_passes(target):
     # 인터페이스 -> 클래스는 방향만 거꾸로다. 인터페이스 -> 패키지·원·인터페이스는 바꿔도 다시 걸리므로 바꾸라고 하지 않는다
@@ -325,7 +335,7 @@ def test_realization_to_a_component_or_an_interface_has_no_notice(target):
 def test_realization_to_a_package_artifact_or_node_draws_with_a_notice(module, target):
     r = report(module, [el("class", "Impl", 0, 250), el(target, "x", 0)], [rel("realization", "Impl", "x")])
     (n,) = r.notices
-    assert n.problem == f"실체화가 가는 요소 'x'는 인터페이스가 아니다(kind {target!r})."
+    assert n.problem == f"실체화가 가는 쪽이 인터페이스가 아니다(to 'x': {target!r})."
     assert n.hint.endswith("— 다른 뜻이면 dependency를 쓴다.") and "generalization" not in n.hint
     assert NOTICE_HEAD.format(1) in r.summary()
 
@@ -358,8 +368,11 @@ def test_tool_descriptions_state_the_rules_of_the_kinds_the_tool_takes():
             "실체화하면") in D.TOOL
     # 흐름 안내(서버 안내문·도구 설명)도 표기 규칙 알림이 불합격이 아니라고 적는다
     assert "표기 규칙 알림(관계 규칙이 있는 도구에서 뜻을 확인해 볼 관계)" in server.INSTRUCTIONS
+    # 자기 자신 금지는 관계 종류(reflexive)에서 꺾는 점 줄에 적는다
+    assert ("자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다(상속·실체화는 꺾는 점이 있어도 자기 자신으로 갈 수 "
+            "없다).") in server.CLASS_TOOL
     # 유즈케이스도의 일반화는 클래스도 관계가 아니라 이 규칙을 적지 않는다
-    assert "  - 규칙:" not in usecasediagram.TOOL
+    assert "  - 규칙:" not in usecasediagram.TOOL and "자기 자신으로 갈 수 없다" not in usecasediagram.TOOL
 
 
 def call(name, args):
@@ -378,4 +391,4 @@ def test_server_returns_rule_errors_as_input_errors_and_notices_with_the_picture
                                          "elements": [el("class", "Impl", 0, 250), el("node", "x", 0)],
                                          "relations": [rel("realization", "Impl", "x")]})
     assert not ok.is_error and (tmp_path / "part.png").exists()
-    assert f"{NOTICE_HEAD.format(1)}\n- relations[0]: 실체화가 가는 요소 'x'는" in ok.content[0].text
+    assert f"{NOTICE_HEAD.format(1)}\n- relations[0]: 실체화가 가는 쪽이 인터페이스가 아니다(to 'x'" in ok.content[0].text
