@@ -830,6 +830,8 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
         그 길이를 다 쓰고도 길이가 남아야 한다 — 같으면 당긴 선 끝이 앞 점에 겹쳐 길이 0인 선이 된다."""
         need, shown = sum(needs), "+".join(fmt_num(n) for n in needs)
         if gap:
+            if len(needs) == 2:  # 끝마다 더한 수가 무엇인지 헷갈리지 않게 쪽을 붙인다
+                shown = f"from 쪽 {fmt_num(needs[0])}, to 쪽 {fmt_num(needs[1])}"
             return f"끝 모양 길이와 띄운 거리를 더한 길이({shown})보다 길지 않다" if length <= need else None
         return f"끝 모양 길이({shown})보다 짧다" if length < need else None
 

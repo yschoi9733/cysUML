@@ -479,12 +479,15 @@ def _lines_through_names(relations: list[_Relation], boxes: list[_Box], w: Words
                     _add(found.get((b.name, z.rect, where), lambda: (b, z, where, []))[3], r)
     for b, z, where, rels in found.values():
         what = z.what
-        whose = (f"{what}{josa(what, '은', '는')} 그 {w.noun}가 끝인 선(몸통 밖 이름 칸일 때)이나 그 {w.noun} 안의 {w.noun}를 "
-                 "잇는 선도" if z.lettered else f"{what}{josa(what, '은', '는')} 그 {w.noun}가 끝인 선도")
+        if z.lettered:
+            hint = (f"{what}{josa(what, '은', '는')} 그 {w.noun}가 끝인 선(몸통 밖 이름 칸일 때)이나 그 {w.noun} 안의 {w.noun}를 잇는 "
+                    f"선도 지나가면 안 된다 — 꺾는 점(via)을 주거나 고쳐 {what}에서 {BOX_CLEARANCE}px 넘게 비켜 가게 한다.")
+        else:  # 글자 없이 몸통 밖에 붙은 자리(부품 네모) — 선이 향하는 점을 비켜 둘러 있으니 끝 구간을 곧게 들인다
+            hint = (f"{what}{josa(what, '은', '는')} 그 {w.noun}가 끝인 선도 지나가면 안 된다 — 그 {w.noun}에 닿는 끝 구간이 "
+                    f"{what} 사이로 곧게 들어가게, 그 {w.noun} 쪽 끝에 붙은 꺾는 점(via)을 선이 향하는 점과 같은 높이에 둔다.")
         yield Finding("line_through_name", (*_owners(rels), b.name), where,
                       f"선이 {w.noun}의 {what}{josa(what, '을', '를')} 지나거나 {BOX_CLEARANCE}px 안으로 붙는다: {_titles(rels)}, "
-                      f"{b.title}의 {what}({fmt_rect(z.rect)}).",
-                      f"{whose} 지나가면 안 된다 — 꺾는 점(via)을 주거나 고쳐 {what}에서 {BOX_CLEARANCE}px 넘게 비켜 가게 한다.")
+                      f"{b.title}의 {what}({fmt_rect(z.rect)}).", hint)
 
 
 def _lines_along_containers(relations: list[_Relation], boxes: list[_Box], w: Words) -> Iterator[Finding]:

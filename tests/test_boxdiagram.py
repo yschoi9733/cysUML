@@ -671,7 +671,7 @@ def test_only_the_end_with_a_gap_speaks_of_the_gap():
 
 
 def test_a_straight_line_exactly_as_long_as_the_gap_is_an_input_error_not_a_crash():
-    with pytest.raises(InputError, match=r"선 길이 6가 양 끝 모양 길이와 띄운 거리를 더한 길이\(0\+6\)보다 길지 않다"):
+    with pytest.raises(InputError, match=r"선 길이 6가 양 끝 모양 길이와 띄운 거리를 더한 길이\(from 쪽 0, to 쪽 6\)보다 길지 않다"):
         draw([dot("Api", 0, 0, name_side="right"), el("class", "A", -96, -12)], [rel("uses", "A", "Api")], spec=SOCKET_SPEC)
 
 
