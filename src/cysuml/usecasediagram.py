@@ -18,8 +18,7 @@ from .boxdiagram import (ELEMENT_WORDS, LABEL_LINE, NEST_PAD, TRIANGLE_HEAD, Dia
 from .canvas import SCALE, Canvas, Point
 from .classdiagram import RELATIONS as CLASS_RELATIONS
 from .geom import Border, EllipseBorder
-from .guide import (COMMON_INPUT, IMAGE_RESULT, NAME_SIDE, NESTING, NEW_INPUT, OUTSIDE_PLACES, PLACES_RESULT, flow,
-                    relation_fields)
+from .guide import (COMMON_INPUT, IMAGE_RESULT, NAME_SIDE, NESTING, NEW_INPUT, flow, places_result, relation_fields)
 from .sequencediagram import ACTOR_FIGURE, draw_actor
 from .text import Box
 
@@ -202,8 +201,7 @@ TOOL = f"""유즈케이스도를 그려 PNG 파일로 저장하고, 검사 결�
 {NESTING}
 
 결과
-{PLACES_RESULT}
-{OUTSIDE_PLACES}
+{places_result(SPEC)}
 {IMAGE_RESULT}
 - elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
 그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.

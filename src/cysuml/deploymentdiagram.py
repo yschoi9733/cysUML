@@ -13,7 +13,7 @@ from .boxcheck import KINDS
 from .boxdiagram import ELEMENT_WORDS, LABEL_LINE, NEST_PAD, Diagram, Drawing, Spec
 from .canvas import SCALE
 from .classdiagram import HEAD, NAME_LINE, RELATIONS
-from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, PLACES_RESULT, flow, relation_fields
+from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, flow, places_result, relation_fields
 from .shapes import DEPTH, SHAPES
 
 SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none")
@@ -84,7 +84,7 @@ TOOL = f"""배치도(deployment diagram)를 그려 PNG 파일로 저장하고, �
 {NOTATION}
 
 결과
-{PLACES_RESULT}
+{places_result(SPEC)}
 {IMAGE_RESULT}
 - elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
 그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.
