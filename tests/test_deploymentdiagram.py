@@ -1,4 +1,6 @@
 """배치도(deployment diagram): 노드 안에 두기, 통신 경로(화살촉 없는 연관), «deploy», 노드 안의 노드, 자리 잡기 요령의 수치."""
+import string
+
 import pytest
 
 from cysuml import boxcheck as K
@@ -171,7 +173,7 @@ def test_nodes_in_a_row_with_the_same_top_and_height_get_straight_paths():
 def test_element_inside_a_stereotyped_node_starts_at_top_plus_66():
     assert report([device("N", 0, 0), inside("N", "component", "C", 20, 66)]).passed
     (f,) = report([device("N", 0, 0), inside("N", "component", "C", 20, 52)]).failures
-    assert f.kind == "inner_off_area" and "top + 66" in D.TIPS
+    assert f.kind == "inner_off_area" and "top + 52가 아니라 top + 66부터" in D.TIPS and "늘어(14px)" in D.TIPS
 
 
 OUTER = [device("App Server", 0, 0),
@@ -200,15 +202,18 @@ LABELS = {  # 선 글자 → (선 만들기, 줄)
 
 
 def estimate(s):
-    """요령의 선 글자 폭 어림: 영문·숫자·기호 한 글자 9px, 한글 한 글자 12px."""
-    return sum(12 if is_korean(c) else 9 for c in s)
+    """요령의 선 글자 폭 어림: 영문·숫자·기호 한 글자 11px(W·@·%는 14px), 한글 한 글자 12px."""
+    return sum(12 if is_korean(c) else 14 if c in "W@%" else 11 for c in s)
 
 
-@pytest.mark.parametrize("label", ["«deploy»", "«manifest»", "«internet»", "HTTPS", "JDBC", "gRPC", "HTTP/2", "TCP/IP",
-                                   "port 443", "REST API", "HTTPS 443", "웹 소켓", "애플리케이션"])
-def test_label_width_estimate_of_the_tip_covers_common_labels(label):
-    assert text_width(label) <= estimate(label)
-    assert "영문·숫자·기호 한 글자 9px, 한글 한 글자 12px로 어림하고" in D.TIPS
+def test_label_width_estimate_of_the_tip_is_an_upper_bound_for_every_character():
+    # 글자마다 상한이라 어떤 선 글자든 어림이 실제 폭 이상이다(대문자 프로토콜 이름 AMQP·MQTT·CORBA·WWW 등도)
+    chars = [c for c in string.printable if c.isprintable()] + ["«", "»"] + [chr(c) for c in range(0xAC00, 0xD7A4, 97)]
+    assert [c for c in chars if text_width(c) > estimate(c)] == []
+    for label in ("«deploy»", "«internet»", "HTTPS", "AMQP", "MQTT", "SMTP", "SOAP", "CORBA", "WWW", "user@host",
+                  "100%", "port 443", "웹 소켓", "애플리케이션"):
+        assert text_width(label) <= estimate(label), label
+    assert "영문·숫자·기호 한 글자 11px(W·@·%는 14px), 한글 한 글자 12px로 어림하고" in D.TIPS
 
 
 def side_gaps(outer, lines, measure=estimate):
