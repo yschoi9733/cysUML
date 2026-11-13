@@ -179,17 +179,31 @@ def test_arrow_into_a_circle_needs_room_from_the_bar(gap, passed):
 
 
 def test_lollipop_is_a_small_circle_with_its_name_below():
+    # 이름 "OrderApi"는 폭이 홀수(53)라 모양 자리가 반 픽셀(16.5)에 놓인다. 원은 그 가운데를 정수로 내린 점에 그린다
     d = draw([el("lollipop", "OrderApi", 0, 0)])
     p = placed(d, "OrderApi")
     (circle,) = owned(d, "OrderApi", Ellipse)
     (name,) = owned(d, "OrderApi", Text)
-    assert (circle.width, circle.height) == (C.BALL, C.BALL)
-    assert (circle.left, circle.top, circle.left + C.BALL, circle.top + C.BALL) == p.shape_rect
+    assert p.shape_rect == (16.5, 0, 36.5, C.BALL)
+    assert (circle.left, circle.top, circle.width, circle.height) == (16, 0, C.BALL, C.BALL)
+    assert p.anchor == (26, 10) and p.border == G.EllipseBorder(26, 10, C.BALL / 2, C.BALL / 2)
     assert p.rect[1] == p.shape_rect[1] and p.rect[3] == C.BALL + NAME_SEP + LABEL_LINE
     assert name.text == "OrderApi" and name.x == (p.rect[0] + p.rect[2]) / 2 > circle.left
     assert p.zones == (NameZone((0, C.BALL + NAME_SEP, p.rect[2], p.rect[3]), True),)
-    assert p.border == G.EllipseBorder(*(p.shape_rect[0] + C.BALL / 2, C.BALL / 2), C.BALL / 2, C.BALL / 2)
     assert not owned(d, "OrderApi", Polygon)
+
+
+@pytest.mark.parametrize("name", ["OrderApi", "Api", "PaymentGatewayApi"])
+def test_bar_under_a_component_stands_straight_with_whole_number_places(name):
+    # 기본 폭 90 컴포넌트(가운데 x 45) 아래에 정수 left로 둔다. 원 가운데는 모양 자리 가운데를 내린 점이라, 이름 폭이 홀수면
+    # 45 - 폭/2(x.5)를 올린 left에서 가운데가 45가 되어 막대가 곧다(내리기 전에는 어느 정수 left로도 곧게 세울 수 없었다)
+    d = draw([el("lollipop", name, 0, 0)])
+    w = placed(d, name).width
+    d = draw([el("component", "Order", 0, 0), el("lollipop", name, math.ceil(45 - w / 2), 120)],
+             [rel("association", "Order", name)])
+    (bar,) = d.layout.relations
+    assert bar.points[0][0] == bar.points[-1][0] == 45
+    assert K.check(d).passed, K.check(d).summary()
 
 
 def test_place_of_a_lollipop_lists_its_circle_too():
