@@ -736,7 +736,7 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
     assert ca is not None and cb is not None
     if r.via:
         start, end = a.border.exit(ca, r.via[0]), b.border.exit(cb, r.via[-1])
-        problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} {w.noun} {_show(p_.key)}({fmt_rect(p_.rect)}) 안이나 "
+        problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} {w.noun} {_show(p_.key)}({fmt_rect(p_.border.bounds)}) 안이나 "
                     f"{w.edge} 위에 있다 — {w.noun} 밖으로 옮긴다"
                     for p, p_, j, key in ((start, a, 0, "from"), (end, b, len(r.via) - 1, "to")) if p is None]
         if problems:
@@ -756,7 +756,7 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
     for key, p_ in (("from", a),) + ((("to", b),) if r.target != r.source else ()):
         inner = p_.border.grown(-EDGE_SLACK)
         if any(inner.hits(p, q) for p, q in zip(points, points[1:])):
-            problems.append(f"{path}: 선이 {key} {w.noun} {_show(p_.key)}({fmt_rect(p_.rect)}) 안을 지난다 — 꺾는 점을 그 "
+            problems.append(f"{path}: 선이 {key} {w.noun} {_show(p_.key)}({fmt_rect(p_.border.bounds)}) 안을 지난다 — 꺾는 점을 그 "
                             f"{w.noun} 밖으로 돌린다")
     lengths = [math.dist(p, q) for p, q in zip(points, points[1:])]
     head, tail = shape_lengths(r, t)
@@ -859,7 +859,8 @@ def layout(diagram: Diagram) -> Layout:
             owner, n = f"{base}#{n}", n + 1
         used.add(owner)
         bare.append(PlacedRelation(r, owner, points, ()))
-    lay = Layout(spec, placed, tuple(bare))
+    parent_of = {p.key: p.box.parent for p in placed}
+    lineage = {key: frozenset(ancestors(parent_of, key)) for key in parent_of}
     sketch = Canvas()  # 선 끝 모양을 그림판과 똑같이 얻으려고 선만 한 번 그려 본다
     for p in bare:
         _draw_relation(sketch, p, spec.relations[p.relation.kind])
@@ -868,7 +869,7 @@ def layout(diagram: Diagram) -> Layout:
     out = []
     for p in bare:
         r, points = p.relation, p.points
-        holders = lay.holders(r)
+        holders = lineage[r.source] | lineage[r.target]  # Layout.holders와 같다
         if holders not in avoids:
             avoids[holders] = obstacles(placed, holders)
         avoid = avoids[holders]

@@ -458,6 +458,7 @@ class PolygonBorder(Border):
         self._sign = 1 if _area(pts) > 0 else -1
         self._empty = empty
         self._edges = tuple(zip(pts, pts[1:] + pts[:1]))
+        self._bounds = span(pts)
 
     def __repr__(self) -> str:
         return f"PolygonBorder({self.points})"
@@ -470,7 +471,7 @@ class PolygonBorder(Border):
 
     @property
     def bounds(self) -> Box:
-        return span(self.points)
+        return self._bounds
 
     @property
     def empty(self) -> bool:

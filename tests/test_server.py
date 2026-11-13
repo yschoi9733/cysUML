@@ -11,7 +11,7 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
-from cysuml import boxcheck, classcheck, guide, packagediagram, sequencecheck, sequencediagram, server
+from cysuml import boxcheck, boxdiagram, classcheck, guide, packagediagram, sequencecheck, sequencediagram, server
 from cysuml.canvas import SCALE
 from cysuml.report import Finding
 
@@ -66,9 +66,9 @@ EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 �
     "packages": "draw_package_diagram",
     "checkout": "draw_sequence_diagram",
 }
-PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 요소를 부르는 말
-    "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, "상자"),
-    "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, "요소"),
+PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 그 도구의 말
+    "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, boxdiagram.BOX_WORDS),
+    "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
 }
 
 
@@ -88,9 +88,9 @@ def test_lists_every_tool_with_its_inputs():
 def test_each_tool_carries_its_flow_and_tips_and_the_instructions_carry_the_flows_only():
     instructions, tools, _ = run(server.mcp)
     seq_tool = tools["draw_sequence_diagram"].description
-    for name, (tips, kinds, noun) in PLACED_TOOLS.items():
+    for name, (tips, kinds, words) in PLACED_TOOLS.items():
         tool = tools[name].description
-        assert guide.flow(kinds, noun) in tool and tips in tool
+        assert guide.flow(kinds, words) in tool and tips in tool
         assert server.SEQUENCE_FLOW not in tool and guide.PLACED_FLOW not in seq_tool
         assert tips not in instructions
         assert tips not in seq_tool
@@ -115,12 +115,12 @@ def test_sequence_description_names_every_field_kind_and_limit_the_reader_takes(
 def test_description_names_the_failure_kinds_of_each_tool_in_check_order():
     assert tuple(guide.KIND_NAMES) == boxcheck.KINDS
     assert set(classcheck.KINDS) == set(boxcheck.KINDS) - set(boxcheck.NESTED_KINDS)
-    # 클래스도 도구는 요소를 상자라고 부른다(그 도구의 입력·결과·검사 글과 같은 말)
-    class_names = guide.kind_names(classcheck.KINDS, "상자")
+    # 클래스도 도구는 요소를 상자, 테두리를 변이라고 부른다(그 도구의 입력·결과·검사 글과 같은 말)
+    class_names = guide.kind_names(classcheck.KINDS, boxdiagram.BOX_WORDS)
     assert ", ".join(class_names) + "." in server.CLASS_TOOL
-    assert "상자끼리 겹치거나 붙음" in class_names and "선이 그 선과 상관없는 상자를 지나감" in class_names
-    assert not any("요소" in n for n in class_names)
-    assert not any(n in server.CLASS_TOOL for n in guide.kind_names(boxcheck.NESTED_KINDS, "상자"))
+    assert {"상자끼리 겹치거나 붙음", "선이 제 끝 상자 변에 붙어 감", "선 끝 모양이 그 선의 다른 끝 상자 변에 붙음"} <= set(class_names)
+    assert not any("요소" in n or "테두리" in n for n in class_names)
+    assert not any(n in server.CLASS_TOOL for n in guide.kind_names(boxcheck.NESTED_KINDS, boxdiagram.BOX_WORDS))
     assert ", ".join(guide.KIND_NAMES.values()) + "." in packagediagram.TOOL
 
 

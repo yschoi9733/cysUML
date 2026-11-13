@@ -350,6 +350,9 @@ def test_package_tool_input_errors():
     with pytest.raises(InputError) as e:
         draw([el("class", "A", 0, 0), inside("A", "class", "B", 20, 44), el("usecase", "U", 0, 200)])
     assert [p.split(":")[0] for p in e.value.problems] == ["elements[2].kind", "elements[1].in"]
+    # 꺾는 점이 끝 요소 안이라는 오류는 실제로 본 테두리(패키지는 탭 아래 몸통)를 보인다
+    with pytest.raises(InputError, match=r"from 요소 'P'\(0, 24, 90×40\) 안이나 테두리 위에 있다"):
+        draw([el("package", "P", 0, 0), el("class", "B", 300, 0)], [rel("dependency", "P", "B", via=[[20, 40]])])
     # kind가 빠져도(모든 종류가 이름을 받으므로) 이름이 빠진 것을 함께 알린다
     with pytest.raises(InputError) as e:
         draw([{"left": 0, "top": 0}])
