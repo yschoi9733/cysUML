@@ -369,7 +369,7 @@ def test_component_icon_is_a_box_with_two_parts_straddling_its_left_edge():
     assert [(r.left, r.top, r.width, r.height) for r in parts] == [(0, cy - 21, 16, 6), (0, cy + 15, 16, 6)]
     assert p.border == G.RectBorder((8, 0, w, h))
     assert w % 2 == 1 and p.anchor == (math.floor((8 + w) / 2), cy)  # 폭이 홀수(123)라 상자 가운데 65.5를 정수로 내린다
-    assert p.zones == tuple(B.NameZone((0, top, 16, top + 6), True, "부품 네모") for top in (cy - 21, cy + 15))
+    assert p.zones == tuple(B.NameZone((0, top, 16, top + 6), True, "부품 네모", lettered=False) for top in (cy - 21, cy + 15))
     texts = owned(d, "C", Text)
     assert [t.text for t in texts] == ["«component»", "C"] and texts[0].x == texts[1].x == (8 + w) / 2
 
@@ -390,6 +390,12 @@ def test_line_to_a_component_icon_is_straight_when_aligned_to_the_box_without_it
     d = draw([el("component_icon", "C", 0, 0, **more), el("class", "A", x - 45, -150)], [rel("dependency", "A", "C")])
     (line,) = d.layout.relations
     assert line.points[0][0] == line.points[-1][0] == x
+    assert K.check(d).passed, K.check(d).summary()
+
+
+def test_slanted_line_from_the_left_passes_with_its_last_bend_at_the_height_of_the_aim_point():
+    # 도구 설명의 요령: 마지막 꺾는 점을 선이 향하는 점(가운데 높이 24)에 두면 마지막 구간이 가로가 되어 부품 네모 사이로 닿는다
+    d = draw([el("component_icon", "C", 0, 0), el("class", "A", -200, -100)], [rel("dependency", "A", "C", via=[[-40, 24]])])
     assert K.check(d).passed, K.check(d).summary()
 
 

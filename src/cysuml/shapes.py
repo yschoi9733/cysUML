@@ -168,7 +168,7 @@ class ComponentIconShape(_HeadShape):
         return floored(self._body(rect))
 
     def name_zones(self, e: Element, rect: Box) -> tuple[NameZone, ...]:
-        return tuple(NameZone(part, True, "부품 네모") for part in self._parts(rect))
+        return tuple(NameZone(part, True, "부품 네모", lettered=False) for part in self._parts(rect))
 
     def parts(self, e: Element, rect: Box) -> tuple[Border, ...]:
         """상자와 부품 네모 둘 — 네모 위아래의 빈 곳은 컴포넌트가 아니다."""
