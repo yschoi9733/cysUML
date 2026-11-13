@@ -68,7 +68,9 @@ optional bend points:
 
 It gets back the check result, the size and place of every box as drawn, the saved file path, and the picture.
 The check **fails** when boxes overlap, a line runs through a box, a label or another line's arrowhead, or labels
-overlap. Crossing lines and the picture size are reported but don't fail.
+overlap. Crossing lines and the picture size are reported but don't fail. Inheritance lines from several children to
+one parent may join into one trunk that shares a single triangle (realization lines too, but not mixed with
+inheritance); the tool description tells the assistant how to give the bend points for it.
 
 ### Package diagrams
 
@@ -182,7 +184,8 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
 
 - **클래스도**는 `draw_class_diagram`으로 그린다. 어시스턴트가 상자의 왼쪽 위 자리와, 필요하면 관계선의 꺾는 점을 준다. 결과로
   검사 결과, 상자마다 그린 자리와 크기, 저장한 파일 경로, 그림을 돌려준다. 상자끼리 겹치거나, 선이 상자·글자·다른 선의 화살촉을
-  지나거나, 글자끼리 겹치면 불합격이다. 선끼리 엇갈린 곳과 그림 크기는 알려 주기만 하고 불합격이 아니다.
+  지나거나, 글자끼리 겹치면 불합격이다. 선끼리 엇갈린 곳과 그림 크기는 알려 주기만 하고 불합격이 아니다. 같은 부모로 가는
+  상속끼리, 실체화끼리는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 써도 된다(꺾는 점을 주는 법은 도구 설명에 있다).
 - **패키지도**는 `draw_package_diagram`으로 그린다. 패키지와 패키지 사이 의존을 그리고, 패키지 안에 클래스·패키지를 넣는다.
   컴포넌트·아티팩트·노드도 한 그림에 함께 그린다. 요소마다 `kind`를 주고, 다른 요소 안에 둘 요소는 `in`으로 품은 요소를
   가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다.

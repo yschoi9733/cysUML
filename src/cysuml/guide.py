@@ -4,6 +4,7 @@
 - NEW_INPUT(나): 새 그림 도구가 모두 받는 입력 규칙(열쇠·여러 줄 이름·관계 스테레오타입).
 - PLACED_ELEMENTS(다): 패키지도·컴포넌트도·배치도(deployment diagram)가 함께 받는 요소 종류.
 - relation_fields(라): 도구 정의가 받는 관계 종류(클래스도 관계 여섯 가지 가운데 고른 것 등)와 연관의 기본 방향으로 만드는 관계 필드.
+  공유 줄기를 받는 관계(상속·실체화)가 있으면 그 모양을 쓰는 법도 붙인다.
 - NESTING(마): 요소 안에 요소 두기.
 - NAME_SIDE(바): 모양 밖 이름의 쪽.
 """
@@ -12,8 +13,9 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from .boxcheck import KINDS
-from .boxdiagram import ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, Spec, Words, josa
+from .boxdiagram import ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec, Words, josa
 from .canvas import MIN_SCALE, SCALE
+from .report import fmt_num
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
 DEFAULT_DIR = "diagrams"
@@ -153,4 +155,24 @@ def relation_fields(spec: Spec) -> str:
                      else (f"{noun} 가운데(요소 종류에 따로 적은 모양은 그 점)", f"상대 {noun}의 그 점"))
     lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "
                  f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다.")
+    trunks = [t for t in types.values() if t.trunk]
+    if trunks:
+        lines.append(_trunk(trunks, spec.words, box))
     return "\n".join(lines)
+
+
+def _trunk(types: list[RelationType], words: Words, box: bool) -> str:
+    """공유 줄기를 쓰는 법. 검사(boxcheck)는 같은 부모로 가는 같은 종류의 선들이 끝 모양을 정확히 같은 자리에 그릴 때만 그 포개짐을
+    봐주므로, 자식마다 마지막 꺾는 점을 같게 주는 법을 적는다."""
+    pairs = ", ".join(f"{t.label}끼리" for t in types)
+    head = _joined(t.end.name for t in types if t.end is not None)
+    length = fmt_num(max(t.end.length for t in types if t.end is not None))
+    noun, edge = words.noun, words.edge
+    x = f"결과의 {noun} 자리에서 왼 + 폭/2" + ("" if box else ", 요소 종류에 따로 적은 모양은 그 점의 x")
+    ga = josa(head, "이", "가")
+    return (f"  - 공유 줄기: 같은 부모(to)로 가는 {pairs}는 여러 선을 한 줄기로 모아 {head} 하나를 함께 쓰게 그려도 된다. "
+            f"{head}{ga} 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다(종류가 다른 선을 섞거나 {head}{ga} 조금이라도 "
+            f"어긋나면 불합격이다). 줄기 높이 y를 하나 정하고, 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 "
+            f"준다(가운데 x는 {x}). 마지막 점이 모두 같아 {head}{ga} 한 자리에 그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 "
+            f"같아지니 [부모 가운데 x, y] 하나만 준다. y는 부모 {noun}의 아래 {edge}{josa(edge, '과', '와')} 자식 {noun}의 위 {edge} 사이 "
+            f"가운데쯤에 둔다 — 부모 아래 {edge}에서 {head} 길이 {length}px보다 가까우면 입력 오류다.")

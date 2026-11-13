@@ -11,7 +11,7 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
-from cysuml import boxcheck, boxdiagram, classcheck, guide, packagediagram, sequencecheck, sequencediagram, server
+from cysuml import boxcheck, boxdiagram, classcheck, classdiagram, guide, packagediagram, sequencecheck, sequencediagram, server
 from cysuml.canvas import SCALE
 from cysuml.report import Finding
 
@@ -66,9 +66,9 @@ EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 �
     "packages": "draw_package_diagram",
     "checkout": "draw_sequence_diagram",
 }
-PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 그 도구의 말
-    "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, boxdiagram.BOX_WORDS),
-    "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
+PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 그 도구 정의(Spec)
+    "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, classdiagram.SPEC),
+    "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, packagediagram.SPEC),
 }
 
 
@@ -88,9 +88,10 @@ def test_lists_every_tool_with_its_inputs():
 def test_each_tool_carries_its_flow_and_tips_and_the_instructions_carry_the_flows_only():
     instructions, tools, _ = run(server.mcp)
     seq_tool = tools["draw_sequence_diagram"].description
-    for name, (tips, kinds, words) in PLACED_TOOLS.items():
+    for name, (tips, kinds, spec) in PLACED_TOOLS.items():
         tool = tools[name].description
-        assert guide.flow(kinds, words) in tool and tips in tool
+        assert guide.flow(kinds, spec.words) in tool and tips in tool
+        assert guide.relation_fields(spec) in tool
         assert server.SEQUENCE_FLOW not in tool and guide.PLACED_FLOW not in seq_tool
         assert tips not in instructions
         assert tips not in seq_tool
@@ -133,6 +134,52 @@ def test_relation_fields_follow_the_relation_kinds_a_tool_takes():
     assert '  - kind(필수): "association"·"dependency"·"generalization".' in text
     assert "의존·상속은 from이 의존하는 쪽·자식이고 화살촉·삼각형이 to 쪽에 붙는다." in text and "마름모" not in text
     assert '연관만 쓴다. navigable은 화살촉을 둘 쪽 "to"·"from"·"both"·"none"(기본)이다.' in text
+    # 공유 줄기는 받는 관계 종류(상속)만 적고, 받는 관계가 없는 도구에는 넣지 않는다
+    assert "  - 공유 줄기: 같은 부모(to)로 가는 상속끼리는 여러 선을" in text and "실체화" not in text
+    plain = boxdiagram.Spec(classdiagram.CLASS_SHAPES, {k: classdiagram.RELATIONS[k] for k in kinds[:2]}, navigable="none")
+    assert "공유 줄기" not in guide.relation_fields(plain)
+
+
+@pytest.mark.parametrize("name", PLACED_TOOLS)
+def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
+    _, tools, _ = run(server.mcp)
+    tool = tools[name].description
+    spec = PLACED_TOOLS[name][2]
+    assert any(t.trunk for t in spec.relations.values())
+    noun, edge = spec.words.noun, spec.words.edge
+    for phrase in ("  - 공유 줄기: 같은 부모(to)로 가는 상속끼리, 실체화끼리는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 쓰게 "
+                   "그려도 된다. 삼각형이 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다",
+                   "자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다",
+                   f"(가운데 x는 결과의 {noun} 자리에서 왼 + 폭/2",
+                   "자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다",
+                   f"부모 아래 {edge}에서 삼각형 길이 18px보다 가까우면 입력 오류다"):
+        assert phrase in tool, phrase
+
+
+PLACE = re.compile(r"(\w+)\((-?[\d.]+), (-?[\d.]+), ([\d.]+)×([\d.]+)\)")
+
+
+@pytest.mark.parametrize("name, field, parent_kind, kind", [  # 패키지가 부모인 줄기는 test_packagediagram이 본다
+    ("draw_class_diagram", "classes", "class", "generalization"),
+    ("draw_class_diagram", "classes", "interface", "realization"),
+    ("draw_package_diagram", "elements", "class", "generalization"),
+])
+def test_shared_trunk_given_as_the_description_says_passes(tmp_path, name, field, parent_kind, kind):
+    """부모 하나·자식 셋(가운데 자식은 부모 바로 아래)을 놓고, 결과의 자리에서 가운데 x를 읽어 설명대로 꺾는 점을 준다."""
+    boxes = [{"kind": parent_kind, "name": "P", "left": 200, "top": 0}]
+    boxes += [{"kind": "class", "name": f"C{i}", "left": left, "top": 120} for i, left in enumerate((50, 200, 350))]
+    args = {"file_name": "trunk", field: boxes, "out_dir": str(tmp_path)}
+    (first,) = run(server.mcp, (name, args))[2]
+    places = {key: tuple(map(float, rest)) for key, *rest in PLACE.findall(text(first))}
+    middle = {key: left + width / 2 for key, (left, top, width, height) in places.items()}
+    parent_bottom = places["P"][1] + places["P"][3]
+    y = (parent_bottom + 120) / 2
+    assert y - parent_bottom > 18
+    via = {k: [[middle["P"], y]] if middle[k] == middle["P"] else [[middle[k], y], [middle["P"], y]] for k in ("C0", "C1", "C2")}
+    assert [len(v) for v in via.values()] == [2, 1, 2]
+    relations = [{"kind": kind, "from": k, "to": "P", "via": v} for k, v in via.items()]
+    (r,) = run(server.mcp, (name, {**args, "relations": relations}))[2]
+    assert not r.is_error and text(r).startswith("합격"), text(r)
 
 
 def test_relation_fields_say_where_lines_start_for_each_tool():

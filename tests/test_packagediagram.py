@@ -152,6 +152,22 @@ def test_lines_aim_at_the_middle_of_the_body_right_of_the_tab():
         assert (x1 - x0) * (ay - y0) == pytest.approx((y1 - y0) * (ax - x0))  # 선이 그 점을 향한다
 
 
+def test_packages_share_one_trunk_through_the_x_their_lines_aim_at():
+    # 도구 설명의 공유 줄기 — 패키지는 선이 향하는 점(탭 오른쪽 몸통의 가운데)의 x로 꺾는 점을 준다. 자리 가운데 x로 주면
+    # 이름이 긴 패키지는 첫 구간이 제 탭을 지난다
+    elements = [el("package", "base", 200, 0)] + [el("package", n, left, 150) for n, left in
+                                                 (("infrastructure", 0), ("web", 220), ("persistence.jpa", 420))]
+    boxes = {p.key: p for p in draw(elements).layout.boxes}
+    y = (boxes["base"].rect[3] + 150) / 2
+
+    def trunk(x):
+        return [rel("generalization", k, "base", via=[[x(k), y], [x("base"), y]]) for k in boxes if k != "base"]
+
+    assert report(elements, trunk(lambda k: boxes[k].anchor[0])).passed
+    middle = report(elements, trunk(lambda k: (boxes[k].rect[0] + boxes[k].rect[2]) / 2))
+    assert kinds(middle) == ["line_through_name", "line_through_name"]
+
+
 def test_element_right_of_a_package_tab_does_not_overlap_the_package():
     # 탭 오른쪽 빈 곳은 패키지가 아니다 — 몸통 윗변 6px 위에 놓인 요소는 패키지와 겹치지 않는다
     assert report([el("package", "p", 0, 0, width=300), el("component", "c", 150, -30)]).passed
