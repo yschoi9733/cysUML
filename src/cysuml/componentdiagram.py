@@ -14,8 +14,8 @@ from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Element, PlacedBox, Sha
 from .canvas import SCALE, Canvas, Point
 from .classdiagram import RELATIONS
 from .geom import Border, EllipseBorder
-from .guide import (COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, OUTSIDE_PLACES, PLACED_ELEMENTS, PLACES_RESULT,
-                    flow, relation_fields)
+from .guide import (COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, flow, places_result,
+                    relation_fields)
 from .shapes import SHAPES
 from .text import Box
 
@@ -96,8 +96,7 @@ TOOL = f"""컴포넌트도를 그려 PNG 파일로 저장하고, 검사 결과�
 {NESTING}
 
 결과
-{PLACES_RESULT}
-{OUTSIDE_PLACES}
+{places_result(SPEC)}
 {IMAGE_RESULT}
 - elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
 그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.

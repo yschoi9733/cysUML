@@ -56,6 +56,7 @@ class PackageShape(_HeadShape):
     가운데를 향한다. 탭 오른쪽 빈 곳은 패키지가 아니다."""
 
     holds = True
+    aims_aside = True
 
     def _tab(self, e: Element) -> Head:
         """(탭 머리 칸 줄, 탭 폭, 탭 높이)."""
@@ -147,6 +148,8 @@ class ComponentIconShape(_HeadShape):
     네모를 뺀 상자(_body)다. 부품 네모는 몸통 밖에 붙은 자리라 그 컴포넌트가 끝인 선도 지나가면 안 된다 — 이름 칸 길(NameZone)로
     넘기되 검사 글은 "부품 네모"라고 부른다. 네모는 상자 세로 가운데에서 위아래로 PART_OFF 떨어져 있어, 왼쪽에서 가로로 곧게 들어오는
     선은 두 네모 사이로 닿는다. 이름과 스테레오타입은 상자 가운데에 쓴다."""
+
+    aims_aside = True  # 선은 자리(부품 네모까지 덮는다) 가운데가 아니라 상자 가운데를 향한다 — 결과 글이 그 점을 덧붙인다
 
     def size(self, e: Element) -> tuple[float, float]:
         _, w, h = self.head(e)

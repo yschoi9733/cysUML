@@ -495,6 +495,8 @@ def test_words_take_only_a_noun_without_a_final_consonant():
 def test_spec_refuses_a_navigable_relation_with_its_own_end_shape_and_odd_defaults():
     with pytest.raises(ValueError):
         B.RelationType("x", end=B.ARROW_HEAD, navigable=True)
+    with pytest.raises(ValueError, match="공유 줄기"):  # 자식 선들이 함께 쓸 끝 모양이 없다
+        B.RelationType("x", trunk=True)
     with pytest.raises(ValueError):
         B.Spec(SHAPES, RELATIONS, navigable="both")
 

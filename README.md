@@ -68,7 +68,9 @@ optional bend points:
 
 It gets back the check result, the size and place of every box as drawn, the saved file path, and the picture.
 The check **fails** when boxes overlap, a line runs through a box, a label or another line's arrowhead, or labels
-overlap. Crossing lines and the picture size are reported but don't fail.
+overlap. Crossing lines and the picture size are reported but don't fail. Inheritance lines from several children to
+one parent may join into one trunk that shares a single triangle (realization lines too, but not mixed with
+inheritance); the tool description tells the assistant how to give the bend points for it.
 
 ### Package diagrams
 
@@ -93,7 +95,8 @@ names the one it sits in with `in`, and the outer element grows right and down t
 }
 ```
 
-It gets back the same things as the class diagram tool, with the place of every element. Besides the class diagram
+It gets back the same things as the class diagram tool, with the place of every element (and, for a package, the
+point its lines aim at, since that is not the middle of the package). Besides the class diagram
 checks, the check fails when an element inside another sits too close to its edge or name tab, or a line runs along
 the edge of a package it starts or ends in, or through a package's name tab.
 
@@ -193,7 +196,8 @@ stand outside it and write their name beside the figure, on the side `name_side`
 
 It gets back the same things as the package diagram tool. An actor's place covers the figure and its name, and the
 figure's own place comes after it. The check is the same as for package diagrams, and it also fails when a line runs
-through an actor's name or the name at the top of the system boundary.
+through an actor's name or the name at the top of the system boundary. Generalization lines to one parent may share
+one trunk, as inheritance lines do in class diagrams.
 
 ### State diagrams
 
@@ -340,10 +344,12 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
 
 - **클래스도**는 `draw_class_diagram`으로 그린다. 어시스턴트가 상자의 왼쪽 위 자리와, 필요하면 관계선의 꺾는 점을 준다. 결과로
   검사 결과, 상자마다 그린 자리와 크기, 저장한 파일 경로, 그림을 돌려준다. 상자끼리 겹치거나, 선이 상자·글자·다른 선의 화살촉을
-  지나거나, 글자끼리 겹치면 불합격이다. 선끼리 엇갈린 곳과 그림 크기는 알려 주기만 하고 불합격이 아니다.
+  지나거나, 글자끼리 겹치면 불합격이다. 선끼리 엇갈린 곳과 그림 크기는 알려 주기만 하고 불합격이 아니다. 같은 부모로 가는
+  상속끼리, 실체화끼리는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 써도 된다(꺾는 점을 주는 법은 도구 설명에 있다).
 - **패키지도**는 `draw_package_diagram`으로 그린다. 패키지와 패키지 사이 의존을 그리고, 패키지 안에 클래스·패키지를 넣는다.
   컴포넌트·아티팩트·노드도 한 그림에 함께 그린다. 요소마다 `kind`를 주고, 다른 요소 안에 둘 요소는 `in`으로 품은 요소를
-  가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다.
+  가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다(패키지는
+  선이 가운데가 아니라 탭 오른쪽 몸통의 가운데를 향하므로 그 점도 함께).
   클래스도 검사에 더해, 안의 요소가 바깥 요소의 테두리·이름 탭에 붙거나, 선이 그 끝을 품은 패키지의 테두리를 따라가거나 패키지
   탭을 지나면 불합격이다. 컴포넌트·아티팩트는 아이콘 표기로도 그린다 — `component_icon`은 왼쪽 변에 작은 네모 둘이 걸친 UML 1
   표기 컴포넌트(선이 네모를 지나면 불합격), `artifact_icon`은 귀 접힌 문서 아이콘과 그 밖(`name_side`)에 쓰는 이름이다.
@@ -359,7 +365,7 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
 - **유즈케이스도**는 `draw_use_case_diagram`으로 그린다. 액터·유즈케이스·시스템 경계를 그리고, 연관·의존(«include»·«extend»)·
   일반화로 잇는다. 유즈케이스는 `in`으로 시스템 경계 안에 넣고, 액터는 경계 밖에 두어 이름을 사람 모양 옆(`name_side`가 정한
   쪽)에 쓴다. 결과는 패키지도와 같고, 액터는 이름까지 덮는 자리 뒤에 사람 모양 자리를 함께 돌려준다. 검사는 패키지도와 같고,
-  선이 액터 이름이나 시스템 경계 이름을 지나도 불합격이다.
+  선이 액터 이름이나 시스템 경계 이름을 지나도 불합격이다. 같은 부모로 가는 일반화 선은 클래스도의 상속처럼 한 줄기로 모아도 된다.
 - **상태도**는 `draw_state_diagram`으로 그린다. 시작·끝 점, 상태, 선택 마름모를 전이로 잇는다. 상태의 `entry /`·`do /`·`exit /`
   줄은 `actions`에 주면 받은 그대로 쓰고, 상태 안에 상태를 넣을 때는 `in`으로 품은 상태를 가리킨다. 이름이 없는 시작·끝 점과
   선택은 `id`를 주어 전이가 가리키게 한다. 전이 글자(`name`)도 대괄호·빗금까지 받은 그대로 쓴다. 결과는 패키지도와 같다. 선이 그
