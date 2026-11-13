@@ -12,9 +12,9 @@ from .geom import Border, PolygonBorder, RectBorder, Segment
 from .text import Box
 
 TAB_MIN = 50       # 패키지 탭의 최소 폭
-# 패키지 몸통은 탭 폭의 두 배보다 적어도 이만큼 넓다 — 선이 향하는 몸통 가운데가 탭 오른쪽 끝에서 TAB_STEP/2 오른쪽에 와서
-# (검사 여유 4px보다 넓다) 위에 같은 폭으로 쌓은 패키지에서 곧게 내려오는 선이 탭을 지나지 않는다
-TAB_STEP = 20
+# 패키지 몸통은 탭보다 적어도 이만큼 넓다. 패키지로 오가는 선은 탭 오른쪽 몸통의 가운데(탭 오른쪽 끝에서 TAB_STEP/2 이상)를
+# 향하므로, 위에서 곧게 내려오는 선의 끝 모양(삼각형 반폭 9)이 탭 둘레 검사 여유(4px)에 닿지 않는다
+TAB_STEP = 40
 PACKAGE_BODY = 40  # 비어 있는 패키지 몸통의 높이
 BOX_BODY = 24      # 컴포넌트·아티팩트에서 머리 칸 밖에 더하는 높이(이름 한 줄이면 클래스 기본 높이 48)
 ICON_ROOM = 16     # 컴포넌트·아티팩트 아이콘이 이름과 겹치지 않게 머리 칸 좌우에 더하는 폭
@@ -25,7 +25,8 @@ NODE_BODY = 24     # 노드 앞면에서 이름 줄 밖에 더하는 높이
 
 class PackageShape(Shape):
     """패키지: 이름(과 스테레오타입)을 쓴 탭이 몸통 왼쪽 위에 붙은 폴더. 안에 요소를 두는 칸은 몸통이고, 선은 몸통 테두리에 닿는다.
-    탭은 몸통 밖에 붙은 이름 칸이라 그 패키지가 끝인 선도 지나가면 안 된다. 탭 오른쪽 빈 곳은 패키지가 아니다."""
+    탭은 몸통 밖에 붙은 이름 칸이라 그 패키지가 끝인 선도 지나가면 안 된다 — 그래서 선은 몸통 가운데가 아니라 탭 오른쪽 몸통의
+    가운데를 향한다. 탭 오른쪽 빈 곳은 패키지가 아니다."""
 
     holds = True
 
@@ -35,12 +36,16 @@ class PackageShape(Shape):
 
     def size(self, e: Element) -> tuple[float, float]:
         _, tab_w, tab_h = self._tab(e)
-        return max(MIN_WIDTH, 2 * tab_w + TAB_STEP), tab_h + PACKAGE_BODY
+        return max(MIN_WIDTH, tab_w + TAB_STEP), tab_h + PACKAGE_BODY
 
     def parts(self, e: Element, rect: Box) -> tuple[Box, ...]:
         """탭과 몸통 — 탭 오른쪽 빈 곳은 패키지가 아니다."""
         _, tab_w, tab_h = self._tab(e)
         return (rect[0], rect[1], rect[0] + tab_w, rect[1] + tab_h), (rect[0], rect[1] + tab_h, rect[2], rect[3])
+
+    def anchor(self, e: Element, rect: Box) -> tuple[float, float]:
+        _, tab_w, tab_h = self._tab(e)
+        return (rect[0] + tab_w + rect[2]) / 2, (rect[1] + tab_h + rect[3]) / 2
 
     def insets(self, e: Element) -> Box:
         return 0.0, self._tab(e)[2], 0.0, 0.0
@@ -125,6 +130,11 @@ class NodeShape(Shape):
 
     def border(self, e: Element, rect: Box) -> Border:
         return PolygonBorder(self._corners(rect))
+
+    def parts(self, e: Element, rect: Box) -> tuple[Box, ...]:
+        """앞면과 위·오른쪽 두께 띠 — 왼쪽 위와 오른쪽 아래의 깎인 모서리는 노드가 아니다."""
+        l, t, r, b = rect
+        return (l, t + DEPTH, r - DEPTH, b), (l + DEPTH, t, r, t + DEPTH), (r - DEPTH, t + DEPTH, r, b - DEPTH)
 
     def name_zones(self, e: Element, rect: Box) -> tuple[NameZone, ...]:
         head = self.head(e)

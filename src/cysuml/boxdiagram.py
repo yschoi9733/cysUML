@@ -125,6 +125,11 @@ class Shape:
         """선이 닿는 겉 테두리."""
         return RectBorder(rect)
 
+    def anchor(self, e: Element, rect: T.Box) -> Point:
+        """선이 향하는 점 — 선 끝은 이 점에서 첫·마지막 꺾는 점(없으면 상대 요소의 이 점)으로 가는 선이 테두리와 만나는 곳이다.
+        테두리 안이어야 하고, 기본은 테두리 가운데다."""
+        return self.border(e, rect).center()
+
     def name_zones(self, e: Element, rect: T.Box) -> tuple[NameZone, ...]:
         """이름 칸. 안에 요소를 두는 모양만 쓴다(선이 지나가면 안 되는 자리)."""
         return ()
@@ -250,7 +255,8 @@ class Diagram:
 @dataclass(frozen=True)
 class PlacedBox:
     """자리를 잡은 요소. rect는 자리(모양 밖 이름까지 덮는다), shape_rect는 모양 자리, inner는 안의 요소를 둘 칸(안에 요소를 둘 수
-    없는 모양은 None), zones는 이름 칸, frame은 안에 요소를 두는 모양의 테두리 선, parts는 겹침을 볼 때 자리를 이루는 사각형들이다."""
+    없는 모양은 None), zones는 이름 칸, frame은 안에 요소를 두는 모양의 테두리 선, parts는 겹침을 볼 때 자리를 이루는 사각형들,
+    anchor는 선이 향하는 점(Shape.anchor)이다."""
 
     box: Element
     shape: Shape = field(compare=False, repr=False)
@@ -262,10 +268,13 @@ class PlacedBox:
     frame: tuple[Segment, ...] = ()
     name_at: tuple[tuple[float, float], ...] = ()  # 모양 밖 이름 줄마다 가운데
     parts: tuple[T.Box, ...] = ()
+    anchor: Optional[Point] = None
 
     def __post_init__(self):
         if not self.parts:
             object.__setattr__(self, "parts", (self.rect,))
+        if self.anchor is None:
+            object.__setattr__(self, "anchor", self.border.center())
 
     @property
     def key(self) -> str:
@@ -532,12 +541,12 @@ class _Reader(Reader):
         self.fail(path, f"{w.key}{josa(w.key, '이', '가')} {_show(key)}인 {w.noun}{josa(w.noun, '이', '가')} 없다"
                         f"(있는 {w.noun}: {self._known(seen) or '없음'})")
 
-    def _parents(self, read: list[tuple[str, Element]], seen: dict[str, int]) -> bool:
+    def _parents(self, read: list[tuple[str, Element]], seen: dict[str, int],
+                 parent_of: dict[str, Optional[str]]) -> bool:
         """in이 가리키는 요소를 본다. 모두 맞으면 True."""
         before = len(self.problems)
         field_ = self.spec.list_field
         by_key = {e.key: e for _, e in read}
-        parent_of = {e.key: e.parent for _, e in read}
         for path, e in read:
             if e.parent is None:
                 continue
@@ -585,8 +594,9 @@ class _Reader(Reader):
             else:
                 seen[key] = i
         read = [(path, e) for path, (_, _, e) in got if e is not None]
-        nested = self._parents(read, seen)
         parent_of = {e.key: e.parent for _, e in read}
+        nested = self._parents(read, seen, parent_of)
+        lineage = {key: ancestors(parent_of, key) for key in parent_of} if nested else {}
         relations = []
         for i, v in enumerate(self.items(o["relations"], "relations") if "relations" in o else []):
             path = _at("relations", i)
@@ -596,10 +606,9 @@ class _Reader(Reader):
                 self._missing(_at(path, key), n, seen)
             if r is None or missing:
                 continue
-            if nested and r.source in parent_of and r.target in parent_of and (
-                    r.source in ancestors(parent_of, r.target) or r.target in ancestors(parent_of, r.source)):
-                inner, outer = ((r.target, r.source) if r.source in ancestors(parent_of, r.target)
-                                else (r.source, r.target))
+            outer_first = r.source in lineage.get(r.target, ())
+            if outer_first or r.target in lineage.get(r.source, ()):
+                inner, outer = (r.target, r.source) if outer_first else (r.source, r.target)
                 self.fail(path, f"한 끝({_show(inner)})이 다른 끝({_show(outer)}) 안에 있다 — 품은 {w.noun}와 그 안의 "
                                 f"{w.noun}는 선으로 잇지 않는다")
                 continue
@@ -720,9 +729,10 @@ def shape_lengths(r: Relation, t: RelationType) -> tuple[float, float]:
 
 def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
            w: Words) -> tuple[Optional[tuple[Point, ...]], list[str]]:
-    """관계선의 점들(선 끝은 테두리 가운데에서 첫·마지막 꺾는 점으로, 꺾는 점이 없으면 다른 요소 가운데로 가는 선이 테두리와
-    만나는 곳)과, 그렇게 그을 수 없으면 그 까닭들."""
-    ca, cb = a.border.center(), b.border.center()
+    """관계선의 점들(선 끝은 요소가 향하게 한 점(anchor — 보통 테두리 가운데)에서 첫·마지막 꺾는 점으로, 꺾는 점이 없으면 다른
+    요소의 그 점으로 가는 선이 테두리와 만나는 곳)과, 그렇게 그을 수 없으면 그 까닭들."""
+    ca, cb = a.anchor, b.anchor
+    assert ca is not None and cb is not None
     if r.via:
         start, end = a.border.exit(ca, r.via[0]), b.border.exit(cb, r.via[-1])
         problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} {w.noun} {_show(p_.key)}({fmt_rect(p_.rect)}) 안이나 "
@@ -808,7 +818,8 @@ def _place(spec: Spec, diagram: Diagram) -> tuple[PlacedBox, ...]:
             cx = (name_rect[0] + name_rect[2]) / 2
             ys = line_ys((name_rect[1] + name_rect[3]) / 2, len(e.name))
             done[e.key] = PlacedBox(e, shape, rect, shape_rect, shape.border(e, shape_rect),
-                                    (NameZone(name_rect, True),), None, (), tuple((cx, y) for y in ys))
+                                    (NameZone(name_rect, True),), None, (), tuple((cx, y) for y in ys),
+                                    anchor=shape.anchor(e, shape_rect))
             continue
         inner = None
         frame: tuple[Segment, ...] = ()
@@ -816,7 +827,7 @@ def _place(spec: Spec, diagram: Diagram) -> tuple[PlacedBox, ...]:
             inner = (rect[0] + insets[0], rect[1] + insets[1], rect[2] - insets[2], rect[3] - insets[3])
             frame = tuple(shape.frame(e, rect))
         done[e.key] = PlacedBox(e, shape, rect, rect, shape.border(e, rect), tuple(shape.name_zones(e, rect)), inner, frame,
-                                parts=tuple(shape.parts(e, rect)))
+                                parts=tuple(shape.parts(e, rect)), anchor=shape.anchor(e, rect))
     return tuple(done[e.key] for e in diagram.boxes)
 
 

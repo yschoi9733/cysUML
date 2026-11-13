@@ -100,7 +100,8 @@ def test_line_through_the_tab_of_the_package_holding_its_end_fails():
 
 
 def test_line_into_a_package_through_its_own_tab_fails():
-    r = report([el("package", "P", 0, 0), el("class", "X", -60, -150)], [rel("dependency", "X", "P")])
+    # 왼쪽 위에서 비스듬히 들어와 탭(0, 0, 50×24)을 지나 몸통 윗변에 닿는다
+    r = report([el("package", "P", 0, 0), el("class", "X", -150, -150)], [rel("dependency", "X", "P")])
     (f,) = r.failures
     assert f.kind == "line_through_name" and f.elements == ("X->P", "P")
 
@@ -113,12 +114,30 @@ def test_dependency_from_above_onto_the_body_right_of_the_tab_passes():
     assert K.check(d).passed
 
 
-def test_packages_stacked_top_to_bottom_pass_with_a_straight_dependency():
-    # 기본 크기 패키지 몸통은 탭 폭의 두 배보다 넓어, 위에 같은 자리로 쌓은 패키지에서 곧게 내려오는 선이 탭 오른쪽에 닿는다
-    d = draw([el("package", "a", 0, 0), el("package", "b", 0, 150)], [rel("dependency", "a", "b")])
+@pytest.mark.parametrize("kind", ["association", "aggregation", "composition", "generalization", "realization",
+                                  "dependency"])
+@pytest.mark.parametrize("source, target", [("a", "b"), ("b", "a")])
+def test_packages_stacked_top_to_bottom_pass_with_a_straight_line_of_any_kind(kind, source, target):
+    # 선은 탭 오른쪽 몸통의 가운데를 향하므로, 같은 left로 쌓은 패키지 사이 선은 곧게 내려와 탭 오른쪽에 닿는다 — 아래 패키지
+    # 윗변의 삼각형·마름모·화살촉도 탭 둘레 검사 여유에 닿지 않는다
+    d = draw([el("package", "a", 0, 0), el("package", "b", 0, 150)], [rel(kind, source, target)])
     b = placed(d, "b")
-    assert b.width / 2 >= b.zones[0].rect[2] + 10
+    (line,) = d.layout.relations
+    assert {p[0] for p in line.points} == {b.anchor[0]} and b.anchor[0] - 9 > b.zones[0].rect[2] + K.BOX_CLEARANCE
     assert K.check(d).passed, K.check(d).summary()
+
+
+def test_lines_aim_at_the_middle_of_the_body_right_of_the_tab():
+    d = draw([el("package", "p", 0, 0), el("class", "L", -200, 20), el("class", "U", 0, 150)],
+             [rel("dependency", "L", "p"), rel("dependency", "U", "p")])
+    p = placed(d, "p")
+    assert p.anchor == ((50 + p.width) / 2, (HEAD + p.height) / 2)
+    left, up = (r.points for r in d.layout.relations)
+    assert left[-1][0] == 0 and up[-1][1] == p.height  # 왼쪽 변·아랫변에 닿는다(몸통 테두리)
+    for points in (left, up):
+        (x0, y0), (x1, y1) = points[-2], points[-1]
+        (ax, ay) = p.anchor
+        assert (x1 - x0) * (ay - y0) == pytest.approx((y1 - y0) * (ax - x0))  # 선이 그 점을 향한다
 
 
 def test_element_right_of_a_package_tab_does_not_overlap_the_package():
@@ -137,6 +156,15 @@ def test_overlapping_elements_inside_a_package_fail_but_holder_and_held_do_not()
 def test_element_placed_over_a_package_without_in_is_an_overlap_with_a_hint():
     (f,) = report([el("package", "P", 0, 0, width=200, height=150), el("class", "A", 40, 60)]).failures
     assert f.kind == "box_overlap" and "A를 P 안에 두려면 A의 in에 P를 준다" in f.hint
+    # 탭 오른쪽에서 몸통으로 걸친 요소는 in을 줘도 칸 밖이라 그 힌트를 붙이지 않는다
+    (f,) = report([el("package", "P", 0, 0, width=300, height=150), el("class", "A", 150, 10)]).failures
+    assert f.kind == "box_overlap" and "in에" not in f.hint
+
+
+def test_nodes_whose_cut_corners_face_each_other_do_not_overlap():
+    # N1의 오른쪽 아래와 N2의 왼쪽 위 깎인 모서리가 자리 사각형으로는 3px 겹치지만, 두 입체 상자는 7px 떨어져 있다
+    n1 = placed(draw([el("node", "N1", 0, 0)]), "N1")
+    assert report([el("node", "N1", 0, 0), el("node", "N2", n1.rect[2] - 3, n1.rect[3] - 3)]).passed
 
 
 @pytest.mark.parametrize("left, top, phrase", [(10, 44, "칸 테두리에서 10px밖에"), (20, 10, "이름 칸에 걸친다"),
