@@ -1,5 +1,9 @@
-"""컴포넌트도: 제공 인터페이스 원과 그 막대·쓰는 쪽 화살표, 아티팩트의 «manifest», 클래스 실현 그림, 연관 기본 방향."""
+"""컴포넌트도: 제공 인터페이스 원과 그 막대·쓰는 쪽 화살표·소켓, 아티팩트의 «manifest», 아이콘 표기 그림, 클래스 실현 그림, 연관
+기본 방향."""
+import json
 import math
+import re
+from pathlib import Path
 
 import pytest
 
@@ -7,9 +11,11 @@ from cysuml import boxcheck as K
 from cysuml import componentdiagram as C
 from cysuml import geom as G
 from cysuml import server
-from cysuml.boxdiagram import LABEL_LINE, NAME_SEP, NameZone
+from cysuml.boxdiagram import LABEL_LINE, HeadMark, NameZone
 from cysuml.canvas import Ellipse, Line, Polygon, Text
 from cysuml.parsing import InputError
+
+README = Path(__file__).resolve().parent.parent / "README.md"
 
 
 def el(kind, name, left, top, **more):
@@ -187,9 +193,9 @@ def test_lollipop_is_a_small_circle_with_its_name_below():
     assert p.shape_rect == (16.5, 0, 36.5, C.BALL)
     assert (circle.left, circle.top, circle.width, circle.height) == (16, 0, C.BALL, C.BALL)
     assert p.anchor == (26, 10) and p.border == G.EllipseBorder(26, 10, C.BALL / 2, C.BALL / 2)
-    assert p.rect[1] == p.shape_rect[1] and p.rect[3] == C.BALL + NAME_SEP + LABEL_LINE
+    assert p.rect[1] == p.shape_rect[1] and p.rect[3] == C.BALL + C.BALL_NAME_GAP + LABEL_LINE
     assert name.text == "OrderApi" and name.x == (p.rect[0] + p.rect[2]) / 2 > circle.left
-    assert p.zones == (NameZone((0, C.BALL + NAME_SEP, p.rect[2], p.rect[3]), True),)
+    assert p.zones == (NameZone((0, C.BALL + C.BALL_NAME_GAP, p.rect[2], p.rect[3]), True),)
     assert not owned(d, "OrderApi", Polygon)
 
 
@@ -229,7 +235,7 @@ def test_two_line_lollipop_name_takes_an_id():
     d = draw([el("lollipop", ["Order", "Api"], 0, 0, id="api"), el("component", "C", -200, -12)],
              [rel("association", "C", "api")])
     assert [t.text for t in owned(d, "api", Text)] == ["Order", "Api"]
-    assert placed(d, "api").height == C.BALL + NAME_SEP + 2 * LABEL_LINE
+    assert placed(d, "api").height == C.BALL + C.BALL_NAME_GAP + 2 * LABEL_LINE
     assert K.check(d).passed, K.check(d).summary()
 
 
@@ -241,7 +247,185 @@ def test_lollipop_in_a_package_grows_the_package_over_its_name():
     assert K.check(d).passed, K.check(d).summary()
 
 
+# ---------------------------------------------------------------- 소켓
+
+
+def ball_center(name_side="bottom", name="Api"):
+    """원을 (0, 0)에 둘 때 원 가운데(선이 향하는 점)."""
+    return placed(draw([el("lollipop", name, 0, 0, name_side=name_side)]), name).anchor
+
+
+def around(name, deg, center, dist, kind="component", **more):
+    """원 가운데에서 deg(수학 각도 — 위가 +)쪽으로 dist 떨어진 곳에 가운데를 둔 기본 크기 컴포넌트(90×48)."""
+    x, y = center[0] + dist * math.cos(math.radians(deg)), center[1] - dist * math.sin(math.radians(deg))
+    return el(kind, name, x - 45, y - 24, **more)
+
+
+def socket_and(other, deg, name_side="bottom"):
+    """소켓은 왼쪽(180°)에서, other 관계의 쓰는 쪽·제공하는 쪽은 deg에서 원으로 온다."""
+    c = ball_center(name_side)
+    return report([el("lollipop", "Api", 0, 0, name_side=name_side), around("U", 180, c, 500), around("P", deg, c, 500)],
+                  [rel("requires", "U", "Api"), rel(other, "P", "Api")])
+
+
+def test_socket_is_a_half_circle_around_the_ball_and_its_line_stops_short_of_the_ball():
+    c = ball_center()
+    d = draw([el("lollipop", "Api", 0, 0), around("U", 180, c, 300)], [rel("requires", "U", "Api")])
+    assert K.check(d).passed, K.check(d).summary()
+    (r,) = d.layout.relations
+    assert r.points[-1] == pytest.approx((c[0] - C.SOCKET, c[1]))  # 원 둘레(반지름 10)에서 5 앞
+    socket = drawn(d, "U->Api")
+    assert socket.line.dash is None
+    (arc,) = socket.heads
+    assert isinstance(arc, Line) and socket.marks == (HeadMark("소켓 반원", r.points[-1]),)
+    assert all(math.dist(p, c) == pytest.approx(C.SOCKET) for p in arc.points)
+    # 쓰는 쪽(왼쪽) 절반만 감싼다 — 양 끝은 원 바로 위·아래, 가운데는 선 끝
+    ends = sorted((arc.points[0], arc.points[-1]), key=lambda p: p[1])
+    assert ends == [pytest.approx((c[0], c[1] - C.SOCKET)), pytest.approx((c[0], c[1] + C.SOCKET))]
+    assert all(p[0] <= c[0] + 1e-9 for p in arc.points) and any(math.dist(r.points[-1], p) < 1e-9 for p in arc.points)
+
+
+def test_socket_with_bends_keeps_its_half_circle_on_the_ball_center():
+    c = ball_center()
+    d = draw([el("lollipop", "Api", 0, 0), el("component", "U", -300, -200)],
+             [rel("requires", "U", "Api", via=[[c[0] - 80, -176], [c[0] - 80, c[1] - 80]])])
+    assert K.check(d).passed, K.check(d).summary()
+    (arc,) = drawn(d, "U->Api").heads
+    assert all(math.dist(p, c) == pytest.approx(C.SOCKET) for p in arc.points)
+    (r,) = d.layout.relations
+    assert math.dist(r.points[-1], c) == pytest.approx(C.SOCKET)  # 마지막 구간도 원 가운데를 향한다
+
+
+@pytest.mark.parametrize("dx, ok", [(16, False), (20, False), (21, True)])
+def test_bend_next_to_a_socket_must_clear_its_half_circle(dx, ok):
+    # 원 왼쪽 dx에 꺾는 점을 두고 위에서 곧게 내려와 꺾어 들어온다. 원 쪽 끝 구간(dx − 10)이 띄운 거리 5와 소켓 반원 길이 5를
+    # 더한 10보다 길어야 한다 — 16이면 세로 구간이 반원 꼭대기(dx 15) 1px 옆을 지나 반원과 한데 붙어 보인다
+    c = ball_center(name_side="right")
+    data = ([el("lollipop", "Api", 0, 0, name_side="right"), el("component", "U", c[0] - dx - 45, c[1] - 250)],
+            [rel("requires", "U", "Api", via=[[c[0] - dx, c[1]]])])
+    if ok:
+        assert report(*data).passed
+    else:
+        with pytest.raises(InputError, match=r"to 쪽 끝 구간 길이 .*끝 모양 길이와 띄운 거리를 더한 길이\(10\)보다 길지 않다"):
+            draw(*data)
+
+
+@pytest.mark.parametrize("side", ["bottom", "top"])
+def test_bar_ball_and_socket_in_a_straight_line_pass_with_the_name_beside(side):
+    assert socket_and("association", 0, name_side=side).passed
+
+
+@pytest.mark.parametrize("gap, passed", [(C.BALL_NAME_GAP - 1, False), (C.BALL_NAME_GAP, True)])
+def test_ball_name_sits_far_enough_that_a_socket_misses_it(monkeypatch, gap, passed):
+    # 이름 칸을 원에서 BALL_NAME_GAP보다 1px만 덜 떼도 소켓 반원 아래 끝이 이름 칸 검사 여유에 걸린다(실측)
+    monkeypatch.setattr(C.LOLLIPOP, "name_gap", gap)
+    r = socket_and("association", 0)
+    assert r.passed == passed and (passed or kinds(r) == ["line_through_name"]), r.summary()
+
+
+@pytest.mark.parametrize("other, turn, passed", [("association", 95, False), ("association", 100, True),
+                                                 ("dependency", 105, False), ("dependency", 110, True)])
+def test_bar_and_arrow_need_room_from_the_socket(other, turn, passed):
+    # 배치 요령의 "막대는 100°, 화살표는 110° 넘게"(실측 경계는 98°·108°). 막대는 반원 끝에 닿고, 화살표는 화살촉이 반원에 겹친다
+    r = socket_and(other, 180 - turn)
+    assert r.passed == passed, r.summary()
+    assert passed or kinds(r) == ["line_through_head" if other == "association" else "head_overlap"]
+
+
+def test_one_ball_used_by_a_socket_and_a_dependency_arrow_passes():
+    c = ball_center()
+    r = report([el("lollipop", "Api", 0, 0), around("U", 180, c, 300), around("P", 0, c, 300), around("V", 60, c, 300)],
+               [rel("requires", "U", "Api"), rel("association", "P", "Api"), rel("dependency", "V", "Api")])
+    assert r.passed, r.summary()
+
+
+def test_two_sockets_on_one_ball_overlap():
+    c = ball_center()
+    r = report([el("lollipop", "Api", 0, 0), around("U", 180, c, 300), around("V", 120, c, 300)],
+               [rel("requires", "U", "Api"), rel("requires", "V", "Api")])
+    assert "head_overlap" in kinds(r)
+    (f,) = [f for f in r.failures if f.kind == "head_overlap"]
+    assert f.problem.count("소켓 반원") == 2
+
+
+def test_line_through_a_socket_half_circle_fails_and_is_not_called_an_arrowhead():
+    # 세로선 A→B가 소켓 반원 왼쪽 끝 바로 옆(원 가운데에서 왼쪽 SOCKET)을 지난다
+    c = ball_center(name_side="right")
+    x = c[0] - C.SOCKET
+    r = report([el("lollipop", "Api", 0, 0, name_side="right"), around("U", 180, c, 300),
+                el("class", "A", x - 45, c[1] - 200), el("class", "B", x - 45, c[1] + 150)],
+               [rel("requires", "U", "Api"), rel("dependency", "A", "B")])
+    assert "line_through_head" in kinds(r)
+    (f,) = [f for f in r.failures if f.kind == "line_through_head"]
+    assert "소켓 반원" in f.problem and "화살촉" not in f.problem
+
+
+def test_socket_input_errors():
+    c = ball_center()
+    users = [el("lollipop", "Api", 0, 0), around("U", 180, c, 300), el("lollipop", "Other", 300, 300)]
+    with pytest.raises(InputError) as e:
+        draw(users, [rel("requires", "U", "U2")])
+    assert e.value.problems[0].startswith("relations[0].to: ")  # 없는 요소는 엔진이 먼저 알린다
+    with pytest.raises(InputError) as e:
+        draw([*users, around("V", 0, c, 300)], [rel("requires", "Api", "V"), rel("requires", "U", "V"),
+                                                rel("requires", "Other", "Api")])
+    assert e.value.problems == (
+        "relations[0].from: 소켓(requires)의 from은 인터페이스를 쓰는 쪽이다 — from 요소 'Api'의 종류가 'lollipop'이다",
+        "relations[0].to: 소켓(requires)은 제공 인터페이스 원(kind \"lollipop\")으로 긋는다 — to 요소 'V'의 종류가 'component'다",
+        "relations[1].to: 소켓(requires)은 제공 인터페이스 원(kind \"lollipop\")으로 긋는다 — to 요소 'V'의 종류가 'component'다",
+        "relations[2].from: 소켓(requires)의 from은 인터페이스를 쓰는 쪽이다 — from 요소 'Other'의 종류가 'lollipop'이다")
+    with pytest.raises(InputError) as e:
+        draw(users, [rel("requires", "U", "Api", to_multiplicity="1", navigable="to")])
+    assert [p.split(":")[0] for p in e.value.problems] == ["relations[0].to_multiplicity", "relations[0].navigable"]
+
+
+# ---------------------------------------------------------------- 아이콘 표기와 소켓을 함께 쓴 그림
+
+
+def chain(name_side="bottom"):
+    """아이콘 표기 컴포넌트 다섯을 가로로 늘어놓고, 이웃 사이마다 원을 둔다 — 왼쪽 컴포넌트가 막대로 제공하고 오른쪽 컴포넌트가
+    부품 네모 사이로 소켓을 긋는다. 컴포넌트마다 위에 문서 아이콘 아티팩트가 «manifest»로 내려온다."""
+    off = ball_center(name_side, "Api1")
+    elements, relations = [], []
+    for i in range(5):
+        left = 260 * i
+        elements += [el("component_icon", f"Comp{i + 1}", left, 200),
+                     el("artifact_icon", f"comp{i + 1}.jar", left + 38, 80, name_side="right")]
+        relations.append(rel("dependency", f"comp{i + 1}.jar", f"Comp{i + 1}", stereotype="manifest"))
+    for i in range(4):
+        cx = 260 * i + 179  # 왼쪽 컴포넌트 오른쪽 변(98)과 오른쪽 컴포넌트 부품 네모(260) 사이
+        elements.append(el("lollipop", f"Api{i + 1}", cx - off[0], 224 - off[1], name_side=name_side))
+        relations += [rel("association", f"Comp{i + 1}", f"Api{i + 1}"), rel("requires", f"Comp{i + 2}", f"Api{i + 1}")]
+    return elements, relations
+
+
+def test_readme_billing_example_draws_every_line_straight():
+    # README 예시는 합격만 test_server가 본다 — 교재 그림처럼 모든 구간이 가로·세로로 곧은지는 여기서 본다
+    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
+    (data,) = [b for b in blocks if b.get("file_name") == "billing"]
+    d = C.render({k: v for k, v in data.items() if k != "file_name"})
+    for r in d.layout.relations:
+        assert all(a[0] == b[0] or a[1] == b[1] for a, b in zip(r.points, r.points[1:])), r.owner
+
+
+def test_icon_components_balls_sockets_and_page_artifacts_pass():
+    elements, relations = chain()
+    kinds_ = [e["kind"] for e in elements]
+    assert (kinds_.count("component_icon"), kinds_.count("lollipop"), kinds_.count("artifact_icon")) == (5, 4, 5)
+    d = draw(elements, relations)
+    assert K.check(d).passed, K.check(d).summary()
+    for r in d.layout.relations:  # 막대·소켓·«manifest»가 모두 곧다
+        assert r.points[0][0] == r.points[-1][0] or r.points[0][1] == r.points[-1][1], r.owner
+
+
 # ---------------------------------------------------------------- 도구 정의
+
+
+def test_tool_description_tells_how_to_draw_sockets():
+    assert C.SOCKET_INPUT in C.TOOL and C.TIPS in C.TOOL
+    assert '"requires"' in C.TOOL and "소켓 반원" in C.TOOL
+    assert "막대는 100°, 화살표는 110° 넘게" in C.TIPS and "한 원에 하나" in C.TIPS
+    assert f"이름은 원에서 {C.BALL_NAME_GAP:g}px 떨어진다" in C.TOOL
 
 
 def test_associations_have_no_arrowhead_unless_given_a_direction():
