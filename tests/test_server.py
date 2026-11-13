@@ -174,18 +174,19 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     assert trunks
     text = guide.relation_fields(spec)
     noun, edge = spec.words.noun, spec.words.edge
+    outside = any(s.outside_name for s in spec.shapes.values())
+    edges = "(모양 자리가 덧붙어 있으면 모양 자리의 변)" if outside else ""
     pairs = ", ".join(f"{t.label}끼리" for t in trunks)  # 클래스도·패키지도는 "상속끼리, 실체화끼리", 유즈케이스도는 "일반화끼리"
     for phrase in (f"  - 공유 줄기: 같은 부모(to)로 가는 {pairs}는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 쓰게 "
                    "그려도 된다. 삼각형이 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다",
                    "부모를 위에, 자식들을 그 아래 한 줄에 두고", " 이렇게 준다:\n    - 가운데 x·y:",
                    f"    - 가운데 x·y: 결과의 {noun} 자리에서 왼 + 폭/2, 위 + 높이/2",
                    f"    - 줄기 높이 y는 부모 {noun}의 아래 {edge}",
-                   f"자식 {noun}들의 위 {edge} 사이 가운데쯤에 정한다",
+                   f"자식 {noun}들의 위 {edge}{edges} 사이 가운데쯤에 정한다",
                    f"부모 아래 {edge}에서 삼각형 길이 {boxdiagram.TRIANGLE[0]}px보다 가까우면 입력 오류다",
                    "    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다",
                    "자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다"):
         assert phrase in text, phrase
-    outside = any(s.outside_name for s in spec.shapes.values())
     within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if outside else ""
     named = ", 부모의 모양 밖 이름이 오른쪽에 있거나" if outside else ""
     two = ("    - 같은 부모로 상속·실체화가 함께 오면 종류마다 줄기를 따로 둔다",

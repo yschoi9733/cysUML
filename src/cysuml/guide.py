@@ -196,22 +196,24 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
     longest = max(t.end.length for t in types if t.end is not None)
     noun, edge = spec.words.noun, spec.words.edge
     ga = josa(head, "이", "가")
-    shape = " — 모양 자리가 덧붙어 있으면 모양 자리로 셈한다" if _outside(spec) else ""
+    outside = _outside(spec)
+    shape = " — 모양 자리가 덧붙어 있으면 모양 자리로 셈한다" if outside else ""
     aim = ". 향하는 점이 덧붙어 있으면 그 점을 쓴다" if _aiming(spec) else ""
     middle = f"결과의 {noun} 자리에서 왼 + 폭/2, 위 + 높이/2{shape}{aim}"
-    sides = '(모양 밖 이름은 name_side "left"·"right"로 옆에 쓴다 — 위·아래면 줄기가 이름을 지난다)' if shape else ""
+    edges = "(모양 자리가 덧붙어 있으면 모양 자리의 변)" if outside else ""
+    sides = '(모양 밖 이름은 name_side "left"·"right"로 옆에 쓴다 — 위·아래면 줄기가 이름을 지난다)' if outside else ""
     lines = [f"  - 공유 줄기: 같은 부모(to)로 가는 {pairs}는 여러 선을 한 줄기로 모아 {head} 하나를 함께 쓰게 그려도 된다. "
              f"{head}{ga} 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다(종류가 다른 선을 섞거나 {head}{ga} 조금이라도 "
              f"어긋나면 불합격이다). 부모를 위에, 자식들을 그 아래 한 줄에 두고{sides} 이렇게 준다:",
              f"    - 가운데 x·y: {middle}.",
-             f"    - 줄기 높이 y는 부모 {noun}의 아래 {edge}{josa(edge, '과', '와')} 자식 {noun}들의 위 {edge} 사이 가운데쯤에 "
+             f"    - 줄기 높이 y는 부모 {noun}의 아래 {edge}{josa(edge, '과', '와')} 자식 {noun}들의 위 {edge}{edges} 사이 가운데쯤에 "
              f"정한다. 부모 아래 {edge}에서 {head} 길이 {fmt_num(longest)}px보다 가까우면 입력 오류다.",
              f"    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다. 마지막 점이 모두 같아 {head}{ga} 한 자리에 "
              f"그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다."]
     if len(types) > 1:
         labels = _joined(t.label for t in types)
-        within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if shape else ""
-        named = ", 부모의 모양 밖 이름이 오른쪽에 있거나" if shape else ""
+        within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if outside else ""
+        named = ", 부모의 모양 밖 이름이 오른쪽에 있거나" if outside else ""
         lines += [f"    - 같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오면 종류마다 줄기를 따로 둔다. 한 종류는 위대로 아래 "
                   f"{edge}에 모은다. 다른 종류는 세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {TRUNK_SIDE}, 줄기 높이 "
                   f"y2 = y + {TRUNK_SPLIT}(첫 줄기보다 아래, 자식 쪽)로 정하고 자식마다 via에 [자식 가운데 x, y2], [x2, y2], "
