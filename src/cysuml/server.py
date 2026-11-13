@@ -243,7 +243,7 @@ def _save(png: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[Path]
 
 
 def _boxes(drawing: classdiagram.Drawing) -> list[str]:
-    return ["상자 자리(왼, 위, 폭×높이): " + ", ".join(f"{p.box.name}({fmt_rect(p.rect)})" for p in drawing.layout.boxes)]
+    return ["상자 자리(왼, 위, 폭×높이): " + ", ".join(f"{p.key}({fmt_rect(p.rect)})" for p in drawing.layout.boxes)]
 
 
 D = TypeVar("D", classdiagram.Drawing, sequencediagram.Drawing)

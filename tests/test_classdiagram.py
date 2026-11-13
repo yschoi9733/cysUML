@@ -4,6 +4,7 @@ import math
 import pytest
 from PIL import Image
 
+from cysuml import boxdiagram as B
 from cysuml import classdiagram as C
 from cysuml import geom as G
 from cysuml import text as T
@@ -91,8 +92,9 @@ def test_drawing_hands_over_each_relations_records():
                                 {"kind": "composition", "from": "A", "to": "B", "via": [[45, -60], [345, -60]]}]})
     for drawn, placed in zip(d.drawn, d.layout.relations, strict=True):
         assert drawn.line.points == placed.points
-        assert all(r in d.canvas.records and r.owner == placed.owner for r in (drawn.line, *drawn.heads, *drawn.labels))
-        assert [t.text for t in drawn.labels] == [lab.text for lab in placed.labels]
+        texts = [t for lines in drawn.labels for t in lines]
+        assert all(r in d.canvas.records and r.owner == placed.owner for r in (drawn.line, *drawn.heads, *texts))
+        assert [[t.text for t in lines] for lines in drawn.labels] == [list(lab.lines) for lab in placed.labels]
     heads = [[type(h).__name__ for h in drawn.heads] for drawn in d.drawn]
     assert heads == [["Line", "Line"], ["Polygon"], ["Polygon", "Line"]]  # 두 화살촉 / 삼각형 / 마름모와 화살촉
     assert len(d.drawn[0].labels) == 2 and d.drawn[1].labels == ()
@@ -129,7 +131,7 @@ def test_korean_and_long_rows_fit_inside_every_box():
     d = C.render(data)
     for p in d.layout.boxes:
         l, t, r, b = p.rect
-        for x in owned(d, p.box.name, Text):
+        for x in owned(d, p.key, Text):
             assert l < x.box[0] and x.box[2] < r and t < x.box[1] and x.box[3] < b, x.text
 
 
@@ -211,7 +213,7 @@ def test_default_value_may_be_a_json_number_or_boolean():
     ({"kind": "enum", "stereotype": "flags"}, "«enumeration, flags»"),
 ])
 def test_stereotype_that_repeats_the_kind_is_written_once(box, keyword):
-    assert C.parse({"classes": [{"name": "X", "left": 0, "top": 0, **box}]}).classes[0].keyword == keyword
+    assert C.CLASS_SHAPE.keyword(C.parse({"classes": [{"name": "X", "left": 0, "top": 0, **box}]}).boxes[0]) == keyword
 
 
 @pytest.mark.parametrize("box, texts, height", [
@@ -256,7 +258,7 @@ def test_association_name_sits_above_the_middle_of_a_rightward_line():
     (name,) = [t for t in owned(d, "A->B", Text)]
     assert (name.text, name.x, name.anchor, name.bg) == ("places", 195, "mm", True)
     assert name.box[3] == pytest.approx(24 - C.NAME_GAP)
-    assert d.layout.relations[0].labels == (C.Label("name", "places", name.x, name.y),)
+    assert d.layout.relations[0].labels == (C.Label("name", ("places",), name.x, name.y),)
 
 
 def test_name_on_a_vertical_line_clears_it_by_the_gap():
@@ -346,9 +348,9 @@ def test_labels_keep_off_end_shapes_of_other_relations():
     assert not touches_a_line(d, label.box)
 
     triangle = Polygon(((60, 40), (80, 30), (80, 50)))
-    spots = C._Spots([(-500, -500, -400, -400)], G.outline([triangle]))
+    spots = B._Spots(G.outline([triangle]))
     first = (70, 40)  # 삼각형 위 — 선분만 보면 닿는 데가 없다
-    assert spots.pick("1", [first, (0, 0)]) == (0, 0)
+    assert spots.pick(("1",), [first, (0, 0)], B.Obstacles((G.RectBorder((-500, -500, -400, -400)),))) == (0, 0)
 
 
 def test_generalization_tree_may_share_one_trunk():
@@ -379,7 +381,7 @@ def test_lines_that_only_meet_or_run_straight_through_a_bend_are_fine():
 def test_names_that_point_to_boxes_ignore_surrounding_spaces():
     d = C.render({"classes": [{"name": " A ", "left": 0, "top": 0}, {"name": "B", "left": 300, "top": 0}],
                   "relations": [{"kind": "association", "from": "A", "to": "B  "}]})
-    assert [p.box.name for p in d.layout.boxes] == ["A", "B"] and d.layout.relations[0].owner == "A->B"
+    assert [p.key for p in d.layout.boxes] == ["A", "B"] and d.layout.relations[0].owner == "A->B"
 
 
 def test_relation_owners_are_unique():
@@ -404,7 +406,7 @@ def test_names_are_matched_after_nfc():
     nfd = "가"  # "가"를 풀어 쓴 것
     d = C.render({"classes": [{"name": nfd, "left": 0, "top": 0}, {"name": "B", "left": 300, "top": 0}],
                   "relations": [{"kind": "association", "from": "가", "to": "B"}]})
-    assert d.layout.boxes[0].box.name == "가"
+    assert d.layout.boxes[0].key == "가"
     assert d.layout.relations[0].owner == "가->B"
 
 
@@ -482,8 +484,9 @@ def test_wrong_input_says_where_and_what(change, expected):
 
 @pytest.mark.parametrize("box", [{"name": "A", "top": 0}, {"name": "A", "left": 0, "top": 0, "x": 1}])
 def test_box_missing_or_unknown_field_is_not_built(box):
-    reader = C._Reader()
-    assert reader.class_box(box, "classes[0]") == ("A", None) and len(reader.problems) == 1
+    reader = B._Reader(C.SPEC)
+    key, _, element = reader.element(box, "classes[0]")
+    assert (key, element) == ("A", None) and len(reader.problems) == 1
 
 
 def test_wrong_input_that_is_not_an_object():

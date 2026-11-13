@@ -1,6 +1,6 @@
-"""상자(왼, 위, 오른, 아래)와 선분의 기하.
+"""상자(왼, 위, 오른, 아래)와 선분, 요소 테두리(사각형·타원·볼록 다각형)의 기하.
 
-선 글자 자리를 고르는 쪽(classdiagram)과 검사(classcheck)가 같은 판정을 쓰게 한곳에 둔다 — 둘이 다르면 도구가 빈 자리로
+선 글자 자리를 고르는 쪽(boxdiagram)과 검사(boxcheck)가 같은 판정을 쓰게 한곳에 둔다 — 둘이 다르면 도구가 빈 자리로
 고른 글자를 검사가 걸러 낸다.
 """
 from __future__ import annotations
@@ -10,6 +10,9 @@ import math
 from typing import Iterable, Optional
 
 from .canvas import Box, Line, Point, Polygon, Record
+
+Segment = tuple[Point, Point]
+ELLIPSE_SIDES = 96  # 타원을 판정할 때 쓰는 다각형의 변 수. 반지름 100px에서 실제 타원과 0.06px 안으로 다르다
 
 
 def grow(rect: Box, m: float) -> Box:
@@ -326,3 +329,309 @@ def _to_segment(v: Point, seg: tuple[Point, Point]) -> float:
     n = (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2
     k = 0.0 if n == 0 else min(max(((v[0] - p[0]) * (q[0] - p[0]) + (v[1] - p[1]) * (q[1] - p[1])) / n, 0.0), 1.0)
     return math.dist(v, lerp(p, q, k))
+
+
+def segment_gap(box: Box, s: Segment) -> float:
+    """선분과 상자 사이 거리. 만나거나 닿으면 -1(gap과 같은 꼴)."""
+    if hits(*s, box):
+        return -1
+    return min(distance(s, e, 0.0) for e in rect_edges(box))
+
+
+def rect_edges(r: Box) -> tuple[Segment, ...]:
+    l, t, rt, b = r
+    return ((l, t), (rt, t)), ((rt, t), (rt, b)), ((rt, b), (l, b)), ((l, b), (l, t))
+
+
+class Border:
+    """요소의 볼록한 테두리 — 선이 닿는 곳이고, 선·글자가 그 요소를 지나는지 보는 곳이다. 사각형(RectBorder)·타원
+    (EllipseBorder)·볼록 다각형(PolygonBorder)이 있다. 사각형은 클래스도가 쓰던 상자 판정을 그대로 쓴다."""
+
+    @property
+    def bounds(self) -> Box:
+        raise NotImplementedError
+
+    @property
+    def empty(self) -> bool:
+        """좁혀서 넓이가 없어졌는지."""
+        return False
+
+    def center(self) -> Point:
+        raise NotImplementedError
+
+    def exit(self, inside: Point, toward: Point) -> Optional[Point]:
+        """테두리 안 inside에서 toward로 가는 선이 테두리와 만나는 점. toward가 안이나 테두리 위면 None."""
+        raise NotImplementedError
+
+    def grown(self, m: float) -> Border:
+        """사방으로 m만큼 넓힌(음수면 좁힌) 테두리. 다각형 꼭짓점은 변을 늘여 만나는 자리로 간다(사각형을 넓힌 것과 같은 꼴)."""
+        raise NotImplementedError
+
+    def clip(self, p: Point, q: Point) -> Optional[Segment]:
+        """선분 pq 가운데 테두리 안(테두리 위 포함)에 든 부분. 닿지 않으면 None."""
+        raise NotImplementedError
+
+    def hits(self, p: Point, q: Point) -> bool:
+        return self.clip(p, q) is not None
+
+    def holds(self, v: Point) -> bool:
+        """점이 테두리 안에 있는지(테두리 위는 빼고)."""
+        raise NotImplementedError
+
+    def edges(self) -> tuple[Segment, ...]:
+        raise NotImplementedError
+
+    def meets(self, box: Box) -> bool:
+        """상자와 겹치거나 닿는지."""
+        raise NotImplementedError
+
+    def gap(self, box: Box) -> float:
+        """상자와 떨어진 거리. 겹치거나 닿으면 -1."""
+        raise NotImplementedError
+
+
+class RectBorder(Border):
+    def __init__(self, rect: Box):
+        self.rect = rect
+
+    def __repr__(self) -> str:
+        return f"RectBorder({self.rect})"
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, RectBorder) and other.rect == self.rect
+
+    __hash__ = None  # type: ignore[assignment]
+
+    @property
+    def bounds(self) -> Box:
+        return self.rect
+
+    @property
+    def empty(self) -> bool:
+        return self.rect[0] >= self.rect[2] or self.rect[1] >= self.rect[3]
+
+    def center(self) -> Point:
+        return (self.rect[0] + self.rect[2]) / 2, (self.rect[1] + self.rect[3]) / 2
+
+    def exit(self, inside: Point, toward: Point) -> Optional[Point]:
+        (x1, y1), (x2, y2) = inside, toward
+        l, t, r, b = self.rect
+        ks = []
+        if x2 != x1:
+            ks.append(((r if x2 > x1 else l) - x1) / (x2 - x1))
+        if y2 != y1:
+            ks.append(((b if y2 > y1 else t) - y1) / (y2 - y1))
+        if not ks or min(ks) >= 1:
+            return None
+        k = min(ks)
+        return x1 + (x2 - x1) * k, y1 + (y2 - y1) * k
+
+    def grown(self, m: float) -> RectBorder:
+        return RectBorder(grow(self.rect, m))
+
+    def clip(self, p: Point, q: Point) -> Optional[Segment]:
+        return clip(p, q, self.rect)
+
+    def holds(self, v: Point) -> bool:
+        l, t, r, b = self.rect
+        return l < v[0] < r and t < v[1] < b
+
+    def edges(self) -> tuple[Segment, ...]:
+        return rect_edges(self.rect)
+
+    def meets(self, box: Box) -> bool:
+        return meets(box, self.rect)
+
+    def gap(self, box: Box) -> float:
+        return gap(box, self.rect)
+
+
+class PolygonBorder(Border):
+    """볼록 다각형. 꼭짓점 차례는 어느 쪽으로 돌아도 된다."""
+
+    def __init__(self, points: Iterable[Point], empty: bool = False):
+        pts = _distinct(tuple((float(x), float(y)) for x, y in points))
+        if len(pts) < 3 or _area(pts) == 0:
+            raise ValueError(f"넓이가 있는 볼록 다각형이어야 한다: {pts}")
+        self.points = pts
+        self._sign = 1 if _area(pts) > 0 else -1
+        self._empty = empty
+
+    def __repr__(self) -> str:
+        return f"PolygonBorder({self.points})"
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, PolygonBorder) and other.points == self.points and other._empty == self._empty
+
+    __hash__ = None  # type: ignore[assignment]
+
+    @property
+    def bounds(self) -> Box:
+        return span(self.points)
+
+    @property
+    def empty(self) -> bool:
+        return self._empty
+
+    def center(self) -> Point:
+        """넓이 중심 — 볼록 다각형이면 늘 안에 있다."""
+        pts = self.points
+        a = cx = cy = 0.0
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]):
+            w = x1 * y2 - x2 * y1
+            a += w
+            cx += (x1 + x2) * w
+            cy += (y1 + y2) * w
+        return cx / (3 * a), cy / (3 * a)
+
+    def _inward(self, a: Point, b: Point, v: Point) -> float:
+        """v가 변 ab에서 안쪽으로 들어간 거리(바깥이면 음수)."""
+        ex, ey = b[0] - a[0], b[1] - a[1]
+        return self._sign * (ex * (v[1] - a[1]) - ey * (v[0] - a[0])) / math.hypot(ex, ey)
+
+    def _span(self, p: Point, q: Point) -> Optional[tuple[float, float]]:
+        """선 p + t(q - p)가 다각형 안(테두리 포함)에 드는 t 구간(0 이상). 없으면 None."""
+        t_span: Optional[tuple[float, float]] = (0.0, math.inf)
+        for a, b in self.edges():
+            fp, fq = self._inward(a, b, p), self._inward(a, b, q)
+            t_span = _narrow(*t_span, fp, fq - fp, 0.0, math.inf)
+            if t_span is None:
+                return None
+        return t_span
+
+    def exit(self, inside: Point, toward: Point) -> Optional[Point]:
+        if inside == toward:
+            return None
+        found = self._span(inside, toward)
+        if found is None or found[1] >= 1:
+            return None
+        return lerp(inside, toward, found[1])
+
+    def grown(self, m: float) -> PolygonBorder:
+        if self._empty:
+            return self
+        pts, n = self.points, len(self.points)
+        lines = []
+        for i in range(n):
+            a, b = pts[i], pts[(i + 1) % n]
+            ex, ey = b[0] - a[0], b[1] - a[1]
+            ln = math.hypot(ex, ey)
+            nx, ny = self._sign * ey / ln, -self._sign * ex / ln  # 바깥쪽 단위 법선
+            lines.append(((a[0] + nx * m, a[1] + ny * m), (ex, ey)))
+        out = []
+        for i in range(n):
+            (p, d), (q, e) = lines[i - 1], lines[i]
+            k = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / (d[0] * e[1] - d[1] * e[0])
+            out.append((p[0] + d[0] * k, p[1] + d[1] * k))
+        # 좁히다 변이 뒤집히면(원래 변과 방향이 반대가 되면) 넓이가 없어진 것이다
+        if any((b[0] - a[0]) * d[0] + (b[1] - a[1]) * d[1] <= 0
+               for (a, b), (_, d) in zip(zip(out, out[1:] + out[:1]), lines)):
+            return PolygonBorder(self.points, empty=True)
+        return PolygonBorder(out)
+
+    def clip(self, p: Point, q: Point) -> Optional[Segment]:
+        if self._empty:
+            return None
+        if p == q:
+            return (p, q) if all(self._inward(a, b, p) >= 0 for a, b in self.edges()) else None
+        found = self._span(p, q)
+        if found is None or found[0] > 1:
+            return None
+        return lerp(p, q, found[0]), lerp(p, q, min(found[1], 1.0))
+
+    def holds(self, v: Point) -> bool:
+        return not self._empty and all(self._inward(a, b, v) > 0 for a, b in self.edges())
+
+    def edges(self) -> tuple[Segment, ...]:
+        return tuple(zip(self.points, self.points[1:] + self.points[:1]))
+
+    def meets(self, box: Box) -> bool:
+        if self._empty or not meets(self.bounds, box):
+            return False
+        corners = ((box[0], box[1]), (box[2], box[1]), (box[2], box[3]), (box[0], box[3]))
+        # 상자 꼭짓점이 모두 한 변 바깥에 있으면 떨어져 있다(볼록 다각형과 상자의 분리 축 — 상자 축은 위 bounds가 본다)
+        return all(any(self._inward(a, b, c) >= 0 for c in corners) for a, b in self.edges())
+
+    def gap(self, box: Box) -> float:
+        if self.meets(box):
+            return -1
+        return min(distance(s, e, 0.0) for s in self.edges() for e in rect_edges(box))
+
+
+class EllipseBorder(Border):
+    """타원. 선 끝은 실제 타원 위에 두고, 그 밖의 판정은 꼭짓점이 타원 위에 있는 ELLIPSE_SIDES각형으로 한다."""
+
+    def __init__(self, cx: float, cy: float, rx: float, ry: float):
+        if not (rx > 0 and ry > 0):
+            raise ValueError(f"타원 반지름은 0보다 커야 한다: {rx}, {ry}")
+        self.cx, self.cy, self.rx, self.ry = cx, cy, rx, ry
+        self.polygon = PolygonBorder((cx + rx * math.cos(2 * math.pi * k / ELLIPSE_SIDES),
+                                      cy + ry * math.sin(2 * math.pi * k / ELLIPSE_SIDES)) for k in range(ELLIPSE_SIDES))
+
+    def __repr__(self) -> str:
+        return f"EllipseBorder({self.cx}, {self.cy}, {self.rx}, {self.ry})"
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, EllipseBorder) and (other.cx, other.cy, other.rx, other.ry) == (
+            self.cx, self.cy, self.rx, self.ry)
+
+    __hash__ = None  # type: ignore[assignment]
+
+    @property
+    def bounds(self) -> Box:
+        return self.cx - self.rx, self.cy - self.ry, self.cx + self.rx, self.cy + self.ry
+
+    def center(self) -> Point:
+        return self.cx, self.cy
+
+    def exit(self, inside: Point, toward: Point) -> Optional[Point]:
+        ux, uy = (inside[0] - self.cx) / self.rx, (inside[1] - self.cy) / self.ry
+        dx, dy = (toward[0] - inside[0]) / self.rx, (toward[1] - inside[1]) / self.ry
+        a = dx * dx + dy * dy
+        if a == 0:
+            return None
+        b, c = 2 * (ux * dx + uy * dy), ux * ux + uy * uy - 1
+        disc = b * b - 4 * a * c
+        if disc < 0:
+            return None
+        k = (-b + math.sqrt(disc)) / (2 * a)
+        if not 0 < k < 1:
+            return None
+        return lerp(inside, toward, k)
+
+    def grown(self, m: float) -> PolygonBorder:
+        return self.polygon.grown(m)
+
+    def clip(self, p: Point, q: Point) -> Optional[Segment]:
+        return self.polygon.clip(p, q)
+
+    def holds(self, v: Point) -> bool:
+        return self.polygon.holds(v)
+
+    def edges(self) -> tuple[Segment, ...]:
+        return self.polygon.edges()
+
+    def meets(self, box: Box) -> bool:
+        return self.polygon.meets(box)
+
+    def gap(self, box: Box) -> float:
+        return self.polygon.gap(box)
+
+
+def _area(pts: tuple[Point, ...]) -> float:
+    return sum(p[0] * q[1] - q[0] * p[1] for p, q in zip(pts, pts[1:] + pts[:1])) / 2
+
+
+def _distinct(pts: tuple[Point, ...]) -> tuple[Point, ...]:
+    """이웃한 같은 꼭짓점과 한 줄 위에 놓인 꼭짓점을 뺀다(변을 늘일 때 나란한 두 변이 만나는 자리를 못 구한다)."""
+    out = [p for i, p in enumerate(pts) if p != pts[i - 1]]
+    changed = True
+    while changed and len(out) >= 3:
+        changed = False
+        for i in range(len(out)):
+            a, b, c = out[i - 1], out[i], out[(i + 1) % len(out)]
+            if (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]) == 0:
+                del out[i]
+                changed = True
+                break
+    return tuple(out)

@@ -4,6 +4,7 @@ import unicodedata
 
 import pytest
 
+from cysuml import boxcheck as BC
 from cysuml import classcheck as K
 from cysuml import classdiagram as C
 
@@ -236,7 +237,7 @@ def test_labels_placed_where_the_layout_found_room_pass():
 def test_label_text_given_in_nfd_to_draw_is_matched_to_its_record():
     # parse를 거치지 않고 draw에 바로 준 모델은 풀어 쓴 한글(NFD)일 수 있다 — 그린 기록의 글자는 NFC다
     diagram = C.parse({"classes": [box("A", 0, 0), box("B", 300, 0)], "relations": [rel("association", "A", "B", name="가입")]})
-    relation = dataclasses.replace(diagram.relations[0], name=unicodedata.normalize("NFD", "가입"))
+    relation = dataclasses.replace(diagram.relations[0], name=(unicodedata.normalize("NFD", "가입"),))
     r = K.check(C.draw(dataclasses.replace(diagram, relations=(relation,))))
     assert r.passed
 
@@ -472,9 +473,9 @@ def test_line_coming_up_into_its_own_triangle_base_passes(via_x):
 
 
 def test_places_within_the_tolerance_are_one_place():
-    assert K._same((("A", True), (1.0, 2.0)), (("A", True), (1.0 + K.PLACE_EPS / 2, 2.0)))
-    assert not K._same((1.0, 2.0), (1.0 + K.PLACE_EPS * 2, 2.0))
-    assert not K._same(("A", 1.0), ("B", 1.0))
+    assert BC._same((("A", True), (1.0, 2.0)), (("A", True), (1.0 + K.PLACE_EPS / 2, 2.0)))
+    assert not BC._same((1.0, 2.0), (1.0 + K.PLACE_EPS * 2, 2.0))
+    assert not BC._same(("A", 1.0), ("B", 1.0))
 
 
 def test_shared_trunk_through_a_box_is_one_finding():
