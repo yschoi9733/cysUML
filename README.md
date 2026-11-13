@@ -107,7 +107,7 @@ small rectangles across its left edge, which lines may not cross. `artifact_icon
 ### Component diagrams
 
 The tool is `draw_component_diagram`. It draws components with the interfaces they provide, the artifacts that
-implement them, and the classes that realize them. It takes every element of the package diagram tool, plus
+implement them, and the classes that realize them. It takes every element of the package diagram tool (icon notations included), plus
 `lollipop`: a provided interface drawn as a small circle with its name outside (`name_side` puts the name below,
 above, left or right of the circle). The providing component joins the circle with an `association`, drawn without
 an arrowhead in this tool unless `navigable` is given, and each user points at the circle with a `dependency`:
@@ -140,7 +140,7 @@ the place of the circle with its name. The checks are the same: a line through a
 
 The tool is `draw_deployment_diagram`. It shows which computers (nodes) the software runs on: components and
 artifacts sit inside nodes with `in`, and a node can sit inside another node. It takes the same elements as the package
-diagram tool. A communication path between nodes is an `association` with the protocol as its `name`. This tool draws
+diagram tool, icon notations included. A communication path between nodes is an `association` with the protocol as its `name`. This tool draws
 every association without an arrowhead (between classes too) unless `navigable` says otherwise. A «deploy» arrow from
 an element outside a node is a `dependency` with `"stereotype": "deploy"`:
 
@@ -354,14 +354,14 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   탭을 지나면 불합격이다. 컴포넌트·아티팩트는 아이콘 표기로도 그린다 — `component_icon`은 왼쪽 변에 작은 네모 둘이 걸친 UML 1
   표기 컴포넌트(선이 네모를 지나면 불합격), `artifact_icon`은 귀 접힌 문서 아이콘과 그 밖(`name_side`)에 쓰는 이름이다.
 - **컴포넌트도**는 `draw_component_diagram`으로 그린다. 컴포넌트와 제공 인터페이스, 컴포넌트를 구현하는 아티팩트, 컴포넌트를
-  실현하는 클래스를 그린다. 패키지도 도구가 받는 요소에 더해 `lollipop`(제공 인터페이스 원 — 작은 원과 그 밖에 쓰는
+  실현하는 클래스를 그린다. 패키지도 도구가 받는 요소(아이콘 표기 포함)에 더해 `lollipop`(제공 인터페이스 원 — 작은 원과 그 밖에 쓰는
   이름으로 그린다. 이름 쪽은 `name_side`)을 받는다. 제공하는 컴포넌트는 원과 `association`으로 잇고(이 도구에서는 `navigable`을
   주지 않으면 화살촉이 없다), 쓰는 쪽은 원으로 `dependency`를 긋는다. 결과는 패키지도와 같고, 원마다 원만의 자리도 함께
   돌려준다. 검사도 같고, 선이 원이나 그 이름을 지나면 불합격이다.
 - **배치도**(deployment diagram)는 `draw_deployment_diagram`으로 그린다. 소프트웨어(컴포넌트·아티팩트)가 어느 컴퓨터(노드)에서
   도는지 보인다. 노드 안에 컴포넌트·아티팩트·노드를 `in`으로 넣고, 노드끼리는 통신 경로(`association` — `name`에 HTTPS 같은
   프로토콜)로 잇고, 노드 밖 요소에서 노드로 «deploy»(`stereotype`이 `deploy`인 `dependency`)를 긋는다. 이 도구는 클래스끼리
-  이은 것까지 모든 연관을 화살촉 없는 실선으로 그린다(필요하면 `navigable`을 준다). 받는 요소·결과·검사는 패키지도와 같다.
+  이은 것까지 모든 연관을 화살촉 없는 실선으로 그린다(필요하면 `navigable`을 준다). 받는 요소(아이콘 표기 포함)·결과·검사는 패키지도와 같다.
 - **유즈케이스도**는 `draw_use_case_diagram`으로 그린다. 액터·유즈케이스·시스템 경계를 그리고, 연관·의존(«include»·«extend»)·
   일반화로 잇는다. 유즈케이스는 `in`으로 시스템 경계 안에 넣고, 액터는 경계 밖에 두어 이름을 사람 모양 옆(`name_side`가 정한
   쪽)에 쓴다. 결과는 패키지도와 같고, 액터는 이름까지 덮는 자리 뒤에 사람 모양 자리를 함께 돌려준다. 검사는 패키지도와 같고,

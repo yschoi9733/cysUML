@@ -129,7 +129,7 @@ PLACED_ELEMENTS = f"""- elements: 요소 목록(하나 이상). 종류를 섞어
 않는다.
   - in: 이 요소를 품은 요소(package·node)의 열쇠. "요소 안에 요소 두기(중첩)" 절.
   - width·height: 자리의 최소 크기. 글자와 안의 요소에 맞춰 더 늘어난다. 문서 아이콘 아티팩트는 크기가 정해져 있어 받지 않는다.
-  {NAME_SIDE} 위 종류 가운데 name_side를 받는 것은 "artifact_icon"뿐이다 — 다른 종류에 주면 모르는 필드 오류다.
+  {NAME_SIDE} 이름을 모양 밖에 쓰는 종류만 받는다 — 위 종류 가운데서는 "artifact_icon"이다.
   - attributes·operations·literals: 클래스 상자만 쓴다(literals는 kind가 "enum"일 때). {MEMBERS}
   - 선은 패키지 몸통(탭 아래), 노드 겉 테두리, UML 1 표기 컴포넌트는 부품 네모를 뺀 상자, 문서 아이콘 아티팩트는 문서 아이콘 테두리, \
 그 밖은 상자 테두리에 닿는다. 선이 향하는 점은 UML 1 표기 컴포넌트는 부품 네모를 뺀 상자의 가운데(자리 가운데보다 튀어나온 \
@@ -207,7 +207,7 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
     noun, edge = spec.words.noun, spec.words.edge
     ga = josa(head, "이", "가")
     outside = _outside(spec)
-    shape = " — 모양 자리가 덧붙어 있으면 모양 자리로 셈한다" if outside else ""
+    shape = " — 모양 자리가 덧붙어 있으면 모양 자리로 셈한다(반 픽셀이면 정수로 내린다)" if outside else ""
     aim = ". 향하는 점이 덧붙어 있으면 그 점을 쓴다" if _aiming(spec) else ""
     middle = f"결과의 {noun} 자리에서 왼 + 폭/2, 위 + 높이/2{shape}{aim}"
     edges = "(모양 자리가 덧붙어 있으면 모양 자리의 변)" if outside else ""

@@ -153,7 +153,7 @@ class Shape:
         return None
 
     def name_zones(self, e: Element, rect: T.Box) -> tuple[NameZone, ...]:
-        """이름 칸. 안에 요소를 두는 모양만 쓴다(선이 지나가면 안 되는 자리)."""
+        """선이 지나가면 안 되는 이름 칸 — 안에 요소를 두는 모양의 이름 칸과, 몸통 밖에 붙은 자리(UML 1 표기 컴포넌트의 부품 네모)."""
         return ()
 
     def frame(self, e: Element, rect: T.Box) -> tuple[Segment, ...]:
