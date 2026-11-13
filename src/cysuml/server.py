@@ -23,7 +23,7 @@ from PIL import Image
 from pydantic import Field, WithJsonSchema
 
 from . import (boxcheck, boxdiagram, classcheck, classdiagram, deploymentdiagram, packagediagram, sequencecheck,
-               sequencediagram)
+               sequencediagram, usecasediagram)
 from .canvas import MIN_SCALE, SCALE
 from .guide import COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, MAX_IMAGE_EDGE, MEMBERS, flow, relation_fields
 from .parsing import InputError
@@ -59,6 +59,8 @@ INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리
 - 배치도(deployment diagram)는 draw_deployment_diagram으로 그린다. 요소 자리는 부르는 AI가 잡는다(요령은 도구 설명의 "자리 잡기 \
 요령"에 있다). 노드 안에 컴포넌트·아티팩트·노드를 \
 넣고, 노드끼리 통신 경로를, 노드 밖 요소에서 노드로 «deploy»를 긋는다.
+- 유즈케이스도는 draw_use_case_diagram으로 그린다. 배치는 부르는 AI가 한다. 시스템 경계 안에 유즈케이스를 넣고, 밖의 액터와 \
+연관·«include»·«extend»·일반화로 잇는다.
 - 교류도는 draw_sequence_diagram으로 그린다. 배치는 cysUML이 하고, AI는 참여자·메시지·프레임의 차례만 준다.
 불합격 종류와 그림마다의 배치 요령은 각 도구 설명에 있다.
 
@@ -302,6 +304,18 @@ def draw_deployment_diagram(
 ) -> CallToolResult:
     data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
     return _draw(file_name, lambda: deploymentdiagram.render(data, scale), boxcheck.check, out_dir, _places)
+
+
+@mcp.tool(name="draw_use_case_diagram", description=usecasediagram.TOOL)
+def draw_use_case_diagram(
+        file_name: FileName,
+        elements: Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")],
+        relations: Annotated[Any, _listed("관계 목록. 필드는 도구 설명에 있다.")] = None,
+        out_dir: OutDir = None,
+        scale: Scale = SCALE,
+) -> CallToolResult:
+    data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
+    return _draw(file_name, lambda: usecasediagram.render(data, scale), boxcheck.check, out_dir, _places)
 
 
 @mcp.tool(name="draw_sequence_diagram", description=SEQUENCE_TOOL)

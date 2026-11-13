@@ -12,7 +12,7 @@ from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
 from cysuml import (boxcheck, boxdiagram, classcheck, deploymentdiagram, guide, packagediagram, sequencecheck,
-                    sequencediagram, server)
+                    sequencediagram, server, usecasediagram)
 from cysuml.canvas import SCALE
 from cysuml.report import Finding
 
@@ -61,18 +61,21 @@ TOOLS = [  # 도구 → 필수 입력, 객체 목록 입력, 문자열 목록 �
     ("draw_class_diagram", ["file_name", "classes"], ("classes", "relations"), ()),
     ("draw_package_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_deployment_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_use_case_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_sequence_diagram", ["file_name", "participants"], ("participants", "messages", "frames"), ("notes",)),
 ]
 EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 더한다
     "order": "draw_class_diagram",
     "packages": "draw_package_diagram",
     "deployment": "draw_deployment_diagram",
+    "use-cases": "draw_use_case_diagram",
     "checkout": "draw_sequence_diagram",
 }
 PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 그 도구의 말
     "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, boxdiagram.BOX_WORDS),
     "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
     "draw_deployment_diagram": (deploymentdiagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
+    "draw_use_case_diagram": (usecasediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
 }
 
 

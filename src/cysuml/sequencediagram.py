@@ -67,6 +67,7 @@ ACTOR_W = 90       # 액터 자리 최소 폭
 ACTOR_PAD = 10
 ACTOR_NAME = 51    # 액터 그림 윗끝에서 이름 가운데까지
 ACTOR_H = 63       # 액터 그림 윗끝에서 점선 시작까지
+ACTOR_FIGURE = (18, 37)  # 사람 모양(이름 빼고)의 폭·높이
 LIFE_DASH = (3, 3)
 LIFE_TAIL = 20     # 가장 아래 그린 것 밑으로 점선을 더 긋는 길이
 
@@ -239,7 +240,8 @@ def _head_box(p: Participant, x: float, width: float, top: float) -> Box:
     """머리가 차지하는 상자(액터는 그림과 이름)."""
     if p.kind == "actor":
         name = T.place(x, top + ACTOR_NAME, p.name, True, "mm").box
-        return min(x - 9, name[0]), top, max(x + 9, name[2]), name[3]
+        half = ACTOR_FIGURE[0] / 2
+        return min(x - half, name[0]), top, max(x + half, name[2]), name[3]
     return x - width / 2, top, x + width / 2, top + HEAD_H
 
 
@@ -1377,16 +1379,22 @@ def _draw_tag(c: Canvas, f: Framed) -> None:
     c.text(left + TAG_TEXT[0], top + TAG_TEXT[1], f.kind, bold=True, owner=f.owner)
 
 
+def draw_actor(c: Canvas, x: float, top: float, owner: str) -> None:
+    """사람 모양(머리·몸·팔·다리, 이름 빼고). x는 가운데, top은 머리 윗끝이고, 폭·높이는 ACTOR_FIGURE다. 유즈케이스도의 액터도 쓴다."""
+    half = ACTOR_FIGURE[0] / 2
+    c.ellipse(x - 6, top, 12, 12, owner=owner)
+    c.line([(x, top + 12), (x, top + 24)], owner=owner)
+    c.line([(x - half, top + 16), (x + half, top + 16)], owner=owner)
+    c.line([(x, top + 24), (x - half, top + ACTOR_FIGURE[1])], owner=owner)
+    c.line([(x, top + 24), (x + half, top + ACTOR_FIGURE[1])], owner=owner)
+
+
 def _draw_participant(c: Canvas, p: PlacedParticipant) -> None:
     x, name, o = p.x, p.participant.name, p.participant.name
     for life in p.lives:
         top = life.top
         if p.participant.kind == "actor":
-            c.ellipse(x - 6, top, 12, 12, owner=o)
-            c.line([(x, top + 12), (x, top + 24)], owner=o)
-            c.line([(x - 9, top + 16), (x + 9, top + 16)], owner=o)
-            c.line([(x, top + 24), (x - 9, top + 37)], owner=o)
-            c.line([(x, top + 24), (x + 9, top + 37)], owner=o)
+            draw_actor(c, x, top, o)
             c.text(x, top + ACTOR_NAME, name, bold=True, anchor="mm", owner=o)
         else:
             c.rect(x - p.width / 2, top, p.width, HEAD_H, owner=o)

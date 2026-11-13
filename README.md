@@ -129,6 +129,36 @@ an element outside a node is a `dependency` with `"stereotype": "deploy"`:
 It gets back the same things as the package diagram tool, and the check fails in the same cases, such as a
 communication path running through a node it does not connect or through an element inside one.
 
+### Use case diagrams
+
+The tool is `draw_use_case_diagram`. It draws actors, use cases and the system boundary, joined by associations,
+«include» and «extend» dependencies, and generalizations. Use cases sit inside the system boundary with `in`. Actors
+stand outside it and write their name beside the figure, on the side `name_side` gives:
+
+```json
+{
+  "file_name": "use-cases",
+  "elements": [
+    {"kind": "system", "id": "shop", "name": "Online shop", "left": 160, "top": 0},
+    {"kind": "use_case", "name": "Browse items", "in": "shop", "left": 200, "top": 50},
+    {"kind": "use_case", "name": "Place order", "in": "shop", "left": 200, "top": 150},
+    {"kind": "use_case", "name": "Pay", "in": "shop", "left": 420, "top": 150},
+    {"kind": "actor", "name": "Customer", "left": 0, "top": 130, "name_side": "left"},
+    {"kind": "actor", "name": "Bank", "left": 660, "top": 157, "name_side": "right"}
+  ],
+  "relations": [
+    {"kind": "association", "from": "Customer", "to": "Browse items"},
+    {"kind": "association", "from": "Customer", "to": "Place order"},
+    {"kind": "dependency", "from": "Place order", "to": "Pay", "stereotype": "include"},
+    {"kind": "association", "from": "Pay", "to": "Bank"}
+  ]
+}
+```
+
+It gets back the same things as the package diagram tool. An actor's place covers the figure and its name, and the
+figure's own place comes after it. The check is the same as for package diagrams, and it also fails when a line runs
+through an actor's name or the name at the top of the system boundary.
+
 ### Sequence diagrams
 
 The tool is `draw_sequence_diagram`. The assistant sends no coordinates: only the participants, the messages in
@@ -224,6 +254,10 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   도는지 보인다. 노드 안에 컴포넌트·아티팩트·노드를 `in`으로 넣고, 노드끼리는 통신 경로(`association` — `name`에 HTTPS 같은
   프로토콜)로 잇고, 노드 밖 요소에서 노드로 «deploy»(`stereotype`이 `deploy`인 `dependency`)를 긋는다. 이 도구는 클래스끼리
   이은 것까지 모든 연관을 화살촉 없는 실선으로 그린다(필요하면 `navigable`을 준다). 받는 요소·결과·검사는 패키지도와 같다.
+- **유즈케이스도**는 `draw_use_case_diagram`으로 그린다. 액터·유즈케이스·시스템 경계를 그리고, 연관·의존(«include»·«extend»)·
+  일반화로 잇는다. 유즈케이스는 `in`으로 시스템 경계 안에 넣고, 액터는 경계 밖에 두어 이름을 사람 모양 옆(`name_side`가 정한
+  쪽)에 쓴다. 결과는 패키지도와 같고, 액터는 이름까지 덮는 자리 뒤에 사람 모양 자리를 함께 돌려준다. 검사는 패키지도와 같고,
+  선이 액터 이름이나 시스템 경계 이름을 지나도 불합격이다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
   프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
   파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면
