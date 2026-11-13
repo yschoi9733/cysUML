@@ -191,9 +191,9 @@ class ComponentIconShape(_HeadShape):
 
 class ArtifactIconShape(Shape):
     """문서 아이콘 표기 아티팩트: 귀가 접힌 문서 아이콘을 정해진 크기(PAGE)로 그리고, 이름(흔히 파일 이름)은 모양 밖(name_side, 기본
-    아래)에 쓴다. 선 끝은 문서 테두리(볼록 오각형)에 닿고, 선은 문서 사각형 가운데를 정수로 내린 점을 향한다. 볼록 다각형의 기본
-    중심(넓이 중심)은 귀 반대쪽으로 쏠리고, 모양 밖 이름은 모양 자리를 반 픽셀에 놓기도 해서다 — 그대로면 가운데를 맞춘 컴포넌트와 잇는
-    세로 선이 계단처럼 보인다. 문서도 그 점에 맞춰 그린다."""
+    아래)에 쓴다. 문서는 모양 자리(결과의 "모양")를 그대로 채우고, 선 끝은 문서 테두리(볼록 오각형)에 닿는다. 선은 문서 사각형
+    가운데를 정수로 내린 점을 향한다. 볼록 다각형의 기본 중심(넓이 중심)은 귀 반대쪽으로 쏠리고, 모양 밖 이름은 모양 자리를 반 픽셀에
+    놓기도 해서다 — 그대로면 가운데를 맞춘 컴포넌트와 잇는 세로 선이 계단처럼 보인다."""
 
     outside_name = True
     sized = False
@@ -202,19 +202,14 @@ class ArtifactIconShape(Shape):
     def size(self, e: Element) -> tuple[float, float]:
         return PAGE
 
-    def _top_left(self, rect: Box) -> Point:
-        """가운데를 정수로 내린(boxdiagram.floored) 문서의 왼쪽 위."""
-        cx, cy = floored(rect)
-        return cx - PAGE[0] / 2, cy - PAGE[1] / 2
-
     def anchor(self, e: Element, rect: Box) -> Point:
         return floored(rect)
 
     def border(self, e: Element, rect: Box) -> Border:
-        return PolygonBorder(_page_corners(*self._top_left(rect), *PAGE, FOLD))
+        return PolygonBorder(_page_corners(rect[0], rect[1], *PAGE, FOLD))
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
-        _draw_page(c, *self._top_left(p.shape_rect), *PAGE, FOLD, p.key)
+        _draw_page(c, p.shape_rect[0], p.shape_rect[1], *PAGE, FOLD, p.key)
 
 
 class NodeShape(_HeadShape):

@@ -462,14 +462,15 @@ def test_returned_place_of_a_component_icon_draws_the_same():
 
 
 def test_artifact_icon_is_a_folded_page_with_its_name_outside():
-    # 이름 "order.jar"(폭 49)가 문서(폭 30)보다 넓어 모양 자리가 반 픽셀(9.5)에 놓인다 — 문서는 가운데를 내린 자리(9)에 그린다
+    # 이름 "order.jar"(폭 49)가 문서(폭 30)보다 넓어 모양 자리가 반 픽셀(9.5)에 놓인다 — 문서는 결과의 모양 자리 그대로 그리고,
+    # 선이 향하는 점만 정수로 내린다
     d = draw([el("artifact_icon", "order.jar", 0, 0)])
     p = placed(d, "order.jar")
     assert p.rect == (0, 0, 49, 38 + B.NAME_SEP + B.LABEL_LINE) and p.shape_rect == (9.5, 0, 39.5, 38)
     (page,) = owned(d, "order.jar", Polygon)
     (fold,) = owned(d, "order.jar", Line)
-    assert page.points == ((9, 0), (29, 0), (39, 10), (39, 38), (9, 38))
-    assert fold.points == ((29, 0), (29, 10), (39, 10))
+    assert page.points == ((9.5, 0), (29.5, 0), (39.5, 10), (39.5, 38), (9.5, 38))
+    assert fold.points == ((29.5, 0), (29.5, 10), (39.5, 10))
     assert p.anchor == (24, 19) and p.border == G.PolygonBorder(page.points)
     (name,) = owned(d, "order.jar", Text)
     assert name.text == "order.jar" and p.zones == (B.NameZone((0, 42, 49, 57), True),)
