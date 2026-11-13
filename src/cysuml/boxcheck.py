@@ -22,7 +22,7 @@ from .boxdiagram import (BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, La
                          Words, josa)
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
-                   grow, hits, inside, meets, outline, overlap, span, touches)
+                   grow, hits, inside, meets, outline, overlap, span)
 from .report import Finding, Notice, fmt_num, fmt_rect, round1
 from .report import Report as _Report
 
@@ -35,6 +35,9 @@ PARALLEL_SIN = 0.05  # 두 선분 사이 각의 사인이 이 안이면(약 3°)
 LINE_EPS = 1e-6  # 점이 선에서 이 안이면 선 위로 본다(엇갈림이 아니라 맞닿음)
 HEAD_HIDE = 2  # 선 끝 모양이 제 끝 요소 안으로 이만큼 넘게 들어가면 가려진(들어간) 것으로 본다(살짝 들어가는 건 테두리 밑으로 일부러 넣은 것)
 OWN_MARGIN = 0.5  # 선이 제 삼각형·마름모는 그 안쪽으로 이만큼 넘게 들어가야 지난 것으로 본다(테두리에 닿거나 따라가면 이어진 것)
+# 화살촉 쪽 끝 구간을 직각으로 꺾을 때 꺾는 점을 끝 요소에서 뗄 거리(도구 설명·고치는 법에 쓴다). 꺾은 앞 구간이 화살촉 갈래
+# 끝(10·cos 28° ≈ 8.83)에서 OVERLAP_GAP 넘게 떨어지려면 10.83보다 길어야 해서(실측) 넉넉히 잡는다
+ARROW_BEND = 12
 PLACE_EPS = 1e-3  # 여러 선이 걸린 자리가 이 안으로 같으면 한 자리로 묶는다
 
 ROLES = {"name": "이름", "from_multiplicity": "from 쪽 다중도", "to_multiplicity": "to 쪽 다중도"}
@@ -150,11 +153,6 @@ class _Head:
     def holds(self, segments: Iterable[Segment]) -> bool:
         """선분 끝점이 이 모양(삼각형·마름모) 안에 있는지."""
         return self.closed and any(inside(v, self.points) for s in segments for v in s)
-
-    def touches(self, segments: Iterable[Segment]) -> bool:
-        """선분들이 이 모양에 닿는지 — 테두리에 닿거나 안에 든다."""
-        segments = tuple(segments)
-        return any(touches(s, e, LINE_EPS) for s in segments for e in self.edges) or self.holds(segments)
 
     def near(self, segments: Iterable[Segment]) -> bool:
         """선분들이 이 모양 테두리에서 OVERLAP_GAP 안으로 다가오거나 안에 드는지 — 그만큼 붙으면 모양과 선이 한데 붙어 보인다."""
@@ -603,8 +601,7 @@ def _overlap_pieces(overlaps: list[Overlap]) -> dict[frozenset[str], list[Segmen
 def _by_overlap(near: dict[frozenset[str], list[Segment]], a: _Relation, b: _Relation, head: _Head) -> bool:
     """포개진 두 선 a·b는 포개진 조각 끝의 선 끝 모양에도 닿기 마련이다 — 그 조각에 붙은(OVERLAP_GAP 안) 선 끝 모양은 포개짐으로
     이미 알린 것으로 본다."""
-    pieces = near.get(frozenset((a.owner, b.owner)), ())
-    return any(distance(s, e, LINE_EPS) <= OVERLAP_GAP for s in pieces for e in head.edges) or head.holds(pieces)
+    return head.near(near.get(frozenset((a.owner, b.owner)), ()))
 
 
 def _lines_through_heads(relations: list[_Relation], pairs: Pairs, near: dict[frozenset[str], list[Segment]],
@@ -633,7 +630,8 @@ def _lines_through_heads(relations: list[_Relation], pairs: Pairs, near: dict[fr
         where = span(h.points)
         if own:
             problem = f"선이 제 선 끝 모양에 닿는다: {_titles(passers)}, {h.name}(자리 {fmt_rect(where)})."
-            hint = "꺾는 점(via)을 고쳐 선이 제 선 끝 모양을 비켜 가게 한다."
+            hint = (f"꺾는 점(via)을 고쳐 선이 제 선 끝 모양을 비켜 가게 한다 — 화살촉 쪽 끝 구간을 직각으로 꺾었으면 그 꺾는 점을 "
+                    f"끝 {w.noun}에서 {ARROW_BEND}px 이상 뗀다.")
         else:
             whose = "·".join(f"관계 {o.name}" for o in sorted(owners, key=_index))
             problem = f"선이 다른 관계의 선 끝 모양에 닿는다: {_titles(passers)}, {whose}의 {h.name}(자리 {fmt_rect(where)})."

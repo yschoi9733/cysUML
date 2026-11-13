@@ -528,10 +528,10 @@ def test_icon_kinds_sit_in_packages_and_nodes_and_the_outer_element_covers_them(
 # ---------------------------------------------------------------- 제 화살촉 옆을 지나는 선
 
 
-@pytest.mark.parametrize("end, passed", [(10, False), (11, True), (14, True)])
+@pytest.mark.parametrize("end, passed", [(10, False), (11, True), (K.ARROW_BEND, True)])
 def test_dependency_bent_beside_its_own_arrowhead(end, passed):
     # 클래스 B(0, 0)의 왼쪽 가운데로 오는 의존을 via [[−end, 24]]에서 직각으로 꺾는다. 끝 구간이 화살촉 길이(10)와 같으면 앞 세로
-    # 구간이 화살촉 갈래 끝(x ≈ −8.83)에서 1.2px 떨어져 지나 갈래와 한데 붙어 보인다
+    # 구간이 화살촉 갈래 끝(x ≈ −8.83)에서 1.2px 떨어져 지나 갈래와 한데 붙어 보인다. 도구 설명이 권하는 거리(ARROW_BEND)는 합격한다
     r = report([el("class", "B", 0, 0), el("class", "A", -end - 45, 200)], [rel("dependency", "A", "B", via=[[-end, 24]])])
     assert r.passed is passed, r.summary()
     if not passed:

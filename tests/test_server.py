@@ -123,6 +123,14 @@ def test_each_tool_carries_its_flow_and_tips_and_the_instructions_carry_the_flow
     assert "불합격(" not in instructions  # 불합격 목록은 도구 설명에만 둔다
 
 
+def test_each_placed_tool_says_how_far_to_bend_beside_an_arrowhead():
+    # 화살촉 쪽 끝 구간을 직각으로 꺾을 거리(boxcheck.ARROW_BEND)를 via 설명에 적는다. 그 거리로 꺾은 화살표가 합격하는지는
+    # test_packagediagram이 본다
+    _, tools, _ = run(server.mcp)
+    for name, (_, _, spec) in PLACED_TOOLS.items():
+        assert guide.arrow_bend(spec.words) in tools[name].description, name
+
+
 def test_sequence_description_names_every_field_kind_and_limit_the_reader_takes():
     S = sequencediagram
     names = (S.DIAGRAM_FIELDS + S.PARTICIPANT_FIELDS + S.MESSAGE_FIELDS + S.ALL_FRAME_FIELDS + S.BRANCH_FIELDS)
