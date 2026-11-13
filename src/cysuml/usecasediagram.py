@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from typing import Any
 
 from . import boxdiagram as B
@@ -33,8 +34,16 @@ def _lines_width(lines: tuple[str, ...], bold: bool = False) -> float:
     return math.ceil(max(T.text_width(s, bold) for s in lines))
 
 
+def _floored(rect: Box) -> Point:
+    """자리 가운데를 정수 좌표로 내린 점 — 액터와 유즈케이스의 선이 향하는 점. 가운데가 반 픽셀에 걸리면(사람 모양 높이가 홀수,
+    모양 밖 이름 때문에 반 픽셀에 놓인 모양 자리, 사람이 준 홀수 폭·소수 좌표) 가운데를 맞춰 놓은 두 요소 사이의 선도 반 픽셀
+    기울어 계단이 보인다. 두 끝이 모두 가운데를 내린 점을 향하면 가운데가 같은 두 요소의 선은 곧다."""
+    return math.floor((rect[0] + rect[2]) / 2), math.floor((rect[1] + rect[3]) / 2)
+
+
 class ActorShape(Shape):
-    """액터: 교류도와 같은 사람 모양. 이름은 모양 밖(name_side, 기본 아래)에 쓰고, 선 끝은 사람 모양을 덮는 사각형 테두리에 닿는다."""
+    """액터: 교류도와 같은 사람 모양. 이름은 모양 밖(name_side, 기본 아래)에 쓰고, 선 끝은 사람 모양을 덮는 사각형 테두리에 닿는다.
+    선이 향하는 점은 가운데를 정수로 내린 점이고(_floored), 사람 모양도 그 x에 그려 곧게 내려오는 선이 몸 한가운데에 닿는다."""
 
     outside_name = True
     sized = False
@@ -44,13 +53,10 @@ class ActorShape(Shape):
         return ACTOR_FIGURE
 
     def anchor(self, e: Element, rect: Box) -> Point:
-        """사람 모양 가운데를 정수 좌표로 내린 점. 높이가 홀수이고 모양 밖 이름 때문에 모양 자리가 반 픽셀에 놓이기도 해서 가운데는
-        반 픽셀에 걸릴 수 있는데, 그러면 정수 좌표에 놓은 유즈케이스와 가로·세로로 맞춰도 선이 반 픽셀 기울어 계단이 보인다."""
-        return math.floor((rect[0] + rect[2]) / 2), math.floor((rect[1] + rect[3]) / 2)
+        return _floored(rect)
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
-        l, t, r, _ = p.shape_rect
-        draw_actor(c, (l + r) / 2, t, p.key)
+        draw_actor(c, _floored(p.shape_rect)[0], p.shape_rect[1], p.key)
 
 
 def _even(v: float) -> int:
@@ -58,10 +64,17 @@ def _even(v: float) -> int:
     return 2 * math.ceil(v / 2)
 
 
+@lru_cache(maxsize=4096)
+def _ellipse(rect: Box) -> EllipseBorder:
+    """자리 사각형에 꼭 맞는 타원 — 테두리와 겹침 조각이 같은 타원(꼭짓점 많은 다각형)을 한 번만 만들게."""
+    l, t, r, b = rect
+    return EllipseBorder((l + r) / 2, (t + b) / 2, (r - l) / 2, (b - t) / 2)
+
+
 class UseCaseShape(Shape):
     """유즈케이스: 이름을 안 가운데에 쓴 타원. 여백을 더한 이름 글자 상자를 가로·세로 √2배 하면 그 상자의 네 모서리가 타원 위에
-    놓이므로, 타원은 그 크기(최소 USE_CASE_MIN)로 이름을 덮는다. 폭·높이는 짝수로 올려 정수 좌표에 놓으면 가운데도 정수다(액터와
-    가로·세로로 맞춘 선이 곧게). 선 끝과 겹침은 타원 테두리로 본다."""
+    놓이므로, 타원은 그 크기(최소 USE_CASE_MIN)로 이름을 덮는다. 폭·높이는 짝수로 올려, 정수 좌표에 놓으면 선이 향하는 점
+    (_floored)이 타원 가운데와 같다. 선 끝과 겹침은 타원 테두리로 본다."""
 
     stereotyped = False
 
@@ -71,18 +84,31 @@ class UseCaseShape(Shape):
         return max(USE_CASE_MIN[0], _even(math.sqrt(2) * w)), max(USE_CASE_MIN[1], _even(math.sqrt(2) * h))
 
     def border(self, e: Element, rect: Box) -> Border:
-        l, t, r, b = rect
-        return EllipseBorder((l + r) / 2, (t + b) / 2, (r - l) / 2, (b - t) / 2)
+        return _ellipse(rect)
+
+    def anchor(self, e: Element, rect: Box) -> Point:
+        return _floored(rect)
 
     def parts(self, e: Element, rect: Box) -> tuple[Border, ...]:
         """타원 — 자리 사각형의 네 모서리 쪽은 유즈케이스가 아니다."""
-        return (self.border(e, rect),)
+        return (_ellipse(rect),)
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
         l, t, r, b = p.rect
         c.ellipse(l, t, r - l, b - t, owner=p.key)
         for s, y in zip(p.box.name, line_ys((t + b) / 2, len(p.box.name))):
             c.text((l + r) / 2, y, s, anchor="mm", owner=p.key)
+
+
+def _system_name_height(lines: int) -> float:
+    """이름이 lines줄인 시스템 경계의 이름 칸 높이."""
+    return LABEL_LINE * lines + 2 * SYSTEM_NAME_PAD
+
+
+@lru_cache(maxsize=1024)
+def _system_name(name: tuple[str, ...]) -> tuple[float, float]:
+    """(이름 칸 폭, 이름 칸 높이). 모양의 메서드마다 쓰므로 글자 폭은 한 번만 잰다."""
+    return _lines_width(name, True) + 2 * SYSTEM_NAME_SIDE, _system_name_height(len(name))
 
 
 class SystemShape(Shape):
@@ -93,9 +119,7 @@ class SystemShape(Shape):
     stereotyped = False
 
     def _name(self, e: Element) -> tuple[float, float]:
-        """(이름 칸 폭, 이름 칸 높이)."""
-        return (_lines_width(e.name, True) + 2 * SYSTEM_NAME_SIDE,
-                LABEL_LINE * len(e.name) + 2 * SYSTEM_NAME_PAD)
+        return _system_name(e.name)
 
     def size(self, e: Element) -> tuple[float, float]:
         w, h = self._name(e)
@@ -138,7 +162,7 @@ def render(data: Any, scale: float = SCALE) -> Drawing:
     return B.render(SPEC, data, scale)
 
 
-_ONE_LINE = SYSTEM_NAME_PAD * 2 + LABEL_LINE  # 이름 한 줄인 시스템 경계의 이름 칸 높이
+_ONE_LINE = _system_name_height(1)
 
 ELEMENTS = f"""- elements: 요소 목록(하나 이상).
   - kind(필수): "actor"(사람 모양 — 이름은 모양 밖에 쓴다), "use_case"(이름을 안 가운데에 쓴 타원 — 이름에 맞춰 \

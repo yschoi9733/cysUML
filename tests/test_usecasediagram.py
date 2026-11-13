@@ -208,16 +208,20 @@ def test_use_case_grows_to_cover_its_name():
 # ---------------------------------------------------------------- 액터
 
 
-def test_actor_is_the_sequence_diagram_figure_with_the_name_outside():
-    d = draw([el("actor", "고객", 0, 0)])
+@pytest.mark.parametrize("name", ["고객", "Customers"])
+def test_actor_is_the_sequence_diagram_figure_with_the_name_outside(name):
+    d = draw([el("actor", name, 0, 0)])
     (p,) = d.layout.boxes
     assert (p.shape_rect[2] - p.shape_rect[0], p.shape_rect[3] - p.shape_rect[1]) == ACTOR_FIGURE
+    # 사람 모양은 선이 향하는 점(가운데를 정수로 내린 점)의 x에 그린다 — "Customers"는 모양 자리가 반 픽셀에 놓인다
+    x = math.floor((p.shape_rect[0] + p.shape_rect[2]) / 2)
+    assert p.anchor[0] == x and x - p.shape_rect[0] in ({"고객": 9, "Customers": 8.5}[name],)
     c = Canvas()
-    draw_actor(c, (p.shape_rect[0] + p.shape_rect[2]) / 2, p.shape_rect[1], "고객")
-    figure = [r for r in owned(d, "고객") if not isinstance(r, Text)]
+    draw_actor(c, x, p.shape_rect[1], name)
+    figure = [r for r in owned(d, name) if not isinstance(r, Text)]
     assert [repr(r) for r in figure] == [repr(r) for r in c.records]
-    (name,) = owned(d, "고객", Text)
-    assert name.text == "고객" and name.y > p.shape_rect[3]
+    (text,) = owned(d, name, Text)
+    assert text.text == name and text.y > p.shape_rect[3]
 
 
 @pytest.mark.parametrize("side", ["bottom", "top", "left", "right"])
@@ -257,6 +261,21 @@ def test_lines_between_actors_and_use_cases_at_whole_pixels_stay_straight(actor_
     (pts,) = (p.points for p in below.layout.relations)
     assert pts[0][0] == pts[-1][0]
     assert all(v == int(v) for v in use_case.rect)
+
+
+def test_lines_stay_straight_when_odd_sizes_or_half_pixels_are_given():
+    # 사람이 홀수 폭·높이를 준 유즈케이스(가운데 (262.5, 25.5))와 가운데 높이를 25.5에 맞춘 액터
+    d = draw([el("actor", "고객", 0, 7, name_side="left"), el("use_case", "주문한다", 200, 0, width=125, height=51)],
+             [rel("association", "고객", "주문한다")])
+    (pts,) = (p.points for p in d.layout.relations)
+    assert pts[0][1] == pts[-1][1]
+    # 같은 유즈케이스 위에 사람 모양 가운데를 262.5에 맞춰 놓은 액터(이름은 위)
+    figure = placed(draw([el("actor", "고객", 0, 0, name_side="top")]), "고객").shape_rect
+    left = 262.5 - (figure[0] + figure[2]) / 2
+    d = draw([el("actor", "고객", left, -150, name_side="top"), el("use_case", "주문한다", 200, 0, width=125, height=51)],
+             [rel("association", "고객", "주문한다")])
+    (pts,) = (p.points for p in d.layout.relations)
+    assert pts[0][0] == pts[-1][0] == 262
 
 
 def test_places_list_the_actor_figure():
