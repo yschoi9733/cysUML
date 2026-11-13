@@ -554,6 +554,18 @@ def test_bend_at_the_advised_distance_clears_its_own_arrowhead(beta, side):
     assert r.passed, r.summary()
 
 
+def test_hint_tells_the_bend_distance_only_when_a_longer_end_segment_would_help():
+    # 앞 구간이 직각에서 화살촉 쪽으로 60° 더 기울면 권하는 거리(ARROW_BEND)로도 갈래 끝에 붙는다. 꺾는 점이 이미 그만큼 떨어져
+    # 있으니 고치는 법은 거리를 다시 말하지 않는다
+    corner = (-K.ARROW_BEND, 24)
+    p = (corner[0] + 20 * math.sin(math.radians(60)), corner[1] + 20 * math.cos(math.radians(60)))
+    r = report([el("class", "B", 0, 0), el("class", "A", p[0] - 300, p[1] + 176)],
+               [rel("dependency", "A", "B", via=[list(p), list(corner)])])
+    (f,) = r.failures
+    assert f.kind == "line_through_head" and "화살촉" in f.problem
+    assert K.bend_away(P.SPEC.words) not in f.hint
+
+
 # ---------------------------------------------------------------- 섞어 그리기·도구
 
 

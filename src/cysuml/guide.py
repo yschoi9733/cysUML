@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from .boxcheck import KINDS, bend_away
-from .boxdiagram import ARROW, ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec, Words, aims_off_center, josa
+from .boxdiagram import ARROW, ARROW_HEAD, ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec, Words, aims_off_center, josa
 from .canvas import MIN_SCALE, SCALE
 from .report import fmt_num
 
@@ -198,11 +198,12 @@ def relation_fields(spec: Spec) -> str:
     noun, edge = spec.words.noun, spec.words.edge
     middle, other = ((f"{noun} 가운데", f"상대 {noun} 가운데") if box
                      else (f"{noun} 가운데(요소 종류에 따로 적은 모양은 그 점)", f"상대 {noun}의 그 점"))
+    arrows = any(t.navigable or ARROW_HEAD in (t.start, t.end) for t in types.values())  # 화살촉을 그리는 관계가 있는지
     fixed_ends = _joined(t.label for t in types.values() if not t.reflexive)
     never_self = f"({fixed_ends}{josa(fixed_ends, '은', '는')} 꺾는 점이 있어도 자기 자신으로 갈 수 없다)" if fixed_ends else ""
     lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "
                  f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 "
-                 f"한다{never_self}. {arrow_bend(spec.words)}")
+                 f"한다{never_self}." + (f" {arrow_bend(spec.words)}" if arrows else ""))
     trunks = [t for t in types.values() if t.trunk]
     if trunks:
         lines.append(_trunk(trunks, spec))
