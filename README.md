@@ -97,6 +97,38 @@ It gets back the same things as the class diagram tool, with the place of every 
 checks, the check fails when an element inside another sits too close to its edge or name tab, or a line runs along
 the edge of a package it starts or ends in, or through a package's name tab.
 
+### Component diagrams
+
+The tool is `draw_component_diagram`. It draws components with the interfaces they provide, the artifacts that
+implement them, and the classes that realize them. It takes every element of the package diagram tool, plus
+`lollipop`: a provided interface drawn as a small circle with its name outside (`name_side` puts the name below,
+above, left or right of the circle). The providing component joins the circle with an `association`, drawn without
+an arrowhead in this tool unless `navigable` is given, and each user points at the circle with a `dependency`:
+
+```json
+{
+  "file_name": "components",
+  "elements": [
+    {"kind": "package", "name": "web", "left": 0, "top": 0},
+    {"kind": "component", "name": "OrderController", "in": "web", "left": 20, "top": 44},
+    {"kind": "component", "name": "AdminController", "in": "web", "left": 220, "top": 44},
+    {"kind": "package", "name": "service", "left": 0, "top": 220},
+    {"kind": "component", "name": "OrderService", "in": "service", "left": 110, "top": 324},
+    {"kind": "lollipop", "name": "OrderApi", "in": "service", "left": 70, "top": 264, "name_side": "left"},
+    {"kind": "artifact", "name": "order-service.jar", "left": 400, "top": 324}
+  ],
+  "relations": [
+    {"kind": "association", "from": "OrderService", "to": "OrderApi"},
+    {"kind": "dependency", "from": "OrderController", "to": "OrderApi"},
+    {"kind": "dependency", "from": "AdminController", "to": "OrderApi"},
+    {"kind": "dependency", "from": "order-service.jar", "to": "OrderService", "stereotype": "manifest"}
+  ]
+}
+```
+
+It gets back the same things as the package diagram tool, and for each circle the place of the circle alone next to
+the place of the circle with its name. The checks are the same: a line through a circle or its name fails.
+
 ### Sequence diagrams
 
 The tool is `draw_sequence_diagram`. The assistant sends no coordinates: only the participants, the messages in
@@ -188,6 +220,11 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다.
   클래스도 검사에 더해, 안의 요소가 바깥 요소의 테두리·이름 탭에 붙거나, 선이 그 끝을 품은 패키지의 테두리를 따라가거나 패키지
   탭을 지나면 불합격이다.
+- **컴포넌트도**는 `draw_component_diagram`으로 그린다. 컴포넌트와 제공 인터페이스, 컴포넌트를 구현하는 아티팩트, 컴포넌트를
+  실현하는 클래스를 그린다. 패키지도 도구가 받는 요소에 더해 `lollipop`(막대사탕 — 제공 인터페이스를 작은 원과 그 밖에 쓰는
+  이름으로 그린다. 이름 쪽은 `name_side`)을 받는다. 제공하는 컴포넌트는 원과 `association`으로 잇고(이 도구에서는 `navigable`을
+  주지 않으면 화살촉이 없다), 쓰는 쪽은 원으로 `dependency`를 긋는다. 결과는 패키지도와 같고, 원마다 원만의 자리도 함께
+  돌려준다. 검사도 같고, 선이 원이나 그 이름을 지나면 불합격이다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
   프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
   파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면
