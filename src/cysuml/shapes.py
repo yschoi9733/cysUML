@@ -8,7 +8,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Optional
 
-from .boxdiagram import Element, NameZone, PlacedBox, Shape
+from .boxdiagram import NEST_PAD, Element, NameZone, PlacedBox, Shape
 from .canvas import Canvas
 from .classdiagram import CLASS_SHAPES, MIN_WIDTH, draw_head, head_height, head_lines, head_width
 from .geom import Border, PolygonBorder, RectBorder, Segment
@@ -26,17 +26,21 @@ DEPTH = 8          # 노드 두께 띠의 폭. BOX_CLEARANCE의 두 배 안이�
 NODE_BODY = 24     # 노드 앞면에서 이름 줄 밖에 더하는 높이
 
 
+Head = tuple[tuple[tuple[str, bool], ...], float, float]  # (머리 칸 줄, 폭, 높이)
+
+
 @lru_cache(maxsize=1024)
-def _tab_of(keyword: Optional[str], names: tuple[str, ...]) -> tuple[tuple[tuple[str, bool], ...], float, float]:
+def _head_of(keyword: Optional[str], names: tuple[str, ...]) -> Head:
     head = head_lines(keyword, names)
-    return tuple(head), max(TAB_MIN, head_width(head)), head_height(head)
+    return tuple(head), head_width(head), head_height(head)
 
 
 class _HeadShape(Shape):
-    """이름을 클래스 머리 칸처럼 쓰는 모양: «스테레오타입» 줄 아래에 이름 줄(굵게)."""
+    """이름을 클래스 머리 칸처럼 쓰는 모양: «스테레오타입» 줄 아래에 이름 줄(굵게). 머리 칸은 모양의 메서드마다 쓰므로 글자 폭은
+    한 번만 잰다."""
 
-    def head(self, e: Element) -> list[tuple[str, bool]]:
-        return head_lines(self.keyword(e), e.name)
+    def head(self, e: Element) -> Head:
+        return _head_of(self.keyword(e), e.name)
 
 
 class PackageShape(_HeadShape):
@@ -46,9 +50,10 @@ class PackageShape(_HeadShape):
 
     holds = True
 
-    def _tab(self, e: Element) -> tuple[tuple[tuple[str, bool], ...], float, float]:
-        """(탭 머리 칸 줄, 탭 폭, 탭 높이). 모양의 메서드마다 부르므로 글자 폭은 한 번만 잰다."""
-        return _tab_of(self.keyword(e), e.name)
+    def _tab(self, e: Element) -> Head:
+        """(탭 머리 칸 줄, 탭 폭, 탭 높이)."""
+        lines, w, h = self.head(e)
+        return lines, max(TAB_MIN, w), h
 
     def size(self, e: Element) -> tuple[float, float]:
         _, tab_w, tab_h = self._tab(e)
@@ -78,7 +83,7 @@ class PackageShape(_HeadShape):
         l, t, r, b = p.rect
         c.rect(l, t, tab_w, tab_h, owner=p.key)
         c.rect(l, t + tab_h, r - l, b - t - tab_h, owner=p.key)
-        draw_head(c, head, l + tab_w / 2, t, p.key)
+        draw_head(c, list(head), l + tab_w / 2, t, p.key)
 
 
 class _IconBox(_HeadShape):
@@ -87,8 +92,8 @@ class _IconBox(_HeadShape):
     ICON = (12, 15)  # 아이콘 폭·높이
 
     def size(self, e: Element) -> tuple[float, float]:
-        head = self.head(e)
-        return max(MIN_WIDTH, head_width(head) + 2 * ICON_ROOM), head_height(head) + BOX_BODY
+        _, w, h = self.head(e)
+        return max(MIN_WIDTH, w + 2 * ICON_ROOM), h + BOX_BODY
 
     def icon(self, c: Canvas, x: float, y: float, owner: str) -> None:
         raise NotImplementedError
@@ -97,8 +102,8 @@ class _IconBox(_HeadShape):
         l, t, r, b = p.rect
         c.rect(l, t, r - l, b - t, owner=p.key)
         self.icon(c, r - ICON_MARGIN - self.ICON[0], t + ICON_MARGIN, p.key)
-        head = self.head(p.box)
-        draw_head(c, head, (l + r) / 2, (t + b - head_height(head)) / 2, p.key)
+        lines, _, h = self.head(p.box)
+        draw_head(c, list(lines), (l + r) / 2, (t + b - h) / 2, p.key)
 
 
 class ComponentShape(_IconBox):
@@ -122,17 +127,18 @@ class ArtifactShape(_IconBox):
 
 
 class NodeShape(_HeadShape):
-    """노드: 오른쪽과 위에 두께(DEPTH)가 보이는 입체 상자. 선 끝은 겉 테두리(육각형)에 닿는다. 이름은 앞면 위쪽 가운데에 쓰고, 안에
-    요소를 두는 칸은 이름 줄 아래 앞면이다. 두께 띠와 앞면 윗변·오른변은 테두리 선이다."""
+    """노드: 오른쪽과 위에 두께(DEPTH)가 보이는 입체 상자. 선 끝은 겉 테두리(육각형)에 닿는다. 이름은 앞면 위쪽 가운데에 쓰고(이름
+    칸 좌우로 NEST_PAD 이상 앞면이 남는다 — 안의 요소를 잇는 선이 이름 옆으로 앞면 윗변을 건널 자리), 안에 요소를 두는 칸은 이름 줄
+    아래 앞면이다. 두께 띠와 앞면 윗변·오른변은 테두리 선이다."""
 
     holds = True
 
     def size(self, e: Element) -> tuple[float, float]:
-        head = self.head(e)
-        return max(MIN_WIDTH, head_width(head)) + DEPTH, head_height(head) + NODE_BODY + DEPTH
+        _, w, h = self.head(e)
+        return max(MIN_WIDTH, w + 2 * NEST_PAD) + DEPTH, h + NODE_BODY + DEPTH
 
     def insets(self, e: Element) -> Box:
-        return 0.0, DEPTH + head_height(self.head(e)), DEPTH, 0.0
+        return 0.0, DEPTH + self.head(e)[2], DEPTH, 0.0
 
     def _corners(self, rect: Box) -> tuple[tuple[float, float], ...]:
         l, t, r, b = rect
@@ -147,9 +153,9 @@ class NodeShape(_HeadShape):
         return (l, t + DEPTH, r - DEPTH, b), (l + DEPTH, t, r, t + DEPTH), (r - DEPTH, t + DEPTH, r, b - DEPTH)
 
     def name_zones(self, e: Element, rect: Box) -> tuple[NameZone, ...]:
-        head = self.head(e)
-        cx, top, w = (rect[0] + rect[2] - DEPTH) / 2, rect[1] + DEPTH, head_width(head)
-        return (NameZone((cx - w / 2, top, cx + w / 2, top + head_height(head)), False),)
+        _, w, h = self.head(e)
+        cx, top = (rect[0] + rect[2] - DEPTH) / 2, rect[1] + DEPTH
+        return (NameZone((cx - w / 2, top, cx + w / 2, top + h), False),)
 
     def frame(self, e: Element, rect: Box) -> tuple[Segment, ...]:
         l, t, r, b = rect
@@ -162,7 +168,7 @@ class NodeShape(_HeadShape):
         front = (r - DEPTH, t + DEPTH)
         c.line([(l, t + DEPTH), front, (r - DEPTH, b)], owner=p.key)
         c.line([front, (r, t)], owner=p.key)
-        draw_head(c, self.head(p.box), (l + r - DEPTH) / 2, t + DEPTH, p.key)
+        draw_head(c, list(self.head(p.box)[0]), (l + r - DEPTH) / 2, t + DEPTH, p.key)
 
 
 PACKAGE = PackageShape()

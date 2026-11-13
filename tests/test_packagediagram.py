@@ -226,6 +226,13 @@ def test_node_area_is_the_front_below_its_name():
                                         (n.rect[2] - DEPTH, n.rect[3]), (0, n.rect[3])))
 
 
+def test_long_node_name_leaves_room_beside_it_on_the_front():
+    d = draw([el("node", "ApplicationServerCluster", 0, 0, stereotype="executionEnvironment")])
+    n = placed(d, "ApplicationServerCluster")
+    (zone,) = n.zones
+    assert zone.rect[0] == pytest.approx(B.NEST_PAD) and zone.rect[2] == pytest.approx(n.rect[2] - DEPTH - B.NEST_PAD)
+
+
 def test_element_on_the_thickness_band_of_a_node_fails():
     (f,) = report([el("node", "서버", 0, 0), inside("서버", "component", "Api", 20, 4)]).failures
     assert f.kind == "inner_off_area" and f.elements == ("Api", "서버")

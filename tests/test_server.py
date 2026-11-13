@@ -120,6 +120,17 @@ def test_description_names_the_failure_kinds_of_each_tool_in_check_order():
     assert ", ".join(guide.KIND_NAMES.values()) + "." in packagediagram.TOOL
 
 
+def test_relation_fields_follow_the_relation_kinds_a_tool_takes():
+    # 유즈케이스도처럼 연관·의존·일반화만 받고 연관의 기본 방향이 '없음'인 도구
+    from cysuml import boxdiagram, classdiagram
+    kinds = ("association", "dependency", "generalization")
+    spec = boxdiagram.Spec(classdiagram.CLASS_SHAPES, {k: classdiagram.RELATIONS[k] for k in kinds}, navigable="none")
+    text = guide.relation_fields(spec)
+    assert '  - kind(필수): "association"·"dependency"·"generalization".' in text
+    assert "의존·상속은 from이 의존하는 쪽·자식이고 화살촉·삼각형이 to 쪽에 붙는다." in text and "마름모" not in text
+    assert '연관만 쓴다. navigable은 화살촉을 둘 쪽 "to"·"from"·"both"·"none"(기본)이다.' in text
+
+
 def test_relation_fields_say_where_lines_start_for_each_tool():
     # 클래스도는 상자 가운데, 새 도구는 요소 종류에 따로 적은 점(패키지는 탭 오른쪽 몸통의 가운데)
     assert "선은 상자 가운데에서 첫 꺾는 점(없으면 상대 상자 가운데)으로 가는 선이 상자 변과" in server.CLASS_TOOL

@@ -74,7 +74,7 @@ CLASS_TOOL = f"""클래스도를 그려 PNG 파일로 저장하고, 검사 결�
   - attributes·operations: {MEMBERS}
   - literals: 열거 값 목록(kind가 "enum"일 때만).
   - width·height: 최소 크기. 글자가 더 길면 그만큼 늘어난다(폭 기본 90).
-{relation_fields(tuple(classdiagram.RELATIONS), classdiagram.SPEC.navigable)}
+{relation_fields(classdiagram.SPEC)}
 {COMMON_INPUT}
 
 결과

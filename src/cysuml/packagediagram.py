@@ -41,7 +41,7 @@ TOOL = f"""패키지도를 그려 PNG 파일로 저장하고, 검사 결과와 �
 
 입력
 {PLACED_ELEMENTS}
-{relation_fields(tuple(RELATIONS), SPEC.navigable, SPEC.words)}
+{relation_fields(SPEC)}
 {COMMON_INPUT}
 
 {NEW_INPUT}

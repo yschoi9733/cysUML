@@ -222,9 +222,9 @@ RELATIONS = {
     "association": RelationType("연관", navigable=True, multiplicity=True),
     "aggregation": RelationType("집합", start=OPEN_DIAMOND, navigable=True, multiplicity=True),
     "composition": RelationType("합성", start=FILLED_DIAMOND, navigable=True, multiplicity=True),
-    "generalization": RelationType("상속", end=TRIANGLE_HEAD, trunk=True),
-    "realization": RelationType("실체화", dash=DASH, end=TRIANGLE_HEAD, trunk=True),
-    "dependency": RelationType("의존", dash=DASH, end=ARROW_HEAD),
+    "generalization": RelationType("상속", end=TRIANGLE_HEAD, trunk=True, role="자식"),
+    "realization": RelationType("실체화", dash=DASH, end=TRIANGLE_HEAD, trunk=True, role="구현하는 쪽"),
+    "dependency": RelationType("의존", dash=DASH, end=ARROW_HEAD, role="의존하는 쪽"),
 }
 
 SPEC = Spec(CLASS_SHAPES, RELATIONS, BOX_WORDS, list_field="classes", default_kind="class", navigable="to", extended=False)

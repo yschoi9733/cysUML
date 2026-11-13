@@ -3,7 +3,7 @@
 - flow(가): AI가 배치하는 그림을 그리는 흐름과, 그 도구에서 날 수 있는 불합격 목록.
 - NEW_INPUT(나): 새 그림 도구가 모두 받는 입력 규칙(열쇠·여러 줄 이름·관계 스테레오타입).
 - PLACED_ELEMENTS(다): 패키지도·컴포넌트도·배치도(deployment diagram)가 함께 받는 요소 종류.
-- relation_fields(라): 클래스도 관계 여섯 가지 가운데 받는 것과 연관의 기본 방향으로 만드는 관계 필드.
+- relation_fields(라): 도구 정의가 받는 관계 종류(클래스도 관계 여섯 가지 가운데 고른 것 등)와 연관의 기본 방향으로 만드는 관계 필드.
 - NESTING(마): 요소 안에 요소 두기.
 - NAME_SIDE(바): 모양 밖 이름의 쪽.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from .boxcheck import KINDS
-from .boxdiagram import BOX_WORDS, NAVIGABLE, NEST_PAD, SIDES, Words, josa
+from .boxdiagram import NAVIGABLE, NEST_PAD, SIDES, Spec, josa
 from .canvas import MIN_SCALE, SCALE
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
@@ -91,8 +91,8 @@ PLACED_ELEMENTS = f"""- elements: 요소 목록(하나 이상). 종류를 섞어
 
 NESTING = f"""요소 안에 요소 두기(중첩):
 - 안의 요소에 in으로 품은 요소의 열쇠를 준다. 여러 겹도 된다. 좌표는 늘 그림 전체 기준이다.
-- 바깥 요소는 준 왼쪽 위에서 시작해, 안의 요소와 제 이름 칸을 여백 {NEST_PAD}px를 두고 덮도록 오른쪽·아래로 늘어난다. 그래서 \
-안의 요소는 바깥 요소의 칸(안의 요소를 두는 곳) 왼쪽·위 테두리에서 {NEST_PAD}px 이상 들여 놓는다.
+- 바깥 요소는 준 왼쪽 위에서 시작해, 안의 요소를 여백 {NEST_PAD}px를 두고 덮도록 오른쪽·아래로 늘어난다(제 이름 칸이 들어갈 \
+크기보다 작아지지 않는다). 그래서 안의 요소는 바깥 요소의 칸(안의 요소를 두는 곳) 왼쪽·위 테두리에서 {NEST_PAD}px 이상 들여 놓는다.
 - 선의 끝 요소를 품은 바깥 요소는 그 선이 안을 지나거나 테두리를 건너도 된다. 다만 테두리를 따라가거나 이름 칸을 지나면 \
 불합격이다. 그 선의 글자도 바깥 요소 안에 놓일 수 있다. 그 밖의 요소는 선이 지나가면 불합격이다.
 - 품은 요소와 그 안의 요소는 선으로 잇지 않는다."""
@@ -100,37 +100,44 @@ NESTING = f"""요소 안에 요소 두기(중첩):
 NAME_SIDE = f"""- name_side: 이름을 모양 밖에 쓰는 요소의 이름 쪽 {"·".join(f'"{s}"' for s in SIDES)}(첫째가 기본). 요소 자리는 모양과 \
 이름을 함께 덮고, left·top은 그 자리의 왼쪽 위다. 선 끝은 모양 테두리에 닿고, 어떤 선이든 이름을 지나가면 불합격이다."""
 
-_ENDS = {"generalization": ("상속", "자식", "삼각형"), "realization": ("실체화", "구현하는 쪽", "삼각형"),
-         "dependency": ("의존", "의존하는 쪽", "화살촉")}
-_LABELS = {"association": "연관", "aggregation": "집합", "composition": "합성"}
+def _joined(words: Iterable[str]) -> str:
+    return "·".join(dict.fromkeys(words))
 
 
-def relation_fields(kinds: Iterable[str], navigable: str = "to", words: Words = BOX_WORDS) -> str:
-    """(라) 관계 필드. kinds는 클래스도 관계 여섯 가지 가운데 그 도구가 받는 것(차례대로), navigable은 연관·집합·합성의 기본
-    방향이다. words가 클래스도 말(BOX_WORDS)이면 from·to를 상자 이름으로, 아니면 요소 열쇠로 적는다."""
-    kinds = tuple(kinds)
-    box = words is BOX_WORDS
-    quoted = "·".join(f'"{k}"' for k in kinds)
-    lines = ["- relations: 관계 목록(없어도 된다).", f"  - kind(필수): {quoted}."]
+def relation_fields(spec: Spec) -> str:
+    """(라) 관계 필드. 도구 정의(spec)가 받는 관계 종류와 그 정의(이름·from 쪽 뜻·끝 모양·받는 필드), 연관의 기본 방향으로
+    만든다. 클래스도 도구(extended가 아니다)는 from·to를 상자 이름으로, 새 도구는 요소 열쇠로 적는다."""
+    types = spec.relations
+    box = not spec.extended
+    quoted = "·".join(f'"{k}"' for k in types)
+    need = "(필수)" if spec.default_relation is None else "(관계 종류가 하나뿐이라 빼도 된다)"
+    lines = ["- relations: 관계 목록(없어도 된다).", f"  - kind{need}: {quoted}."]
     meaning = []
-    ends = [_ENDS[k] for k in kinds if k in _ENDS]
+    ends = [t for t in types.values() if t.end is not None and t.role]
     if ends:
-        who = "·".join(e[0] for e in ends)
-        heads = "·".join(dict.fromkeys(e[2] for e in ends))
-        meaning.append(f"{who}{josa(who, '은', '는')} from이 {'·'.join(e[1] for e in ends)}이고 {heads}{josa(heads, '이', '가')} "
-                       "to 쪽에 붙는다.")
-    diamonds = [_LABELS[k] for k in kinds if k in ("aggregation", "composition")]
-    if diamonds:
-        meaning.append(f"{'·'.join(diamonds)}의 마름모는 from 쪽에 붙는다.")
+        who, heads = _joined(t.label for t in ends), _joined(t.end.name for t in ends if t.end is not None)
+        meaning.append(f"{who}{josa(who, '은', '는')} from이 {_joined(t.role for t in ends)}이고 "
+                       f"{heads}{josa(heads, '이', '가')} to 쪽에 붙는다.")
+    starts = [t for t in types.values() if t.start is not None]
+    if starts:
+        shapes = _joined(t.start.name for t in starts if t.start is not None)
+        meaning.append(f"{_joined(t.label for t in starts)}의 {shapes}{josa(shapes, '은', '는')} from 쪽에 붙는다.")
     lines.append(f"  - from·to(필수): {'상자 이름' if box else '요소 열쇠'}." + "".join(f" {m}" for m in meaning))
     lines.append("  - name: 관계 이름." + ("" if box else ' stereotype: "공용 입력(열쇠·이름)" 절.'))
-    assoc = [_LABELS[k] for k in kinds if k in _LABELS]
-    if assoc:
-        options = "·".join(f'"{n}"' + ("(기본)" if n == navigable else "") for n in NAVIGABLE)
-        tail = f"({'·'.join(diamonds)}은 \"to\"·\"none\"만)" if diamonds else ""
-        lines.append(f"  - from_multiplicity·to_multiplicity·navigable: {'·'.join(assoc)}만 쓴다. navigable은 화살촉을 둘 쪽 "
-                     f"{options}이다{tail}.")
-    noun, edge = words.noun, words.edge
+    steered = [t for t in types.values() if t.navigable]
+    counted = [t for t in types.values() if t.multiplicity]
+    options = "·".join(f'"{n}"' + ("(기본)" if n == spec.navigable else "") for n in NAVIGABLE)
+    fixed = [t for t in steered if t.start is not None]
+    tail = f"({_joined(t.label for t in fixed)}{josa(fixed[-1].label, '은', '는')} \"to\"·\"none\"만)" if fixed else ""
+    if steered and counted == steered:
+        lines.append(f"  - from_multiplicity·to_multiplicity·navigable: {_joined(t.label for t in steered)}만 쓴다. navigable은 "
+                     f"화살촉을 둘 쪽 {options}이다{tail}.")
+    else:
+        if counted:
+            lines.append(f"  - from_multiplicity·to_multiplicity: {_joined(t.label for t in counted)}만 쓴다.")
+        if steered:
+            lines.append(f"  - navigable: {_joined(t.label for t in steered)}만 쓴다. 화살촉을 둘 쪽 {options}이다{tail}.")
+    noun, edge = spec.words.noun, spec.words.edge
     middle, other = ((f"{noun} 가운데", f"상대 {noun} 가운데") if box
                      else (f"{noun} 가운데(요소 종류에 따로 적은 모양은 그 점)", f"상대 {noun}의 그 점"))
     lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "

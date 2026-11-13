@@ -166,7 +166,8 @@ FILLED_DIAMOND = EndShape("마름모", DIAMOND, lambda c, tip, frm, o: c.diamond
 @dataclass(frozen=True)
 class RelationType:
     """관계 종류. start·end는 from·to 쪽 끝에 늘 그리는 모양이다. navigable이면 방향(navigable)을 받아 그 쪽에 화살촉을 그리고,
-    multiplicity면 다중도를 받는다. trunk면 자식 여럿의 선이 한 줄기로 모여 한 끝 모양을 함께 쓰는 것(공유 줄기)을 받는다."""
+    multiplicity면 다중도를 받는다. trunk면 자식 여럿의 선이 한 줄기로 모여 한 끝 모양을 함께 쓰는 것(공유 줄기)을 받는다.
+    label(상속 등)과 role(from 쪽이 무엇인지 — 상속은 자식)은 오류 글과 도구 설명(guide.relation_fields)에 쓴다."""
 
     label: str
     dash: Optional[tuple[float, float]] = None
@@ -175,6 +176,7 @@ class RelationType:
     navigable: bool = False
     multiplicity: bool = False
     trunk: bool = False
+    role: str = ""
 
     def __post_init__(self):
         if self.navigable and self.end is not None:
@@ -793,7 +795,8 @@ def _outside_name(e: Element, w: float, h: float) -> tuple[float, float, Point, 
 
 
 def _place(spec: Spec, diagram: Diagram) -> tuple[PlacedBox, ...]:
-    """요소 크기와 자리. 안의 요소부터 재서 바깥 요소가 안의 요소와 제 이름 칸을 NEST_PAD 여백을 두고 덮도록 오른쪽·아래로 늘린다."""
+    """요소 크기와 자리. 안의 요소부터 재서 바깥 요소가 안의 요소를 NEST_PAD 여백을 두고 덮도록 오른쪽·아래로 늘린다. 제 이름 칸이
+    들어갈 크기는 모양(Shape.size)이 정한다."""
     parent_of = {e.key: e.parent for e in diagram.boxes}
     children: dict[str, list[Element]] = {}
     for e in diagram.boxes:
@@ -866,12 +869,14 @@ def layout(diagram: Diagram) -> Layout:
     for p in bare:
         _draw_relation(sketch, p, spec.relations[p.relation.kind])
     spots = _Spots(outline(sketch.records))
-    plain = obstacles(placed)
+    avoids: dict[frozenset[str], Obstacles] = {}  # 끝을 품은 요소들마다 한 번만 만든다
     out = []
     for p in bare:
         r, points = p.relation, p.points
         holders = lay.holders(r)
-        avoid = obstacles(placed, holders) if holders else plain
+        if holders not in avoids:
+            avoids[holders] = obstacles(placed, holders)
+        avoid = avoids[holders]
         labels = []
         if r.label_lines:
             lines = r.label_lines
