@@ -163,6 +163,21 @@ def test_element_placed_over_a_package_without_in_is_an_overlap_with_a_hint():
     assert f.kind == "box_overlap" and "in에" not in f.hint
 
 
+@pytest.mark.parametrize("corner", ["top-left", "bottom-right"])
+def test_element_close_to_the_cut_corner_of_a_node_fails(corner):
+    # 노드(100, 100)의 깎인 모서리 대각선 테두리에 0.7px까지 다가온 상자는 붙은 것이다
+    n = placed(draw([el("node", "N", 100, 100)]), "N")
+    left, top = (0, 0) if corner == "top-left" else (n.rect[2] - 3.5, n.rect[3] - 3.5)
+    (f,) = report([el("node", "N", 100, 100), el("class", "E", left, top, width=103.5, height=103.5)]).failures
+    assert f.kind == "box_overlap" and "0.7px밖에" in f.problem
+
+
+def test_child_touching_the_name_area_edge_is_close_not_on_it():
+    # 안의 요소 윗변이 노드 이름 칸 아랫변(y=32)에 맞닿기만 하면 "걸친다"가 아니라 칸 테두리에 붙은 것이다
+    (f,) = report([el("node", "N", 0, 0), inside("N", "class", "C", 20, DEPTH + HEAD)]).failures
+    assert f.kind == "inner_off_area" and "0px밖에 떨어지지 않았다" in f.problem
+
+
 def test_nodes_whose_cut_corners_face_each_other_do_not_overlap():
     # N1의 오른쪽 아래와 N2의 왼쪽 위 깎인 모서리가 자리 사각형으로는 3px 겹치지만, 두 입체 상자는 7px 떨어져 있다
     n1 = placed(draw([el("node", "N1", 0, 0)]), "N1")

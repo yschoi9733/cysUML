@@ -59,10 +59,11 @@ class PackageShape(_HeadShape):
         _, tab_w, tab_h = self._tab(e)
         return max(MIN_WIDTH, tab_w + TAB_STEP), tab_h + PACKAGE_BODY
 
-    def parts(self, e: Element, rect: Box) -> tuple[Box, ...]:
+    def parts(self, e: Element, rect: Box) -> tuple[Border, ...]:
         """탭과 몸통 — 탭 오른쪽 빈 곳은 패키지가 아니다."""
         _, tab_w, tab_h = self._tab(e)
-        return (rect[0], rect[1], rect[0] + tab_w, rect[1] + tab_h), (rect[0], rect[1] + tab_h, rect[2], rect[3])
+        return (RectBorder((rect[0], rect[1], rect[0] + tab_w, rect[1] + tab_h)),
+                RectBorder((rect[0], rect[1] + tab_h, rect[2], rect[3])))
 
     def anchor(self, e: Element, rect: Box) -> tuple[float, float]:
         _, tab_w, tab_h = self._tab(e)
@@ -147,10 +148,9 @@ class NodeShape(_HeadShape):
     def border(self, e: Element, rect: Box) -> Border:
         return PolygonBorder(self._corners(rect))
 
-    def parts(self, e: Element, rect: Box) -> tuple[Box, ...]:
-        """앞면과 위·오른쪽 두께 띠 — 왼쪽 위와 오른쪽 아래의 깎인 모서리는 노드가 아니다."""
-        l, t, r, b = rect
-        return (l, t + DEPTH, r - DEPTH, b), (l + DEPTH, t, r, t + DEPTH), (r - DEPTH, t + DEPTH, r, b - DEPTH)
+    def parts(self, e: Element, rect: Box) -> tuple[Border, ...]:
+        """겉 테두리(육각형) — 왼쪽 위와 오른쪽 아래의 깎인 모서리는 노드가 아니다."""
+        return (self.border(e, rect),)
 
     def name_zones(self, e: Element, rect: Box) -> tuple[NameZone, ...]:
         _, w, h = self.head(e)

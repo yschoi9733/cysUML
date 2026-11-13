@@ -125,10 +125,10 @@ class Shape:
         """선이 닿는 겉 테두리."""
         return RectBorder(rect)
 
-    def anchor(self, e: Element, rect: T.Box) -> Point:
+    def anchor(self, e: Element, rect: T.Box) -> Optional[Point]:
         """선이 향하는 점 — 선 끝은 이 점에서 첫·마지막 꺾는 점(없으면 상대 요소의 이 점)으로 가는 선이 테두리와 만나는 곳이다.
-        테두리 안이어야 하고, 기본은 테두리 가운데다."""
-        return self.border(e, rect).center()
+        테두리 안이어야 한다. None(기본)이면 테두리 가운데다."""
+        return None
 
     def name_zones(self, e: Element, rect: T.Box) -> tuple[NameZone, ...]:
         """이름 칸. 안에 요소를 두는 모양만 쓴다(선이 지나가면 안 되는 자리)."""
@@ -138,10 +138,11 @@ class Shape:
         """안에 요소를 두는 모양의 테두리 선 — 그 안의 요소를 잇는 선이 건너도 되지만 따라가면 안 되고, 선 글자가 겹치면 안 되는 선."""
         return self.border(e, rect).edges()
 
-    def parts(self, e: Element, rect: T.Box) -> tuple[T.Box, ...]:
-        """요소끼리 겹치는지 볼 때 자리를 이루는 사각형들. 기본은 자리 하나이고, 자리 안에 요소가 아닌 빈 곳이 있는 모양(패키지 탭
-        오른쪽)은 나눠 넘긴다. 모양 밖 이름이 있는 요소는 모양과 이름을 함께 덮는 자리 하나로 본다."""
-        return (rect,)
+    def parts(self, e: Element, rect: T.Box) -> tuple[Border, ...]:
+        """요소끼리 겹치는지 볼 때 그 요소를 이루는 테두리들. 기본은 자리 사각형 하나이고, 자리 안에 요소가 아닌 빈 곳이 있는
+        모양은 실제 모양으로 넘긴다(패키지는 탭과 몸통, 노드는 깎인 모서리를 뺀 육각형). 모양 밖 이름이 있는 요소는 모양과 이름을
+        함께 덮는 자리 하나로 본다."""
+        return (RectBorder(rect),)
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
         raise NotImplementedError
@@ -257,8 +258,8 @@ class Diagram:
 @dataclass(frozen=True)
 class PlacedBox:
     """자리를 잡은 요소. rect는 자리(모양 밖 이름까지 덮는다), shape_rect는 모양 자리, inner는 안의 요소를 둘 칸(안에 요소를 둘 수
-    없는 모양은 None), zones는 이름 칸, frame은 안에 요소를 두는 모양의 테두리 선, parts는 겹침을 볼 때 자리를 이루는 사각형들,
-    anchor는 선이 향하는 점(Shape.anchor)이다."""
+    없는 모양은 None), zones는 이름 칸, frame은 안에 요소를 두는 모양의 테두리 선, parts는 겹침을 볼 때 그 요소를 이루는 테두리들
+    (Shape.parts), anchor는 선이 향하는 점(Shape.anchor — 없으면 테두리 가운데)이다."""
 
     box: Element
     shape: Shape = field(compare=False, repr=False)
@@ -269,12 +270,12 @@ class PlacedBox:
     inner: Optional[T.Box] = None
     frame: tuple[Segment, ...] = ()
     name_at: tuple[tuple[float, float], ...] = ()  # 모양 밖 이름 줄마다 가운데
-    parts: tuple[T.Box, ...] = ()
+    parts: tuple[Border, ...] = ()
     anchor: Optional[Point] = None
 
     def __post_init__(self):
         if not self.parts:
-            object.__setattr__(self, "parts", (self.rect,))
+            object.__setattr__(self, "parts", (RectBorder(self.rect),))
         if self.anchor is None:
             object.__setattr__(self, "anchor", self.border.center())
 
@@ -317,9 +318,16 @@ class PlacedRelation:
 
 @dataclass(frozen=True)
 class Layout:
+    """lines_of는 요소마다 품은 요소들(lineage)이다 — 자리 잡기가 이미 잰 것을 넘기고, 주지 않으면 여기서 잰다."""
+
     spec: Spec = field(compare=False, repr=False)
     boxes: tuple[PlacedBox, ...]
     relations: tuple[PlacedRelation, ...]
+    lines_of: Optional[Mapping[str, tuple[str, ...]]] = field(default=None, compare=False, repr=False)
+
+    def __post_init__(self):
+        if self.lines_of is None:
+            object.__setattr__(self, "lines_of", lineage({p.key: p.box.parent for p in self.boxes}))
 
     @cached_property
     def by_key(self) -> dict[str, PlacedBox]:
@@ -330,17 +338,15 @@ class Layout:
         """안에 다른 요소를 품은 요소의 열쇠."""
         return frozenset(p.box.parent for p in self.boxes if p.box.parent is not None)
 
-    @cached_property
-    def _lineage(self) -> dict[str, tuple[str, ...]]:
-        return lineage({p.key: p.box.parent for p in self.boxes})
-
     def ancestors(self, key: str) -> tuple[str, ...]:
         """key를 품은 요소들(바로 품은 것부터 바깥으로)."""
-        return self._lineage[key]
+        assert self.lines_of is not None
+        return self.lines_of[key]
 
     def holders(self, r: Relation) -> frozenset[str]:
         """관계의 끝 요소를 품은 요소들."""
-        return holders(self._lineage, r)
+        assert self.lines_of is not None
+        return holders(self.lines_of, r)
 
     def kind_of(self, r: Relation) -> RelationType:
         return self.spec.relations[r.kind]
@@ -801,16 +807,15 @@ def _outside_name(e: Element, w: float, h: float) -> tuple[float, float, Point, 
     return width, height, (sx, sy), (nx, ny, nx + tw, ny + th)
 
 
-def _place(spec: Spec, diagram: Diagram) -> tuple[PlacedBox, ...]:
+def _place(spec: Spec, diagram: Diagram, lines_of: Mapping[str, tuple[str, ...]]) -> tuple[PlacedBox, ...]:
     """요소 크기와 자리. 안의 요소부터 재서 바깥 요소가 안의 요소를 NEST_PAD 여백을 두고 덮도록 오른쪽·아래로 늘린다. 제 이름 칸이
     들어갈 크기는 모양(Shape.size)이 정한다."""
-    parent_of = {e.key: e.parent for e in diagram.boxes}
     children: dict[str, list[Element]] = {}
     for e in diagram.boxes:
         if e.parent is not None:
             children.setdefault(e.parent, []).append(e)
     done: dict[str, PlacedBox] = {}
-    for e in sorted(diagram.boxes, key=lambda e: len(ancestors(parent_of, e.key)), reverse=True):
+    for e in sorted(diagram.boxes, key=lambda e: len(lines_of[e.key]), reverse=True):
         shape = spec.shapes[e.kind]
         w, h = shape.size(e)
         offset: Point = (0.0, 0.0)
@@ -851,7 +856,8 @@ def layout(diagram: Diagram) -> Layout:
     맞닿았다, 끝 구간이 끝 모양보다 짧다 등) 모두 모아 InputError. 선 글자는 관계 순서대로 이름 → from 다중도 → to 다중도
     차례로 놓고, 앞서 놓은 글자를 뒤 글자가 피한다."""
     spec = diagram.spec
-    placed = _place(spec, diagram)
+    lines_of = lineage({e.key: e.parent for e in diagram.boxes})  # 품은 사이는 여기서 한 번 재서 검사(Layout)까지 넘긴다
+    placed = _place(spec, diagram, lines_of)
     by_key = {p.key: p for p in placed}
     problems: list[str] = []
     routes = []
@@ -871,7 +877,6 @@ def layout(diagram: Diagram) -> Layout:
             owner, n = f"{base}#{n}", n + 1
         used.add(owner)
         bare.append(PlacedRelation(r, owner, points, ()))
-    lines_of = lineage({p.key: p.box.parent for p in placed})  # 검사도 같은 함수(Layout.holders)로 본다
     sketch = Canvas()  # 선 끝 모양을 그림판과 똑같이 얻으려고 선만 한 번 그려 본다
     for p in bare:
         _draw_relation(sketch, p, spec.relations[p.relation.kind])
@@ -893,7 +898,7 @@ def layout(diagram: Diagram) -> Layout:
             if text:
                 labels.append(Label(role, (text,), *spots.pick((text,), multiplicity_spots(tip, toward), avoid)))
         out.append(replace(p, labels=tuple(labels)))
-    return Layout(spec, placed, tuple(out))
+    return Layout(spec, placed, tuple(out), lines_of)
 
 
 # ---------------------------------------------------------------- 그리기

@@ -19,8 +19,8 @@ from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
 from .boxdiagram import BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, Layout, NameZone, PlacedBox, PlacedRelation, Words, josa
 from .canvas import Line, Point, Polygon
-from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, crossings, distance, enters, grow, hits,
-                   inside, meets, outline, span, touches)
+from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
+                   grow, hits, inside, meets, outline, overlap, span, touches)
 from .report import Finding, fmt_num, fmt_rect, round1
 from .report import Report as _Report
 
@@ -334,14 +334,21 @@ def _owners(*groups: Iterable[_Relation]) -> tuple[str, ...]:
 
 
 def _box_overlaps(boxes: list[_Box], lay: Layout, w: Words) -> Iterator[Finding]:
-    """품고 품긴 사이(여러 겹 포함)가 아닌 두 요소가 겹치거나 BOX_CLEARANCE 안으로 붙었다. 자리(모양 밖 이름까지)를 이루는
-    사각형들(PlacedBox.parts — 패키지는 탭과 몸통)로 본다."""
+    """품고 품긴 사이(여러 겹 포함)가 아닌 두 요소가 겹치거나 BOX_CLEARANCE 안으로 붙었다. 그 요소를 이루는 테두리들(PlacedBox.parts
+    — 패키지는 탭과 몸통, 노드는 육각형, 그 밖은 자리 사각형)로 본다. 사각형끼리는 가로·세로 가운데 더 떨어진 쪽의 틈으로, 다른
+    모양이 끼면 테두리 사이 거리로 잰다."""
     fit = "글자와 안의 요소에" if lay.spec.extended else "글자에"
+
+    def apart(x: Border, y: Border) -> float:
+        if isinstance(x, RectBorder) and isinstance(y, RectBorder):
+            return axis_gap(x.rect, y.rect)
+        return border_gap(x, y)
+
     for i, a in enumerate(boxes):
         for b in boxes[i + 1:]:
             if a.name in lay.ancestors(b.name) or b.name in lay.ancestors(a.name):
                 continue
-            g, pa, pb = min(((axis_gap(pa, pb), pa, pb) for pa in a.placed.parts for pb in b.placed.parts),
+            g, pa, pb = min(((apart(pa, pb), pa.bounds, pb.bounds) for pa in a.placed.parts for pb in b.placed.parts),
                             key=operator.itemgetter(0))
             if g > BOX_CLEARANCE:
                 continue
@@ -373,7 +380,7 @@ def _inner_off_area(boxes: list[_Box], lay: Layout, w: Words) -> Iterator[Findin
         room = min(r[0] - area[0], r[1] - area[1], area[2] - r[2], area[3] - r[3])
         if room >= NEST_PAD - LINE_EPS:
             continue
-        if any(meets(r, z.rect) for z in p.zones):
+        if any(overlap(r, z.rect) for z in p.zones):  # 맞닿기만 한 것은 걸친 게 아니다(테두리에 붙은 것으로 알린다)
             what = f"안의 {w.noun}가 바깥 {w.noun}의 이름 칸에 걸친다"
         elif room < 0:
             what = f"안의 {w.noun}가 바깥 {w.noun}의 칸 밖으로 나간다"

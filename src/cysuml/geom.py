@@ -627,6 +627,19 @@ class EllipseBorder(Border):
         return self.polygon.gap(box)
 
 
+def border_gap(a: Border, b: Border) -> float:
+    """두 테두리 사이 거리. 겹치거나 닿으면 -1. 둘 다 사각형이면 gap과 같다."""
+    if isinstance(b, RectBorder):
+        return a.gap(b.rect)
+    if isinstance(a, RectBorder):
+        return b.gap(a.rect)
+    ea, eb = a.edges(), b.edges()
+    if meets(a.bounds, b.bounds) and (any(touches(s, t, 0.0) for s in ea for t in eb)
+                                      or any(b.holds(p) for p, _ in ea) or any(a.holds(p) for p, _ in eb)):
+        return -1
+    return min(distance(s, t, 0.0) for s in ea for t in eb)
+
+
 def _area(pts: tuple[Point, ...]) -> float:
     return sum(p[0] * q[1] - q[0] * p[1] for p, q in zip(pts, pts[1:] + pts[:1])) / 2
 
