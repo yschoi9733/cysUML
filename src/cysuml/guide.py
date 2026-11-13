@@ -83,7 +83,7 @@ OUTSIDE_PLACES = ("  모양 밖 이름이 있는 요소의 자리는 모양과 �
 
 
 def _aiming(spec: Spec) -> list[str]:
-    """선이 테두리 가운데가 아닌 점을 향하는 요소 종류(kind)."""
+    """선이 모양 가운데에서 비켜난 점을 향하는 요소 종류(kind)."""
     return [k for k, s in spec.shapes.items() if aims_off_center(s)]
 
 
@@ -97,8 +97,8 @@ def places_result(spec: Spec) -> str:
     lines = [PLACES_RESULT] + ([OUTSIDE_PLACES] if _outside(spec) else [])
     if kinds := _aiming(spec):
         named = "·".join(f'"{k}"' for k in kinds)
-        lines.append(f"  선이 테두리 가운데가 아닌 점을 향하는 요소(kind {named})는 그 뒤에 그 점을 \"향하는 점 x, y\"로 덧붙인다"
-                     "(꺾는 점을 그 점의 위아래나 옆에 줄 때 쓴다).")
+        lines.append(f"  선이 모양 가운데에서 비켜난 점을 향하는 요소(kind {named})는 그 뒤에 그 점을 \"향하는 점 x, y\"로 "
+                     "덧붙인다(꺾는 점을 그 점의 위아래나 옆에 줄 때 쓴다).")
     return "\n".join(lines)
 
 MEMBERS = """속성·연산은 한 줄 문자열(그대로 쓴다)이나 객체다. 속성 객체는 name(필수)·type·default·visibility(기본 "-")·static, \

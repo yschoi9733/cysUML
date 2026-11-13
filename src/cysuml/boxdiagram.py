@@ -109,6 +109,7 @@ class Shape:
     stereotyped: bool = True      # stereotype을 받는지
     holds: bool = False           # 안에 요소를 둘 수 있는지
     outside_name: bool = False    # 이름을 모양 밖에 쓰는지(쪽은 name_side)
+    aims_aside: bool = False      # 선이 모양 가운데에서 비켜난 점(anchor)을 향하는지 — 결과 글이 그 점을 덧붙인다
     default_width: float = 0      # width를 주지 않았을 때의 최소 폭
 
     def read(self, r: Reader, o: dict, path: str, kind: Optional[str]) -> Any:
@@ -133,8 +134,8 @@ class Shape:
 
     def anchor(self, e: Element, rect: T.Box) -> Optional[Point]:
         """선이 향하는 점 — 선 끝은 이 점에서 첫·마지막 꺾는 점(없으면 상대 요소의 이 점)으로 가는 선이 테두리와 만나는 곳이다.
-        테두리 안이어야 한다. None(기본)이면 테두리 가운데다. 고친 모양은 늘 점을 돌려준다 — 도구 설명과 결과 글은 고쳤는지만 보고
-        (aims_off_center) 그 모양의 향하는 점을 결과에 덧붙인다."""
+        테두리 안이어야 한다. None(기본)이면 테두리 가운데다. 가운데에서 비켜난 점을 돌려주는 모양은 aims_aside를 켠다 — 결과 글이
+        그 점을 덧붙이고 도구 설명이 그것을 알린다(aims_off_center)."""
         return None
 
     def name_zones(self, e: Element, rect: T.Box) -> tuple[NameZone, ...]:
@@ -156,8 +157,9 @@ class Shape:
 
 
 def aims_off_center(shape: Shape) -> bool:
-    """선이 테두리 가운데가 아닌 점을 향하는 모양인지(Shape.anchor를 고쳤는지). 도구 설명과 결과 글이 같은 판정을 쓴다."""
-    return type(shape).anchor is not Shape.anchor
+    """선이 모양 가운데에서 비켜난 점을 향하는 모양인지(aims_aside). 도구 설명과 결과 글이 같은 판정을 쓴다. anchor를 고쳤어도
+    가운데를 정수로 내린 점처럼 사실상 가운데면 아니다."""
+    return shape.aims_aside
 
 
 @dataclass(frozen=True)

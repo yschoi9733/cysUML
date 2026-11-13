@@ -49,6 +49,7 @@ class PackageShape(_HeadShape):
     가운데를 향한다. 탭 오른쪽 빈 곳은 패키지가 아니다."""
 
     holds = True
+    aims_aside = True
 
     def _tab(self, e: Element) -> Head:
         """(탭 머리 칸 줄, 탭 폭, 탭 높이)."""
