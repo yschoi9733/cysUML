@@ -155,7 +155,7 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     pairs = ", ".join(f"{t.label}끼리" for t in trunks)  # 클래스도·패키지도는 "상속끼리, 실체화끼리", 유즈케이스도는 "일반화끼리"
     for phrase in (f"  - 공유 줄기: 같은 부모(to)로 가는 {pairs}는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 쓰게 "
                    "그려도 된다. 삼각형이 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다",
-                   "부모를 위에, 자식들을 그 아래 한 줄에 두고 이렇게 준다:",
+                   "부모를 위에, 자식들을 그 아래 한 줄에 두고", " 이렇게 준다:\n    - 가운데 x·y:",
                    f"    - 가운데 x·y: 결과의 {noun} 자리에서 왼 + 폭/2, 위 + 높이/2",
                    f"    - 줄기 높이 y는 부모 {noun}의 아래 {edge}",
                    f"자식 {noun}들의 위 {edge} 사이 가운데쯤에 정한다",
@@ -181,6 +181,7 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     outside = any(s.outside_name for s in spec.shapes.values())
     assert ("향하는 점이 덧붙어 있으면 그 점을 쓴다" in text) == aims == (name == "draw_package_diagram")
     assert ("모양 자리가 덧붙어 있으면 모양 자리로 셈한다" in text) == outside == (name == "draw_use_case_diagram")
+    assert ('모양 밖 이름은 name_side "left"·"right"로 옆에 쓴다 — 위·아래면 줄기가 이름을 지난다' in text) == outside
 
 
 def test_trunk_numbers_fit_together():
@@ -246,6 +247,7 @@ def test_shared_trunk_given_as_the_description_says_passes(tmp_path, name, field
     ("actor", {"name_side": "right"}, True),
     ("actor", {"name_side": "left"}, True),
     ("actor", {}, False),  # 이름이 아래(기본)면 자식 줄기가 부모 이름을 지난다 — 배치 요령이 이름을 옆에 두라고 한다
+    ("actor", {"name_side": "top"}, False),  # 위면 자식 제 이름을 지난다 — 설명이 이름을 옆에 쓰라고 한다
     ("use_case", {}, True),
 ])
 def test_use_case_trunk_given_as_the_description_says(tmp_path, kind, more, passes):
