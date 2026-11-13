@@ -8,7 +8,7 @@ from cysuml import geom as G
 from cysuml import guide
 from cysuml import statediagram as S
 from cysuml.canvas import Ellipse, Line, Polygon, Text
-from cysuml.flowshapes import ACTION_LEFT, DIAMOND_SIZE, FINAL, FINAL_CORE, START, STATE_RADIUS, rounded
+from cysuml.flowshapes import DIAMOND_SIZE, FINAL, FINAL_CORE, START, STATE_RADIUS, STATE_ROW_LEFT, rounded
 from cysuml.parsing import InputError
 
 
@@ -172,18 +172,21 @@ def test_children_go_under_the_name_zone_as_the_description_says():
     assert kinds(report([outer, el("state", "안", left=20, top=59, **{"in": "밖"})])) == ["inner_off_area"]
 
 
-def test_lines_under_the_name_and_under_the_zone_are_drawn_only_when_something_is_below():
+def test_only_the_actions_get_a_line_above_them():
+    # 이름과 동작 칸 사이에만 선을 긋는다. 이름 칸 아래(복합 상태의 안)에는 긋지 않으므로 height를 준 단순 상태도 빈 복합 상태처럼
+    # 보이지 않는다
     d = draw([el("state", "단순"), el("state", "동작", left=200, actions=["do / 일"]),
-              el("state", "복합", left=0, top=200), el("state", "안", left=20, top=260, **{"in": "복합"})])
-    assert owned(d, "단순", Line) == []
+              el("state", "복합", left=0, top=200), el("state", "안", left=20, top=260, **{"in": "복합"}),
+              el("state", "높이", left=400, height=80), el("state", "낮게", left=600, height=43)])
     act = placed(d, "동작")
     (line,) = owned(d, "동작", Line)
     assert line.points == ((act.rect[0], 40), (act.rect[2], 40))
     (row,) = [t for t in owned(d, "동작", Text) if t.text == "do / 일"]
-    assert row.x == act.rect[0] + ACTION_LEFT
-    comp = placed(d, "복합")
-    (line,) = owned(d, "복합", Line)
-    assert line.points == ((comp.rect[0], 240), (comp.rect[2], 240))
+    assert row.x == act.rect[0] + STATE_ROW_LEFT
+    for key in ("단순", "복합", "높이", "낮게"):
+        assert owned(d, key, Line) == [], key
+    (name,) = owned(d, "높이", Text)
+    assert name.y == 20  # 이름은 늘 위쪽 이름 띠 가운데
 
 
 def test_start_final_and_choice_are_drawn_as_their_shapes():
@@ -229,11 +232,22 @@ def test_two_diamonds_whose_boxes_overlap_but_not_their_shapes_pass():
     ([el("state", "A"), el("initial", id="s", left=200, **{"in": "s"})], [], "elements[1].in: 제 자신 안에"),
     ([el("choice", id="c"), el("state", "A", left=200, **{"in": "c"})], [], "안에 요소를 둘 수 없다 — 안에 요소를 두는 종류: 'state'"),
     ([el("state", "A")], [tr("A", "A", via=[[200, 0]])], "꺾는 점(via)이 둘 이상"),
+    ([el("initial", id="s"), el("state", "A", left=100)], [tr("A", "s")],
+     "relations[0].to: 시작 점('s')으로 들어오는 전이는 그릴 수 없다 — 시작 점은 from에만 쓴다"),
+    ([el("final", id="f"), el("state", "A", left=100)], [tr("f", "A")],
+     "relations[0].from: 끝 점('f')에서 나가는 전이는 그릴 수 없다 — 끝 점은 to에만 쓴다"),
 ])
 def test_wrong_input(elements, relations, expected):
     with pytest.raises(InputError) as e:
         draw(elements, relations)
     assert any(expected in p for p in e.value.problems), e.value.problems
+
+
+def test_start_and_end_rules_are_told_together_for_every_relation():
+    elements = [el("initial", id="s"), el("final", id="f", left=100), el("state", "A", left=200)]
+    with pytest.raises(InputError) as e:
+        draw(elements, [tr("s", "A"), tr("f", "s"), tr("A", "f")])
+    assert [p.split(":")[0] for p in e.value.problems] == ["relations[1].to", "relations[1].from"]
 
 
 # ---------------------------------------------------------------- 도구 설명

@@ -12,7 +12,7 @@ from .boxcheck import KINDS
 from .boxdiagram import ARROW_HEAD, ELEMENT_WORDS, LABEL_LINE, NEST_PAD, Diagram, Drawing, RelationType, Spec
 from .canvas import SCALE
 from .classdiagram import ROW, SECTION_PAD
-from .flowshapes import DIAMOND, DIAMOND_SIZE, FINAL, FINAL_POINT, NAME_BAND, START, START_POINT, STATE
+from .flowshapes import DIAMOND, DIAMOND_SIZE, FINAL, FINAL_POINT, NAME_BAND, START, START_POINT, STATE, parse_flow
 from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACES_RESULT, flow
 
 TRANSITION = RelationType("전이", end=ARROW_HEAD)
@@ -21,11 +21,11 @@ SPEC = Spec(SHAPES, {"transition": TRANSITION}, ELEMENT_WORDS, list_field="eleme
 
 
 def parse(data: Any) -> Diagram:
-    return B.parse(SPEC, data)
+    return parse_flow(SPEC, data)
 
 
 def render(data: Any, scale: float = SCALE) -> Drawing:
-    return B.render(SPEC, data, scale)
+    return B.draw(parse(data), scale)
 
 
 _ZONE = NAME_BAND + LABEL_LINE  # 이름 한 줄·동작 없는 상태의 이름 칸 높이
@@ -61,7 +61,7 @@ TOOL = f"""상태도를 그려 PNG 파일로 저장하고, 검사 결과와 그�
 줄·동작 없는 상태면 top + {_ZONE + NEST_PAD}부터).
 - relations: 전이 목록(없어도 된다).
   - kind: "transition". 관계 종류가 하나뿐이라 빼도 된다.
-  - from·to(필수): 요소 열쇠. 화살촉은 늘 to 쪽에 붙는다.
+  - from·to(필수): 요소 열쇠. 화살촉은 늘 to 쪽에 붙는다. 시작 점은 from에만, 끝 점은 to에만 쓴다.
   - name: 전이 글자. "사건 [조건] / 동작" 꼴을 받은 그대로 쓴다 — 대괄호·빗금도 쓴다(도구가 씌우지 않는다). 길면 줄마다 문자열인 \
 목록으로 나눈다. stereotype: "공용 입력(열쇠·이름)" 절.
   - via: 꺾는 점 [[x, y], …]. 선은 요소 가운데에서 첫 꺾는 점(없으면 상대 요소 가운데)으로 가는 선이 요소 테두리와 만나는 곳에서 \

@@ -12,7 +12,7 @@ from .boxcheck import KINDS as ALL_KINDS
 from .boxcheck import NESTED_KINDS
 from .boxdiagram import ARROW_HEAD, ELEMENT_WORDS, Diagram, Drawing, RelationType, Spec
 from .canvas import SCALE
-from .flowshapes import ACTION, DIAMOND, DIAMOND_SIZE, FINAL, FINAL_POINT, START, START_POINT
+from .flowshapes import ACTION, DIAMOND, DIAMOND_SIZE, FINAL, FINAL_POINT, START, START_POINT, parse_flow
 from .guide import COMMON_INPUT, IMAGE_RESULT, NEW_INPUT, PLACES_RESULT, flow
 
 FLOW = RelationType("흐름", end=ARROW_HEAD)
@@ -22,11 +22,11 @@ KINDS = tuple(k for k in ALL_KINDS if k not in NESTED_KINDS)  # 이 도구에서
 
 
 def parse(data: Any) -> Diagram:
-    return B.parse(SPEC, data)
+    return parse_flow(SPEC, data)
 
 
 def render(data: Any, scale: float = SCALE) -> Drawing:
-    return B.render(SPEC, data, scale)
+    return B.draw(parse(data), scale)
 
 
 TIPS = """액티비티도 배치 요령:
@@ -53,7 +53,7 @@ TOOL = f"""액티비티도를 그려 PNG 파일로 저장하고, 검사 결과�
 ({DIAMOND_SIZE}×{DIAMOND_SIZE}px)는 크기가 정해져 있다.
 - relations: 흐름 목록(없어도 된다).
   - kind: "flow". 관계 종류가 하나뿐이라 빼도 된다.
-  - from·to(필수): 요소 열쇠. 화살촉은 늘 to 쪽에 붙는다.
+  - from·to(필수): 요소 열쇠. 화살촉은 늘 to 쪽에 붙는다. 시작 점은 from에만, 끝 점은 to에만 쓴다.
   - name: 흐름 글자. 받은 그대로 쓴다 — 결정에서 나가는 흐름의 조건은 "[재고 있음]"처럼 대괄호까지 쓴다(도구가 씌우지 않는다). \
 길면 줄마다 문자열인 목록으로 나눈다. stereotype: "공용 입력(열쇠·이름)" 절.
   - via: 꺾는 점 [[x, y], …]. 선은 요소 가운데에서 첫 꺾는 점(없으면 상대 요소 가운데)으로 가는 선이 요소 테두리와 만나는 곳에서 \

@@ -1,20 +1,23 @@
 """상태도·액티비티도가 함께 쓰는 요소 모양: 시작 점, 끝 점(과녁), 마름모(선택·결정·합류), 둥근 모서리 상자(상태·행동).
 
 그림판에는 둥근 모서리 상자가 없다. 모서리 호를 짧은 선분으로 나눈 다각형으로 그리고, 같은 꼭짓점을 검사용 테두리로 넘긴다 —
-그린 것과 검사하는 테두리가 같다. 시작·끝 점과 마름모는 이름이 없어 관계·in이 id로 가리키고, 크기가 정해져 있다.
+그린 것과 검사하는 테두리가 같다. 시작·끝 점과 마름모는 이름이 없어 관계·in이 id로 가리키고, 크기가 정해져 있다. 두 그림의
+읽기(parse_flow)는 공용 엔진의 읽기에 시작·끝 점의 선 방향 규칙을 더한다.
 """
 from __future__ import annotations
 
 import math
-from typing import Optional
+from typing import Any, Optional
 
+from . import boxdiagram as B
 from . import text as T
-from .boxdiagram import LABEL_LINE, Element, NameZone, PlacedBox, Shape, line_ys
+from .boxdiagram import LABEL_LINE, Diagram, Element, NameZone, PlacedBox, Shape, Spec, josa, line_ys
 from .canvas import Canvas, Point
 from .classdiagram import MIN_WIDTH, NAME_PAD, ROW, SECTION_PAD
 from .geom import Border, EllipseBorder, PolygonBorder
-from .parsing import Reader
+from .parsing import InputError, Reader
 from .parsing import at as _at
+from .parsing import show as _show
 from .text import Box
 
 START = 20         # 시작 점 지름
@@ -25,11 +28,12 @@ ARC_STEPS = 6      # 둥근 모서리 호 하나를 나누는 선분 수
 STATE_RADIUS = 10  # 상태 모서리 반지름
 ACTION_RADIUS = 16  # 행동 모서리 반지름(상태보다 둥글다)
 NAME_BAND = 25     # 상태·행동 이름 칸에서 이름 줄 밖에 더하는 높이(위아래 반씩) — 이름 한 줄이면 40
-ACTION_LEFT = 8    # 상태 동작 줄의 왼쪽 여백(오른쪽도 같게 폭에 더한다) — 둥근 모서리에 글자가 닿지 않게
+STATE_ROW_LEFT = 8  # 상태 동작 칸 줄의 왼쪽 여백(오른쪽도 같게 폭에 더한다) — 둥근 모서리에 글자가 닿지 않게
 ACTION_SIDE = 20   # 행동 이름 좌우 여백(둥근 모서리에 글자가 닿지 않게)
 
-_QUARTER = tuple((math.cos(math.pi / 2 * i / ARC_STEPS), math.sin(math.pi / 2 * i / ARC_STEPS)) for i in range(ARC_STEPS + 1))
-_QUARTER = ((1.0, 0.0),) + _QUARTER[1:-1] + ((0.0, 1.0),)  # 호 끝은 곧은 변과 정확히 맞물리게
+# 4분원 위의 점(0°에서 90°까지). 호 끝은 곧은 변과 정확히 맞물리게 (1, 0)·(0, 1) 그대로 둔다
+_QUARTER = ((1.0, 0.0), *((math.cos(math.pi / 2 * i / ARC_STEPS), math.sin(math.pi / 2 * i / ARC_STEPS))
+                          for i in range(1, ARC_STEPS)), (0.0, 1.0))
 
 
 def rounded(rect: Box, radius: float) -> tuple[Point, ...]:
@@ -49,19 +53,24 @@ def rounded(rect: Box, radius: float) -> tuple[Point, ...]:
     return tuple(out) if out[0] != out[-1] else tuple(out[:-1])
 
 
-class _Fixed(Shape):
-    """이름이 없고 크기가 정해진 모양(시작·끝 점, 마름모). 겹침은 실제 테두리로 본다."""
+class _Solid(Shape):
+    """사각형이 아닌 모양. 요소끼리 겹치는지도 자리 사각형이 아니라 실제 테두리로 본다. 요소 스테레오타입은 받지 않는다."""
+
+    stereotyped = False
+
+    def parts(self, e: Element, rect: Box) -> tuple[Border, ...]:
+        return (self.border(e, rect),)
+
+
+class _Fixed(_Solid):
+    """이름이 없고 크기가 정해진 모양(시작·끝 점, 마름모)."""
 
     named = False
     sized = False
-    stereotyped = False
     SIZE = (0.0, 0.0)
 
     def size(self, e: Element) -> tuple[float, float]:
         return self.SIZE
-
-    def parts(self, e: Element, rect: Box) -> tuple[Border, ...]:
-        return (self.border(e, rect),)
 
 
 def _circle(rect: Box) -> EllipseBorder:
@@ -114,17 +123,13 @@ class DiamondShape(_Fixed):
         c.poly(self.corners(p.rect), owner=p.key)
 
 
-class _RoundedShape(Shape):
+class _RoundedShape(_Solid):
     """둥근 모서리 상자. 그린 다각형과 검사용 테두리가 같은 꼭짓점(rounded)이다."""
 
     RADIUS = 0.0
-    stereotyped = False
 
     def border(self, e: Element, rect: Box) -> Border:
         return PolygonBorder(rounded(rect, self.RADIUS))
-
-    def parts(self, e: Element, rect: Box) -> tuple[Border, ...]:
-        return (self.border(e, rect),)
 
     def outline(self, c: Canvas, p: PlacedBox) -> None:
         c.poly(rounded(p.rect, self.RADIUS), owner=p.key)
@@ -144,7 +149,8 @@ def _band(e: Element) -> float:
 class StateShape(_RoundedShape):
     """상태: 둥근 모서리 상자. 위쪽 이름 칸에 이름(굵게)을 쓰고, 동작 칸(actions)이 있으면 그 아래에 선을 긋고 받은 줄을 그대로
     쓴다. 안에 상태를 둘 수 있고(복합 상태), 안의 요소를 두는 칸은 이름 칸 아래다. 이름 칸은 이름 줄과 동작 칸을 함께 덮어, 그
-    상태 안의 요소를 잇는 선이 지나가거나 그 선의 글자가 겹치면 안 된다. 이름 칸 아래에 자리가 남으면(복합 상태) 경계에 선을 긋는다."""
+    상태 안의 요소를 잇는 선이 지나가거나 그 선의 글자가 겹치면 안 된다. 이름 칸과 안의 요소 사이에는 선을 긋지 않는다 — 모양은
+    안에 요소가 있는지 모르고(그리기는 요소 하나만 받는다), 자리 크기로 짐작하면 height를 준 단순 상태가 빈 복합 상태처럼 그려진다."""
 
     RADIUS = STATE_RADIUS
     holds = True
@@ -167,7 +173,7 @@ class StateShape(_RoundedShape):
 
     def size(self, e: Element) -> tuple[float, float]:
         widths = [T.text_width(s, True) + NAME_PAD for s in e.name] + [
-            T.text_width(s) + 2 * ACTION_LEFT for s in self._actions(e)]
+            T.text_width(s) + 2 * STATE_ROW_LEFT for s in self._actions(e)]
         return max(MIN_WIDTH, math.ceil(max(widths))), self.zone_height(e)
 
     def insets(self, e: Element) -> Box:
@@ -178,20 +184,17 @@ class StateShape(_RoundedShape):
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
         e, o = p.box, p.key
-        l, t, r, b = p.rect
+        l, t, r, _ = p.rect
         self.outline(c, p)
         band = _band(e)
         _centered(c, p, e.name, t, band, bold=True)
         acts = self._actions(e)
-        if acts:
+        if acts:  # 동작 칸이 있으면 자리는 이름 띠 아래로 SECTION_PAD + ROW 넘게 남아, 이 선은 모서리 호 밖에 닿지 않는다
             c.line([(l, t + band), (r, t + band)], owner=o)
             y = t + band + SECTION_PAD / 2 + ROW / 2
             for s in acts:
-                c.text(l + ACTION_LEFT, y, s, owner=o)
+                c.text(l + STATE_ROW_LEFT, y, s, owner=o)
                 y += ROW
-        bottom = t + self.zone_height(e)
-        if b - bottom > 1e-6:
-            c.line([(l, bottom), (r, bottom)], owner=o)
 
 
 class ActionShape(_RoundedShape):
@@ -213,3 +216,22 @@ FINAL_POINT = FinalShape()
 DIAMOND = DiamondShape()
 STATE = StateShape()
 ACTION = ActionShape()
+
+
+def parse_flow(spec: Spec, data: Any) -> Diagram:
+    """공용 엔진으로 읽고, 시작 점으로 들어오는 선과 끝 점에서 나가는 선도 입력 오류로 알린다 — 시작 점은 나가기만, 끝 점은
+    들어오기만 한다(from·to를 바꿔 쓴 입력이 합격한 그림으로 문서에 들어가지 않게)."""
+    diagram = B.parse(spec, data)
+    shape_of = {e.key: spec.shapes[e.kind] for e in diagram.boxes}
+    problems = []
+    for i, r in enumerate(diagram.relations):  # 읽기가 통과했으면 관계는 입력 차례 그대로 다 있다
+        path, label = _at("relations", i), spec.relations[r.kind].label
+        said = f"{label}{josa(label, '은', '는')}"
+        if shape_of[r.target] is START_POINT:
+            problems.append(f"{_at(path, 'to')}: 시작 점({_show(r.target)})으로 들어오는 {said} 그릴 수 없다 — 시작 점은 "
+                            "from에만 쓴다")
+        if shape_of[r.source] is FINAL_POINT:
+            problems.append(f"{_at(path, 'from')}: 끝 점({_show(r.source)})에서 나가는 {said} 그릴 수 없다 — 끝 점은 to에만 쓴다")
+    if problems:
+        raise InputError(problems)
+    return diagram

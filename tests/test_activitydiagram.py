@@ -112,6 +112,10 @@ def test_action_is_a_rounder_box_with_its_name_in_the_middle():
     ([el("action", "A", actions=["do / x"])], [], "elements[0].actions: 모르는 필드다"),
     ([el("action", "A"), el("action", "B", top=100)], [fl("A", "B", kind="transition")], "relations[0].kind: 'flow' 가운데"),
     ([el("action", "A"), el("action", "B", top=100)], [fl("A", "B", navigable="none")], "relations[0].navigable: 모르는 필드다"),
+    ([el("final", id="f"), el("initial", id="s", left=100)], [fl("f", "s")],
+     "relations[0].to: 시작 점('s')으로 들어오는 흐름은 그릴 수 없다"),
+    ([el("final", id="f"), el("initial", id="s", left=100)], [fl("f", "s")],
+     "relations[0].from: 끝 점('f')에서 나가는 흐름은 그릴 수 없다"),
 ])
 def test_wrong_input(elements, relations, expected):
     with pytest.raises(InputError) as e:
