@@ -157,7 +157,7 @@ def test_relation_fields_say_where_lines_start_for_each_tool():
     assert "선은 요소 가운데(요소 종류에 따로 적은 모양은 그 점)에서" in packagediagram.TOOL
     assert "탭 오른쪽 몸통의 가운데를 향한다" in packagediagram.TOOL
     # 패키지도도 모양 밖 이름이 있는 문서 아이콘 아티팩트를 받으므로 이름 쪽과 모양 자리 결과 문장을 넣는다(한 번씩)
-    for tool in (packagediagram.TOOL, componentdiagram.TOOL):
+    for tool in (packagediagram.TOOL, componentdiagram.TOOL, deploymentdiagram.TOOL):
         assert guide.PLACES_RESULT in tool and tool.count(guide.OUTSIDE_PLACES) == 1 and tool.count(guide.NAME_SIDE) == 1
 
 
