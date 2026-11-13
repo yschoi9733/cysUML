@@ -12,13 +12,12 @@ from typing import Any
 
 from . import boxdiagram as B
 from . import text as T
-from .boxcheck import KINDS
 from .boxdiagram import (ELEMENT_WORDS, LABEL_LINE, NEST_PAD, TRIANGLE_HEAD, Diagram, Drawing, Element, NameZone, PlacedBox,
                          RelationType, Shape, Spec, floored, line_ys)
 from .canvas import SCALE, Canvas, Point
 from .classdiagram import RELATIONS as CLASS_RELATIONS
 from .geom import Border, EllipseBorder
-from .guide import (COMMON_INPUT, IMAGE_RESULT, NAME_SIDE, NESTING, NEW_INPUT, flow, places_result, relation_fields)
+from .guide import NAME_SIDE, box_tool, relation_fields, spacing_tips
 from .sequencediagram import ACTOR_FIGURE, draw_actor
 from .text import Box
 
@@ -170,7 +169,7 @@ ELEMENTS = f"""- elements: 요소 목록(하나 이상).
 이름 한 줄이면 {_ONE_LINE}px, 줄이 하나 늘 때마다 {LABEL_LINE}px씩 더 아래다(그래서 안의 유즈케이스는 이름 한 줄이면 \
 top + {_ONE_LINE + NEST_PAD}부터 둔다)."""
 
-TIPS = """유즈케이스도 배치 요령:
+TIPS = f"""유즈케이스도 배치 요령:
 - 시스템 경계 안에 유즈케이스를 세로로 늘어놓는다. 포함(«include»)·확장(«extend»)으로 이어지는 유즈케이스는 그 옆에 둔다.
 - 액터는 시스템 경계의 왼쪽과 오른쪽 밖에 두고, 이름은 왼쪽 액터면 왼쪽("left"), 오른쪽 액터면 오른쪽("right")에 쓴다\
 (name_side). 이름을 아래(기본)에 두면 아래쪽 유즈케이스로 가는 연관선과, 아래 자식 액터에서 올라오는 일반화 선이 이름을 \
@@ -178,28 +177,10 @@ TIPS = """유즈케이스도 배치 요령:
 - 액터끼리 일반화는 부모 액터를 위에, 자식 액터를 그 아래에 둔다. 유즈케이스끼리 일반화도 부모를 위에 둔다.
 - «include»는 기본 유즈케이스에서 포함되는 유즈케이스로, «extend»는 확장하는 유즈케이스에서 기본 유즈케이스로 긋는다 — 둘 다 \
 kind "dependency"에 stereotype을 단다.
-- 요소 사이는 관계 이름·스테레오타입 글자가 들어갈 만큼 띄운다. 가로 80px·세로 60px쯤에서 시작하고, 글자가 길면 더 띄운다.
-- 요소 크기는 도구가 글자와 안의 요소에 맞춰 늘린다. 그린 크기는 결과의 "요소 자리"에서 보고 다음 배치에 쓴다."""
+{spacing_tips(SPEC, "관계 이름·스테레오타입")}"""
 
-TOOL = f"""유즈케이스도를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 액터·유즈케이스·시스템 경계를 그리고, 그 \
+INTRO = """유즈케이스도를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 액터·유즈케이스·시스템 경계를 그리고, 그 \
 사이를 연관·의존(«include»·«extend»)·일반화로 잇는다. 요소는 준 왼쪽 위(left·top) 그대로, 관계선은 준 꺾는 점(via)을 따라 \
-그리고, 요소 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다.
+그리고, 요소 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다."""
 
-입력
-{ELEMENTS}
-{relation_fields(SPEC)}
-{COMMON_INPUT}
-
-{NEW_INPUT}
-
-{NESTING}
-
-결과
-{places_result(SPEC)}
-{IMAGE_RESULT}
-- elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
-그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.
-
-{flow(KINDS, SPEC.words)}
-
-{TIPS}"""
+TOOL = box_tool(INTRO, SPEC, f"{ELEMENTS}\n{relation_fields(SPEC)}", TIPS)

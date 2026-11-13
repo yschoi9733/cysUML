@@ -2,7 +2,8 @@
 
 도구는 그린 PNG를 파일로 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이 너무 커서 PNG로 못
 그리거나, 저장할 폴더에 쓸 수 없으면 저장하지 않고 오류 결과(isError)로 돌려준다 — AI가 읽고 고칠 수 있게 예외 대신 결과로 낸다.
-새 그림의 도구 설명은 그 그림 모듈이 guide의 공용 조각으로 만든다(처음부터 있던 두 도구의 설명은 여기 있다).
+새 그림의 도구 설명은 그 그림 모듈이 guide의 공용 조각으로 만든다(처음부터 있던 두 도구의 설명은 여기 있다). 상자 그림(공용 엔진
+boxdiagram이 그리는 그림) 도구는 _box_tool 하나로 등록한다.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import threading
 import unicodedata
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from types import ModuleType
 from typing import Annotated, Any, Callable, Optional, TypeVar
 
 from mcp.server.mcpserver import MCPServer
@@ -25,7 +27,8 @@ from pydantic import Field, WithJsonSchema
 from . import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, componentdiagram, deploymentdiagram,
                packagediagram, sequencecheck, sequencediagram, statediagram, usecasediagram)
 from .canvas import MIN_SCALE, SCALE
-from .guide import COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, MAX_IMAGE_EDGE, MEMBERS, flow, relation_fields
+from .guide import (COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, MAX_IMAGE_EDGE, MEMBERS, flow, relation_fields,
+                    spacing_tips)
 from .parsing import InputError
 from .report import Report, fmt_num, fmt_rect
 from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
@@ -33,12 +36,11 @@ from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPAN
 MAX_NAME_BYTES = 200  # 파일 이름(확장자 빼고) UTF-8 길이 상한. 파일 시스템 한도는 보통 255바이트
 NAME_FORBIDDEN = set('/\\:*?"<>|')
 
-CLASS_TIPS = """클래스도 배치 요령:
+CLASS_TIPS = f"""클래스도 배치 요령:
 - 연결이 가장 많은 클래스를 가운데에 둔다.
 - 상속·실체화는 부모를 위에, 자식들을 그 아래 한 줄에 둔다.
 - 엇갈림이나 불합격이 나오면 먼저 상자 순서와 자리를 바꾸고, 그래도 안 되면 꺾는 점(via)을 준다.
-- 상자 사이는 관계 이름·다중도 글자가 들어갈 만큼 띄운다. 가로 80px·세로 60px쯤에서 시작하고, 글자가 길면 더 띄운다.
-- 상자 크기는 도구가 글자에 맞춰 늘린다(폭은 90px 이상). 그린 크기는 결과의 "상자 자리"에서 보고 다음 배치에 쓴다."""
+{spacing_tips(classdiagram.SPEC, "관계 이름·다중도", f"(폭은 {classdiagram.MIN_WIDTH}px 이상)")}"""
 
 # 교류도 배치 버그를 비켜 가는 법
 SEQUENCE_WAY_AROUND = "참여자 순서나 메시지 차례, 프레임이 덮는 범위(first·last·칸·before)를 바꾸거나, 글자를 줄이거나, 그림을 나눈다"
@@ -270,7 +272,14 @@ def _listed(description: str, item: str = "object") -> WithJsonSchema:
     return WithJsonSchema({"type": "array", "items": {"type": item}, "description": description})
 
 
+def _relations(word: str) -> Any:
+    """relations 인자 타입 — word는 그 도구가 관계를 부르는 말(관계·전이·흐름)."""
+    return Annotated[Any, _listed(f"{word} 목록. 필드는 도구 설명에 있다.")]
+
+
 FileName = Annotated[str, Field(description="저장할 파일 이름(확장자 없이). 같은 이름이면 덮어쓴다.")]
+Elements = Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")]
+Relations = _relations("관계")
 OutDir = Annotated[Optional[str], Field(description=f"저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/.")]
 Scale = Annotated[float, Field(ge=MIN_SCALE, allow_inf_nan=False, description=f"출력 배율(기본 {SCALE:g}). 보통은 주지 않는다.")]
 
@@ -279,7 +288,7 @@ Scale = Annotated[float, Field(ge=MIN_SCALE, allow_inf_nan=False, description=f"
 def draw_class_diagram(
         file_name: FileName,
         classes: Annotated[Any, _listed("상자 목록(하나 이상). 필드는 도구 설명에 있다.")],
-        relations: Annotated[Any, _listed("관계 목록. 필드는 도구 설명에 있다.")] = None,
+        relations: Relations = None,
         out_dir: OutDir = None,
         scale: Scale = SCALE,
 ) -> CallToolResult:
@@ -287,76 +296,27 @@ def draw_class_diagram(
     return _draw(file_name, lambda: classdiagram.render(data, scale), classcheck.check, out_dir, _places)
 
 
-@mcp.tool(name="draw_package_diagram", description=packagediagram.TOOL)
-def draw_package_diagram(
-        file_name: FileName,
-        elements: Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")],
-        relations: Annotated[Any, _listed("관계 목록. 필드는 도구 설명에 있다.")] = None,
-        out_dir: OutDir = None,
-        scale: Scale = SCALE,
-) -> CallToolResult:
-    data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
-    return _draw(file_name, lambda: packagediagram.render(data, scale), boxcheck.check, out_dir, _places)
+def _box_tool(name: str, diagram: ModuleType, word: str = "관계") -> None:
+    """상자 그림 도구 하나를 등록한다. 그림 모듈(diagram)의 render·TOOL을 쓰고, 인자는 file_name·elements·relations·out_dir·
+    scale이다. word는 relations 인자 설명에 쓰는 말(관계·전이·흐름)이다."""
+    def tool(file_name, elements, relations=None, out_dir=None, scale=SCALE):
+        data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
+        return _draw(file_name, lambda: diagram.render(data, scale), boxcheck.check, out_dir, _places)
+
+    # SDK는 함수 이름으로 입력 스키마 이름(<이름>Arguments)을 짓고, 글자로 남은 주석을 그 함수의 모듈에서 풀어 relations 설명을
+    # 바꿀 수 없다 — 이름은 도구 이름으로, 주석은 글자가 아닌 타입으로 준다
+    tool.__name__ = tool.__qualname__ = name
+    tool.__annotations__ = {"file_name": FileName, "elements": Elements, "relations": _relations(word), "out_dir": OutDir,
+                            "scale": Scale, "return": CallToolResult}
+    mcp.add_tool(tool, name=name, description=diagram.TOOL)
 
 
-@mcp.tool(name="draw_component_diagram", description=componentdiagram.TOOL)
-def draw_component_diagram(
-        file_name: FileName,
-        elements: Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")],
-        relations: Annotated[Any, _listed("관계 목록. 필드는 도구 설명에 있다.")] = None,
-        out_dir: OutDir = None,
-        scale: Scale = SCALE,
-) -> CallToolResult:
-    data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
-    return _draw(file_name, lambda: componentdiagram.render(data, scale), boxcheck.check, out_dir, _places)
-
-
-@mcp.tool(name="draw_deployment_diagram", description=deploymentdiagram.TOOL)
-def draw_deployment_diagram(
-        file_name: FileName,
-        elements: Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")],
-        relations: Annotated[Any, _listed("관계 목록. 필드는 도구 설명에 있다.")] = None,
-        out_dir: OutDir = None,
-        scale: Scale = SCALE,
-) -> CallToolResult:
-    data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
-    return _draw(file_name, lambda: deploymentdiagram.render(data, scale), boxcheck.check, out_dir, _places)
-
-
-@mcp.tool(name="draw_use_case_diagram", description=usecasediagram.TOOL)
-def draw_use_case_diagram(
-        file_name: FileName,
-        elements: Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")],
-        relations: Annotated[Any, _listed("관계 목록. 필드는 도구 설명에 있다.")] = None,
-        out_dir: OutDir = None,
-        scale: Scale = SCALE,
-) -> CallToolResult:
-    data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
-    return _draw(file_name, lambda: usecasediagram.render(data, scale), boxcheck.check, out_dir, _places)
-
-
-@mcp.tool(name="draw_state_diagram", description=statediagram.TOOL)
-def draw_state_diagram(
-        file_name: FileName,
-        elements: Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")],
-        relations: Annotated[Any, _listed("전이 목록. 필드는 도구 설명에 있다.")] = None,
-        out_dir: OutDir = None,
-        scale: Scale = SCALE,
-) -> CallToolResult:
-    data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
-    return _draw(file_name, lambda: statediagram.render(data, scale), boxcheck.check, out_dir, _places)
-
-
-@mcp.tool(name="draw_activity_diagram", description=activitydiagram.TOOL)
-def draw_activity_diagram(
-        file_name: FileName,
-        elements: Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")],
-        relations: Annotated[Any, _listed("흐름 목록. 필드는 도구 설명에 있다.")] = None,
-        out_dir: OutDir = None,
-        scale: Scale = SCALE,
-) -> CallToolResult:
-    data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
-    return _draw(file_name, lambda: activitydiagram.render(data, scale), boxcheck.check, out_dir, _places)
+_box_tool("draw_package_diagram", packagediagram)
+_box_tool("draw_component_diagram", componentdiagram)
+_box_tool("draw_deployment_diagram", deploymentdiagram)
+_box_tool("draw_use_case_diagram", usecasediagram)
+_box_tool("draw_state_diagram", statediagram, "전이")
+_box_tool("draw_activity_diagram", activitydiagram, "흐름")
 
 
 @mcp.tool(name="draw_sequence_diagram", description=SEQUENCE_TOOL)

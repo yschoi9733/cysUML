@@ -8,6 +8,8 @@
 - NESTING(마): 요소 안에 요소 두기.
 - NAME_SIDE(바): 모양 밖 이름의 쪽.
 - places_result(사): 새 도구의 결과 글 설명. 그 도구의 모양에 따라 자리 뒤에 덧붙는 것(모양 자리·선이 향하는 점)도 적는다.
+- spacing_tips(아): AI가 배치하는 그림의 배치 요령 끝 두 항목(요소 사이 띄우기·요소 크기).
+- box_tool(자): 상자 그림(공용 엔진 boxdiagram이 그리는 그림) 도구 설명 전체. 그림 모듈은 제 소개·입력·표기·요령만 넘긴다.
 """
 from __future__ import annotations
 
@@ -90,6 +92,11 @@ def _aiming(spec: Spec) -> list[str]:
 
 def _outside(spec: Spec) -> bool:
     return any(s.outside_name for s in spec.shapes.values())
+
+
+def _holds(spec: Spec) -> bool:
+    """안에 요소를 두는 모양이 있는지 — 없으면 in을 받을 곳이 없다."""
+    return any(s.holds for s in spec.shapes.values())
 
 
 def places_result(spec: Spec) -> str:
@@ -243,3 +250,32 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
                   f"    - 두 줄기를 둘 때는 y2가 자식 {noun}들의 위 {edge}보다 {TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
                   f"{TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다."]
     return "\n".join(lines)
+
+
+def spacing_tips(spec: Spec, label: str, size_note: str = "") -> str:
+    """(아) 배치 요령 끝 두 항목. label은 선 글자 이름("관계 이름·스테레오타입"·"전이" 등), size_note는 크기 문장에 붙이는
+    괄호 말이다. 안에 요소를 두는 모양이 있는 도구면 크기가 안의 요소에도 맞춰 늘어난다고 적는다. noun(요소·상자)은 받침이 없어
+    조사가 그대로 맞는다(Words가 막는다)."""
+    noun = spec.words.noun
+    inner = f"와 안의 {noun}" if _holds(spec) else ""
+    return (f"- {noun} 사이는 {label} 글자가 들어갈 만큼 띄운다. 가로 80px·세로 60px쯤에서 시작하고, 글자가 길면 더 띄운다.\n"
+            f"- {noun} 크기는 도구가 글자{inner}에 맞춰 늘린다{size_note}. 그린 크기는 결과의 \"{noun} 자리\"에서 보고 다음 입력에 쓴다.")
+
+
+def box_tool(intro: str, spec: Spec, inputs: str, tips: str, kinds: Iterable[str] = KINDS, notation: str = "",
+             errors: str = "") -> str:
+    """(자) 상자 그림 도구 설명. 그림 모듈은 제 소개(intro), 공용 조각 밖의 입력 항목(inputs — elements·relations 등), 표기
+    절(notation), 결과 절의 오류 문장 뒤에 더할 오류(errors), 날 수 있는 불합격 종류(kinds), 배치 요령(tips)을 넘기고, 공용
+    입력·결과·그리는 흐름은 여기서 채운다. 중첩 절은 안에 요소를 두는 모양이 있는 도구에만 넣는다."""
+    field = spec.list_field
+    parts = [intro, f"입력\n{inputs}\n{COMMON_INPUT}", NEW_INPUT]
+    if _holds(spec):
+        parts.append(NESTING)
+    if notation:
+        parts.append(notation)
+    more = f"{errors} " if errors else ""
+    parts += [f"결과\n{places_result(spec)}\n{IMAGE_RESULT}\n- {field}·relations·file_name이 틀리면 그리지 않고 틀린 곳을 "
+              f"{field}[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. {more}그림이 너무 커서 PNG로 그릴 수 없거나 저장할 "
+              "폴더에 쓸 수 없을 때도 오류로 돌려준다.",
+              flow(kinds, spec.words), tips]
+    return "\n\n".join(parts)

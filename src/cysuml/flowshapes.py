@@ -249,3 +249,10 @@ def parse_flow(spec: Spec, data: Any) -> Diagram:
     if problems:
         raise InputError(problems)
     return diagram
+
+
+def ends_errors(spec: Spec) -> str:
+    """parse_flow가 따로 모아 알리는 오류를 도구 설명 결과 절에 적는 문장. 두 그림 모두 관계 종류가 하나(전이·흐름)다."""
+    (relation,) = spec.relations.values()
+    said = f"{relation.label}{josa(relation.label, '은', '는')}"
+    return f"시작 점으로 들어오거나 끝 점에서 나가는 {said} 그 밖의 입력이 맞을 때 따로 모아 알린다."
