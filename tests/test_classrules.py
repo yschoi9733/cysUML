@@ -249,6 +249,29 @@ def test_realization_made_by_a_ball_or_a_package_has_a_notice(source, target, pr
     assert n.problem == problem
 
 
+@pytest.mark.parametrize("source", ["artifact", "node", "enum", "component"])
+def test_only_classes_realize_components_quietly(source):
+    # 아티팩트는 «manifest» 의존으로 컴포넌트를 구현한다 — 클래스·추상 클래스 밖의 실체화는 알리고, 그 상속 오류도 실체화를 권하지 않는다
+    elements = [el(source, "a", 0, 250), el("component", "c", 0)]
+    (n,) = report(P, elements, [rel("realization", "a", "c")]).notices
+    assert n.problem == "실체화가 가는 요소 'c'는 인터페이스가 아니다(kind 'component')."
+    if source != "component":
+        (p,) = problems(P, elements, [rel("generalization", "a", "c")])
+        assert p.endswith("from·to나 요소의 kind를 고친다")
+    assert report(P, [el("abstract", "a", 0, 250), el("component", "c", 0)], [rel("realization", "a", "c")]).notices == ()
+
+
+def test_inheritance_hint_is_left_out_when_inheriting_would_close_a_cycle():
+    # B가 이미 A를 상속하는데 A -> B 실체화를 상속으로 바꾸면 고리 오류가 난다 — 그 말 대신 실체화를 지우라고 한다
+    (n,) = class_report([box("A", 0), box("B", 300)], [rel("generalization", "B", "A"),
+                                                        rel("realization", "A", "B", via=[[45, -60], [345, -60]])]).notices
+    assert n.hint == ("'B'가 이미 'A'를 상속해 generalization으로 바꾸면 고리가 된다 — 인터페이스를 구현하는 것이면 to를 "
+                      "인터페이스로 고치고, 아니면 이 실체화를 지운다.")
+    (n,) = class_report([box("I", 0, kind="interface"), box("J", 300, kind="interface")],
+                        [rel("generalization", "J", "I"), rel("realization", "I", "J", via=[[45, -60], [345, -60]])]).notices
+    assert n.hint == "'J'가 이미 'I'를 상속해 generalization으로 바꾸면 고리가 된다 — 이 실체화를 지운다."
+
+
 def test_realization_hint_in_tools_with_components_names_component_realization():
     r = report(D, [el("class", "Impl", 0, 250), el("node", "x", 0)], [rel("realization", "Impl", "x")])
     (n,) = r.notices
@@ -329,8 +352,12 @@ def test_tool_descriptions_state_the_rules_of_the_kinds_the_tool_takes():
     assert ('"interface"끼리, "enum"끼리, "component"끼리, "artifact"끼리, "node"끼리). "package"는 상속의 끝이 될 수 없다.'
             in P.TOOL)
     assert '"package"·"lollipop"는 상속의 끝이 될 수 없다.' in CD.TOOL
-    assert '실체화가 "interface"·"lollipop"·"component"가 아닌 요소로 가거나 "interface"·"lollipop"·"package"가 실체화하면' in CD.TOOL
-    assert '실체화가 "interface"·"component"가 아닌 요소로 가거나 "interface"·"package"가 실체화하면' in D.TOOL
+    assert ('실체화가 "interface"·"lollipop"가 아닌 요소로 가거나(클래스가 "component"로 가는 것은 빼고) '
+            '"interface"·"lollipop"·"package"가 실체화하면') in CD.TOOL
+    assert ('실체화가 "interface"가 아닌 요소로 가거나(클래스가 "component"로 가는 것은 빼고) "interface"·"package"가 '
+            "실체화하면") in D.TOOL
+    # 흐름 안내(서버 안내문·도구 설명)도 표기 규칙 알림이 불합격이 아니라고 적는다
+    assert "표기 규칙 알림(관계 규칙이 있는 도구에서 뜻을 확인해 볼 관계)" in server.INSTRUCTIONS
     # 유즈케이스도의 일반화는 클래스도 관계가 아니라 이 규칙을 적지 않는다
     assert "  - 규칙:" not in usecasediagram.TOOL
 

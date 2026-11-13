@@ -202,7 +202,7 @@ class Rules:
     def check(self, r: Reader, spec: Spec, elements: list[tuple[str, Element]],
               relations: list[tuple[str, Relation]]) -> list[Notice]:
         """읽힌 요소와 관계를 (입력 안의 자리, 값)으로 받아 짜임을 본다. 다른 곳이 틀려 읽히지 않은 요소는 elements에 없으니, 끝 요소를
-        찾지 못한 관계는 건너뛴다(그 문제는 이미 알렸다). 자기 자신으로 가는 관계도 relations에 든다."""
+        찾지 못한 관계는 건너뛴다(그 문제는 이미 알렸다). 자기 자신으로 가는 관계는 self_loop이 막지 않은 것만 relations에 든다."""
         return []
 
     def guide(self, spec: Spec) -> str:
