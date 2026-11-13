@@ -1,6 +1,7 @@
 """클래스도 관계 여섯 가지의 표기 규칙(classdiagram.RULES): 상속은 같은 종류끼리, 고리·자기 자신 금지, 인터페이스가 아닌 것으로
 가는 실체화는 알림. 이 관계를 받는 패키지도·컴포넌트도·배치도(deployment diagram)도 같은 규칙을 쓴다."""
 import json
+import re
 
 import anyio
 import pytest
@@ -276,6 +277,13 @@ def test_inheritance_hint_is_left_out_when_inheriting_would_close_a_cycle():
     assert n.hint == "to('J')가 이미 from('I')을 상속해 generalization으로 바꾸면 고리가 된다 — 이 실체화를 지운다."
 
 
+def test_inheritance_hint_is_left_out_when_the_same_inheritance_already_exists():
+    # 같은 from·to의 상속이 이미 있으면 실체화를 상속으로 바꾸라고 하지 않는다(두 선이 겹쳐 그려진다)
+    (n,) = class_report([box("A", 0), box("B", 300)], [rel("generalization", "A", "B"),
+                                                        rel("realization", "A", "B", via=[[45, -60], [345, -60]])]).notices
+    assert n.hint.startswith("같은 from·to의 generalization이 이미 있다 — ") and n.hint.endswith("이 실체화를 지운다.")
+
+
 def test_realization_hint_in_tools_with_components_names_component_realization():
     r = report(D, [el("class", "Impl", 0, 250), el("node", "x", 0)], [rel("realization", "Impl", "x")])
     (n,) = r.notices
@@ -357,15 +365,19 @@ def test_self_inheritance_names_the_element_word_of_the_tool():
 def test_tool_descriptions_state_the_rules_of_the_kinds_the_tool_takes():
     assert ('  - 규칙: 상속은 같은 종류끼리 긋는다("class"·"abstract"끼리, "interface"끼리, "enum"끼리). 클래스가 '
             "인터페이스를 구현하는 것은 realization이다.") in server.CLASS_TOOL
-    assert ('  - 알림: 실체화가 "interface"가 아닌 상자로 가거나 "interface"가 실체화하면 그리되 검사 결과에 알림을 준다'
-            in server.CLASS_TOOL)
-    assert ('"interface"끼리, "enum"끼리, "component"끼리, "artifact"끼리, "node"끼리). "package"는 상속의 끝이 될 수 없다.'
-            in P.TOOL)
-    assert '"package"·"lollipop"는 상속의 끝이 될 수 없다.' in CD.TOOL
-    assert ('실체화가 "interface"·"lollipop"가 아닌 요소로 가거나(클래스가 "component"로 가는 것은 빼고) '
-            '"interface"·"lollipop"·"package"가 실체화하면') in CD.TOOL
-    assert ('실체화가 "interface"가 아닌 요소로 가거나(클래스가 "component"로 가는 것은 빼고) "interface"·"package"가 '
-            "실체화하면") in D.TOOL
+    assert ('  - 알림: 다음 실체화는 그리되 검사 결과에 알림을 준다(불합격이 아니다) — from이 "interface"인 것, to가 '
+            '"interface" 밖의 종류인 것. ') in server.CLASS_TOOL
+    assert ('"interface"끼리, "enum"끼리, "component"끼리, "artifact"끼리, "node"끼리). 상속의 끝이 될 수 없는 종류: '
+            '"package".') in P.TOOL
+    assert '상속의 끝이 될 수 없는 종류: "package"·"lollipop".' in CD.TOOL
+    assert ('from이 "interface"·"lollipop"·"package" 가운데 하나인 것, to가 "interface"·"lollipop" 밖의 종류인 것(to가 '
+            '"component"이고 from이 "class"·"abstract"인 것은 빼고).') in CD.TOOL
+    assert ('from이 "interface"·"package" 가운데 하나인 것, to가 "interface" 밖의 종류인 것(to가 "component"이고 from이 '
+            '"class"·"abstract"인 것은 빼고).') in D.TOOL
+    # 따옴표 친 종류 이름 바로 뒤에 받침에 따라 갈리는 조사를 붙이지 않는다("lollipop"는은 틀린다 — 이고·인 같은 서술은 괜찮다)
+    for tool in (server.CLASS_TOOL, P.TOOL, CD.TOOL, D.TOOL):
+        rules = "\n".join(line for line in tool.splitlines() if line.startswith(("  - 규칙:", "  - 알림:")))
+        assert not re.search(r'"(?:[은는가을를]|이 |으?로)', rules), rules
     # 흐름 안내(서버 안내문·도구 설명)도 표기 규칙 알림이 불합격이 아니라고 적는다
     assert "표기 규칙 알림(관계 규칙이 있는 도구에서 뜻을 확인해 볼 관계)" in server.INSTRUCTIONS
     # 자기 자신 금지는 관계 종류(reflexive)에서 꺾는 점 줄에 적는다

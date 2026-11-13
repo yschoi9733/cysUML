@@ -360,15 +360,20 @@ class ClassRules(Rules):
                      t: str) -> Optional[Notice]:
         """실체화의 두 끝 종류를 본다(from 쪽부터). 알릴 것이 없으면 None. 상속으로 바꾸라는 말은 두 끝이 같은 종류이고, 바꿔도
         고리가 생기지 않을 때만 한다(parents는 오류 없는 상속 — to가 이미 from을 상속하면 고리가 된다)."""
-        def inherits_back() -> bool:  # to가 이미 from을 상속한다 — 이 실체화를 상속으로 바꾸면 고리가 된다
-            return _cycle(parents, rel.target, rel.source) is not None
+        def blocked() -> Optional[str]:
+            """이 실체화를 상속으로 바꾸면 안 되는 까닭 — 같은 상속이 이미 있거나(겹쳐 그린다), to가 이미 from을 상속한다(고리)."""
+            if rel.target in parents.get(rel.source, ()):
+                return "같은 from·to의 generalization이 이미 있다"
+            if _cycle(parents, rel.target, rel.source) is not None:
+                return (f"to({_show(rel.target)})가 이미 from({_show(rel.source)})을 상속해 generalization으로 바꾸면 고리가 "
+                        "된다")
+            return None
 
-        already = (f"to({_show(rel.target)})가 이미 from({_show(rel.source)})을 상속해 generalization으로 바꾸면 고리가 "
-                   "된다")
         if s in INTERFACES:
             problem = f"실체화를 하는 쪽이 인터페이스다({_end('from', rel.source, s)})."
             if s == t == "interface":
-                hint = f"{already} — 이 실체화를 지운다." if inherits_back() else "인터페이스끼리는 kind를 'generalization'으로 바꾼다."
+                why = blocked()
+                hint = f"{why} — 이 실체화를 지운다." if why else "인터페이스끼리는 kind를 'generalization'으로 바꾼다."
             else:
                 hint = _elsewhere(spec, s, t)
         elif s in NOT_INHERITED:
@@ -378,8 +383,8 @@ class ClassRules(Rules):
             problem = f"실체화가 가는 쪽이 인터페이스가 아니다({_end('to', rel.target, t)})."
             if not _same_kind(s, t):
                 hint = _elsewhere(spec, s, t)
-            elif inherits_back():
-                hint = f"{already} — 인터페이스를 구현하는 것이면 to를 인터페이스로 고치고, 아니면 이 실체화를 지운다."
+            elif why := blocked():
+                hint = f"{why} — 인터페이스를 구현하는 것이면 to를 인터페이스로 고치고, 아니면 이 실체화를 지운다."
             else:
                 hint = "상속을 뜻했으면 kind를 'generalization'으로 바꾸고, 인터페이스를 구현하는 것이면 to를 인터페이스로 고친다."
         else:
@@ -387,20 +392,24 @@ class ClassRules(Rules):
         return Notice(path, (rel.source, rel.target), problem, hint)
 
     def guide(self, spec: Spec) -> str:
+        """따옴표 친 종류 이름 바로 뒤에는 받침에 따라 갈리는 조사를 붙이지 않는다(_end와 같은 까닭)."""
+        def quoted(kinds) -> str:
+            return "·".join(f'"{k}"' for k in dict.fromkeys(kinds) if k in spec.shapes)
+
         kinds = [k for k in spec.shapes if k not in NOT_INHERITED and k not in SAME_KIND]
         groups = ", ".join('"class"·"abstract"끼리' if k == "class" and "abstract" in spec.shapes else f'"{k}"끼리' for k in kinds)
-        never = "·".join(f'"{k}"' for k in NOT_INHERITED if k in spec.shapes)
-        quiet = "·".join(f'"{k}"' for k, d in REALIZED.items() if d.doers is None and k in spec.shapes)
-        but = "".join(f'(클래스가 "{k}"로 가는 것은 빼고)' for k, d in REALIZED.items() if d.doers is not None and k in spec.shapes)
-        doers = "·".join(f'"{k}"' for k in dict.fromkeys((*INTERFACES, *NOT_INHERITED)) if k in spec.shapes)
-        noun = spec.words.noun
+        never = quoted(NOT_INHERITED)
+        quiet = quoted(k for k, d in REALIZED.items() if d.doers is None)
+        but = "".join(f"(to가 {quoted([k])}이고 from이 {quoted(d.doers)}인 것은 빼고)" for k, d in REALIZED.items()
+                      if d.doers is not None and k in spec.shapes)
+        doers = quoted((*INTERFACES, *NOT_INHERITED))
+        doers += " 가운데 하나" if "·" in doers else ""
         return "\n".join([
-            f"  - 규칙: 상속은 같은 종류끼리 긋는다({groups})."
-            + (f" {never}는 상속의 끝이 될 수 없다." if never else "")
+            f"  - 규칙: 상속은 같은 종류끼리 긋는다({groups})." + (f" 상속의 끝이 될 수 없는 종류: {never}." if never else "")
             + " 클래스가 인터페이스를 구현하는 것은 realization이다. 종류가 다른 상속, 고리를 이루는 상속(A가 B를, B가 다시 A를 "
             "상속하는 것 — 여러 단계도)은 입력 오류다.",
-            f"  - 알림: 실체화가 {quiet}가 아닌 {noun}로 가거나{but} {doers}가 실체화하면 그리되 검사 결과에 알림을 준다(불합격이 "
-            "아니다) — 상속 등 다른 관계를 뜻했는지 확인하고, 뜻한 대로면 그대로 둔다."])
+            f"  - 알림: 다음 실체화는 그리되 검사 결과에 알림을 준다(불합격이 아니다) — from이 {doers}인 것, to가 {quiet} 밖의 "
+            f"종류인 것{but}. 상속 등 다른 관계를 뜻했는지 확인하고, 뜻한 대로면 그대로 둔다."])
 
 
 RULES = ClassRules()
