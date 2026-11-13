@@ -127,6 +127,18 @@ def test_packages_stacked_top_to_bottom_pass_with_a_straight_line_of_any_kind(ki
     assert K.check(d).passed, K.check(d).summary()
 
 
+@pytest.mark.parametrize("lower", ["order.domain", "infrastructure", "infrastructure.persistence"])
+@pytest.mark.parametrize("kind", ["dependency", "generalization"])
+def test_stacked_packages_of_different_names_follow_the_tip_with_one_bend(lower, kind):
+    # 이름 길이가 다르면 곧은 선은 아래 패키지 탭을 지난다 — 배치 요령대로 탭 오른쪽 끝 + 20, 아래 top - 30에 꺾는 점을 주면 합격
+    elements = [el("package", "app", 0, 0), el("package", lower, 0, 150)]
+    (f,) = report(elements, [rel(kind, "app", lower)]).failures
+    assert f.kind == "line_through_name"
+    tab = placed(draw(elements), lower).zones[0].rect
+    assert "이름 칸(" in f.problem and "꺾는 점(via)을 하나 준다" in P.TIPS
+    assert report(elements, [rel(kind, "app", lower, via=[[tab[2] + 20, 150 - 30]])]).passed
+
+
 def test_lines_aim_at_the_middle_of_the_body_right_of_the_tab():
     d = draw([el("package", "p", 0, 0), el("class", "L", -200, 20), el("class", "U", 0, 150)],
              [rel("dependency", "L", "p"), rel("dependency", "U", "p")])
