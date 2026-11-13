@@ -71,6 +71,16 @@ BOX_WORDS = Words("상자", "변", "이름")
 ELEMENT_WORDS = Words("요소", "테두리", "열쇠")
 
 
+NAME_AREA = "이름 칸"  # NameZone.what의 기본값 — 요소가 제 글자를 쓰는 자리
+
+
+def floored(rect: T.Box) -> Point:
+    """자리 가운데를 정수로 내린 점. 모양 밖 이름이 모양 자리를 반 픽셀에 놓거나(이름 폭·줄 수가 홀수) 모양 높이·폭이 홀수면 가운데가
+    반 픽셀에 걸려, 가운데를 맞춰 놓은 두 요소 사이의 선도 반 픽셀 기울어 계단이 보인다. 선이 향하는 점(Shape.anchor)과 모양을 이
+    점에 맞추면, 가운데가 정수인 요소와 잇는 선이 곧다(액터·제공 인터페이스 원·문서 아이콘 아티팩트가 쓴다)."""
+    return math.floor((rect[0] + rect[2]) / 2), math.floor((rect[1] + rect[3]) / 2)
+
+
 @dataclass(frozen=True)
 class NameZone:
     """요소가 제 글자(이름·스테레오타입 등)를 쓰는 자리. outside면 몸통(선이 닿는 테두리) 밖에 붙은 칸이다(패키지 탭, 모양 밖
@@ -79,7 +89,7 @@ class NameZone:
 
     rect: T.Box
     outside: bool
-    what: str = "이름 칸"
+    what: str = NAME_AREA
 
 
 @dataclass(frozen=True)
@@ -382,7 +392,7 @@ class DrawnRelation:
     line: Line
     heads: tuple[Union[Line, Polygon], ...]
     labels: tuple[tuple[Text, ...], ...]
-    marks: tuple[HeadMark, ...] = ()
+    marks: tuple[HeadMark, ...]
 
 
 @dataclass(frozen=True)

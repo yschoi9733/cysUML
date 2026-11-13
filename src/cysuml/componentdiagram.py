@@ -6,12 +6,11 @@
 """
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from . import boxdiagram as B
 from .boxcheck import KINDS
-from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Element, PlacedBox, Shape, Spec
+from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Element, PlacedBox, Shape, Spec, floored
 from .canvas import SCALE, Canvas, Point
 from .classdiagram import RELATIONS
 from .geom import Border, EllipseBorder
@@ -23,17 +22,11 @@ from .text import Box
 BALL = 20  # 제공 인터페이스 원의 지름
 
 
-def _centre(rect: Box) -> Point:
-    """원 가운데 — 모양 자리 가운데를 정수로 내린 점. 모양 밖 이름의 폭(위·아래)이나 줄 수(왼쪽·오른쪽)가 홀수면 모양 자리가 반
-    픽셀에 놓여, 정수 좌표에 가운데가 놓인 컴포넌트(폭이 짝수 — 기본 폭 90)와 잇는 막대가 반 픽셀 기울어 계단이 보인다(유즈케이스도의
-    _floored와 같은 까닭)."""
-    return math.floor((rect[0] + rect[2]) / 2), math.floor((rect[1] + rect[3]) / 2)
-
-
 class LollipopShape(Shape):
     """제공 인터페이스 원(lollipop): 작은 원과 모양 밖에 쓰는 이름. 클래스 모양 인터페이스(«interface» 상자)와 다른 종류다. 제공하는
     컴포넌트에서 원으로 연관(막대)을 긋고, 그 인터페이스를 쓰는 쪽은 원으로 점선 의존 화살표를 긋는다. 원은 모양 자리 가운데를
-    정수로 내린 점(_centre)에 그리고, 선도 그 점을 향한다."""
+    정수로 내린 점(boxdiagram.floored)에 그리고, 선도 그 점을 향한다 — 정수 좌표에 가운데가 놓인 컴포넌트(기본 폭 90)와 잇는 막대가
+    곧다."""
 
     outside_name = True
     sized = False
@@ -43,13 +36,13 @@ class LollipopShape(Shape):
         return BALL, BALL
 
     def anchor(self, e: Element, rect: Box) -> Point:
-        return _centre(rect)
+        return floored(rect)
 
     def border(self, e: Element, rect: Box) -> Border:
-        return EllipseBorder(*_centre(rect), BALL / 2, BALL / 2)
+        return EllipseBorder(*floored(rect), BALL / 2, BALL / 2)
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
-        cx, cy = _centre(p.shape_rect)
+        cx, cy = floored(p.shape_rect)
         c.ellipse(cx - BALL / 2, cy - BALL / 2, BALL, BALL, owner=p.key)
 
 

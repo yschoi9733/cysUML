@@ -156,6 +156,9 @@ def test_relation_fields_say_where_lines_start_for_each_tool():
     assert "선은 상자 가운데에서 첫 꺾는 점(없으면 상대 상자 가운데)으로 가는 선이 상자 변과" in server.CLASS_TOOL
     assert "선은 요소 가운데(요소 종류에 따로 적은 모양은 그 점)에서" in packagediagram.TOOL
     assert "탭 오른쪽 몸통의 가운데를 향한다" in packagediagram.TOOL
+    # 아이콘 표기 두 종류도 "따로 적은 점"을 적는다
+    assert "UML 1 표기 컴포넌트는 부품 네모를 뺀 상자의 가운데(자리 가운데보다 튀어나온 폭의 반 4px 오른쪽)" in packagediagram.TOOL
+    assert "문서 아이콘 아티팩트는 문서의 가운데(결과의 모양 자리 가운데를 정수로 내린 점)" in packagediagram.TOOL
     # 패키지도도 모양 밖 이름이 있는 문서 아이콘 아티팩트를 받으므로 이름 쪽과 모양 자리 결과 문장을 넣는다(한 번씩)
     for tool in (packagediagram.TOOL, componentdiagram.TOOL, deploymentdiagram.TOOL):
         assert guide.PLACES_RESULT in tool and tool.count(guide.OUTSIDE_PLACES) == 1 and tool.count(guide.NAME_SIDE) == 1

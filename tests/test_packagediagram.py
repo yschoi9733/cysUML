@@ -382,6 +382,14 @@ def test_lines_into_a_component_icon_pass_from_above_below_right_and_straight_fr
     assert K.check(d).passed, K.check(d).summary()
 
 
+def test_line_to_a_component_icon_is_straight_when_aligned_to_the_box_without_its_parts():
+    # 도구 설명대로 선이 향하는 점(부품 네모를 뺀 상자 가운데 — 자리 가운데 49보다 4px 오른쪽 53)에 A의 가운데를 맞춘다
+    d = draw([el("component_icon", "C", 0, 0), el("class", "A", 53 - 45, -150)], [rel("dependency", "A", "C")])
+    (line,) = d.layout.relations
+    assert line.points[0][0] == line.points[-1][0] == 53
+    assert K.check(d).passed, K.check(d).summary()
+
+
 def test_line_through_a_part_of_a_component_icon_fails_and_is_not_called_a_name_area():
     # 왼쪽에서 비스듬히 들어와 위쪽 부품 네모에 걸린다 — 그 컴포넌트가 끝인 선이어도 불합격
     r = report([el("component_icon", "C", 0, 0), el("class", "A", -200, -100)], [rel("dependency", "A", "C")])

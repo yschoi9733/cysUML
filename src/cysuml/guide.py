@@ -14,6 +14,7 @@ from typing import Iterable, Optional
 from .boxcheck import KINDS
 from .boxdiagram import ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, Spec, Words, josa
 from .canvas import MIN_SCALE, SCALE
+from .shapes import PART
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
 DEFAULT_DIR = "diagrams"
@@ -103,8 +104,10 @@ PLACED_ELEMENTS = f"""- elements: 요소 목록(하나 이상). 종류를 섞어
   {NAME_SIDE}
   - attributes·operations·literals: 클래스 상자만 쓴다(literals는 kind가 "enum"일 때). {MEMBERS}
   - 선은 패키지 몸통(탭 아래), 노드 겉 테두리, UML 1 표기 컴포넌트는 부품 네모를 뺀 상자, 문서 아이콘 아티팩트는 문서 아이콘 테두리, \
-그 밖은 상자 테두리에 닿는다. 부품 네모는 그 컴포넌트가 끝인 선도 지나가면 안 되므로, UML 1 표기 컴포넌트에 왼쪽에서 오가는 선은 \
-가로로 곧게 긋는다. 패키지 탭은 그 패키지가 끝인 선도 지나가면 안 되므로, \
+그 밖은 상자 테두리에 닿는다. 선이 향하는 점은 UML 1 표기 컴포넌트는 부품 네모를 뺀 상자의 가운데(자리 가운데보다 튀어나온 폭의 반 {PART[0] // 4}px \
+오른쪽), 문서 아이콘 아티팩트는 문서의 가운데(결과의 모양 자리 가운데를 정수로 내린 점)다 — 다른 요소와 곧게 이으려면 그 점에 \
+가운데를 맞춘다. 부품 네모는 그 컴포넌트가 끝인 선도 지나가면 안 되므로, UML 1 표기 컴포넌트에 왼쪽에서 오가는 선은 가로로 곧게 \
+긋는다. 패키지 탭은 그 패키지가 끝인 선도 지나가면 안 되므로, \
 패키지로 오가는 선은 몸통 가운데가 아니라 탭 오른쪽 몸통의 가운데를 향한다. 안의 요소를 두는 칸은 패키지는 탭 아래 몸통, 노드는 \
 이름 줄 아래 앞면(두께 띠 빼고)이다 — 칸 윗변은 패키지 top에서 탭 높이만큼, 노드 top에서 두께 8px과 이름 줄 높이만큼 아래다. 탭과 \
 이름 줄 높이는 이름 한 줄이면 24px이고, 스테레오타입이나 이름 줄이 하나 늘 때마다 14px씩 더한다(그래서 안의 요소는 이름 한 줄 \

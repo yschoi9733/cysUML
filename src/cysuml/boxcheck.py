@@ -17,8 +17,8 @@ import operator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
-from .boxdiagram import (BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, Layout, NameZone, PlacedBox, PlacedRelation,
-                         Words, josa)
+from .boxdiagram import (BOX_WORDS, LABEL_CLEAR, NAME_AREA, NEST_PAD, Drawing, HeadMark, Layout, NameZone, PlacedBox,
+                         PlacedRelation, Words, josa)
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
                    grow, hits, inside, meets, outline, overlap, span, touches)
@@ -479,7 +479,7 @@ def _lines_through_names(relations: list[_Relation], boxes: list[_Box], w: Words
     for b, z, where, rels in found.values():
         what = z.what
         whose = (f"{what}{josa(what, '은', '는')} 그 {w.noun}가 끝인 선(몸통 밖 이름 칸일 때)이나 그 {w.noun} 안의 {w.noun}를 "
-                 "잇는 선도" if what == "이름 칸" else f"{what}{josa(what, '은', '는')} 그 {w.noun}가 끝인 선도")
+                 "잇는 선도" if what == NAME_AREA else f"{what}{josa(what, '은', '는')} 그 {w.noun}가 끝인 선도")
         yield Finding("line_through_name", (*_owners(rels), b.name), where,
                       f"선이 {w.noun}의 {what}{josa(what, '을', '를')} 지나거나 {BOX_CLEARANCE}px 안으로 붙는다: {_titles(rels)}, "
                       f"{b.title}의 {what}({fmt_rect(z.rect)}).",

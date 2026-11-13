@@ -14,7 +14,7 @@ from . import boxdiagram as B
 from . import text as T
 from .boxcheck import KINDS
 from .boxdiagram import (ELEMENT_WORDS, LABEL_LINE, NEST_PAD, TRIANGLE_HEAD, Diagram, Drawing, Element, NameZone, PlacedBox,
-                         RelationType, Shape, Spec, line_ys)
+                         RelationType, Shape, Spec, floored, line_ys)
 from .canvas import SCALE, Canvas, Point
 from .classdiagram import RELATIONS as CLASS_RELATIONS
 from .geom import Border, EllipseBorder
@@ -35,10 +35,9 @@ def _lines_width(lines: tuple[str, ...], bold: bool = False) -> float:
 
 
 def _floored(rect: Box) -> Point:
-    """자리 가운데를 정수 좌표로 내린 점 — 액터와 유즈케이스의 선이 향하는 점. 가운데가 반 픽셀에 걸리면(사람 모양 높이가 홀수,
-    모양 밖 이름 때문에 반 픽셀에 놓인 모양 자리, 사람이 준 홀수 폭·소수 좌표) 가운데를 맞춰 놓은 두 요소 사이의 선도 반 픽셀
-    기울어 계단이 보인다. 두 끝이 모두 가운데를 내린 점을 향하면 가운데가 같은 두 요소의 선은 곧다."""
-    return math.floor((rect[0] + rect[2]) / 2), math.floor((rect[1] + rect[3]) / 2)
+    """액터와 유즈케이스의 선이 향하는 점 — 자리 가운데를 정수로 내린 점(boxdiagram.floored). 두 끝이 모두 가운데를 내린 점을 향하면
+    가운데가 같은 두 요소의 선은 곧다(사람 모양 높이가 홀수거나 사람이 준 폭이 홀수·좌표가 소수여도)."""
+    return floored(rect)
 
 
 class ActorShape(Shape):

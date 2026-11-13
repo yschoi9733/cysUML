@@ -6,11 +6,10 @@
 """
 from __future__ import annotations
 
-import math
 from functools import lru_cache
 from typing import Optional
 
-from .boxdiagram import NEST_PAD, Element, NameZone, PlacedBox, Shape
+from .boxdiagram import NEST_PAD, Element, NameZone, PlacedBox, Shape, floored
 from .canvas import Canvas, Point
 from .classdiagram import CLASS_SHAPES, MIN_WIDTH, draw_head, head_height, head_lines, head_width
 from .geom import Border, PolygonBorder, RectBorder, Segment
@@ -186,10 +185,10 @@ class ArtifactIconShape(Shape):
         return PAGE
 
     def _page(self, rect: Box) -> Box:
-        """가운데를 정수로 내린 문서 사각형."""
-        l, t, r, b = rect
-        dx, dy = math.floor((l + r) / 2) - (l + r) / 2, math.floor((t + b) / 2) - (t + b) / 2
-        return l + dx, t + dy, r + dx, b + dy
+        """가운데를 정수로 내린(boxdiagram.floored) 문서 사각형."""
+        cx, cy = floored(rect)
+        w, h = PAGE
+        return cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
 
     def _corners(self, rect: Box) -> tuple[Point, ...]:
         l, t, r, b = self._page(rect)
