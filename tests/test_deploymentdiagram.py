@@ -7,7 +7,7 @@ from cysuml import guide
 from cysuml.canvas import Line, Text
 from cysuml.parsing import InputError
 from cysuml.shapes import DEPTH, NODE
-from cysuml.text import text_width
+from cysuml.text import is_korean, text_width
 
 
 def el(kind, name, left, top, **more):
@@ -155,7 +155,7 @@ def test_nodes_in_a_row_with_the_same_top_and_height_get_straight_paths():
     straight = draw(same, PATHS)
     assert all(len({y for _, y in r.points}) == 1 for r in straight.layout.relations[:3])
     assert K.check(straight).passed
-    assert "top과 height를 같게 주면 경로가 곧다" in D.TIPS
+    assert "top과 height를 같게 주면 경로가 곧다" in D.TIPS and "다시 늘면 다시 맞춘다" in D.TIPS
 
 
 def test_element_inside_a_stereotyped_node_starts_at_top_plus_66():
@@ -189,12 +189,24 @@ LABELS = {  # 선 글자 → (선 만들기, 줄)
 }
 
 
-def side_gaps(outer, lines):
-    """요령의 간격: (왼쪽, 오른쪽, 아래). 옆은 바깥 노드 테두리 ~ 안쪽 노드 거리 + 가장 긴 줄의 폭 + 20, 아래는 그 거리 + 40 +
-    줄이 늘 때마다 15."""
+def estimate(s):
+    """요령의 선 글자 폭 어림: 영문·숫자·기호 한 글자 9px, 한글 한 글자 12px."""
+    return sum(12 if is_korean(c) else 9 for c in s)
+
+
+@pytest.mark.parametrize("label", ["«deploy»", "«manifest»", "«internet»", "HTTPS", "JDBC", "gRPC", "HTTP/2", "TCP/IP",
+                                   "port 443", "REST API", "HTTPS 443", "웹 소켓", "애플리케이션"])
+def test_label_width_estimate_of_the_tip_covers_common_labels(label):
+    assert text_width(label) <= estimate(label)
+    assert "영문·숫자·기호 한 글자 9px, 한글 한 글자 12px로 어림하고" in D.TIPS
+
+
+def side_gaps(outer, lines, measure=estimate):
+    """요령의 간격: (왼쪽, 오른쪽, 아래). 옆은 바깥 노드 테두리 ~ 안쪽 노드 거리 + 가장 긴 줄의 폭(measure로 잰다) + 20, 아래는
+    그 거리 + 40 + 줄이 늘 때마다 15."""
     d = draw(outer)
     o, i = placed(d, outer[0]["name"]).rect, placed(d, "Tomcat").rect
-    width = max(text_width(s) for s in lines)
+    width = max(measure(s) for s in lines)
     return i[0] - o[0] + width + 20, o[2] - i[2] + width + 20, o[3] - i[3] + 40 + 15 * (len(lines) - 1)
 
 
@@ -225,12 +237,13 @@ def test_line_into_a_nested_node_from_above_crosses_the_outer_name_but_not_from_
 
 @pytest.mark.parametrize("side", ["left", "right", "below"])
 def test_side_or_below_sender_closer_than_the_tip_puts_the_label_on_the_outer_border(side):
-    # 안쪽 노드가 바깥 노드 왼쪽 테두리에서 140px 들어가 있다. 선 글자는 선 가운데쯤에 놓이므로, 요령의 간격보다 30px 가까이
-    # 두면 글자가 바깥 노드 테두리에 걸리고 요령대로 띄우면 합격한다(옆은 20px 가까워도 걸리고, 아래 +40은 여유를 둔 값이다)
+    # 안쪽 노드가 바깥 노드 왼쪽 테두리에서 140px 들어가 있다. 선 글자는 선 가운데쯤에 놓이므로, 요령의 간격(옆은 실제 글자 폭
+    # — 불합격 항목에 나오는 폭 — 으로 잰 것)보다 30px 가까이 두면 글자가 바깥 노드 테두리에 걸리고 요령대로 띄우면 합격한다
+    # (옆은 20px 가까워도 걸리고, 아래 +40은 여유를 둔 값이다)
     outer = [device("App", 0, 0), el("node", "Tomcat", 140, 66, stereotype="executionEnvironment", **{"in": "App"}),
              inside("Tomcat", "component", "Svc", 160, 132)]
     sender = el("artifact", "a.war", 0, 0)
-    gap = dict(zip(("left", "right", "below"), side_gaps(outer, ("«deploy»",))))[side]
+    gap = dict(zip(("left", "right", "below"), side_gaps(outer, ("«deploy»",), text_width)))[side]
     (f,) = sent_from(outer, sender, side, gap - 30, deploy).failures
     assert f.kind == "text_on_box" and f.elements == ("a.war->Tomcat", "App")
     assert sent_from(outer, sender, side, gap, deploy).passed
@@ -245,7 +258,7 @@ def test_label_of_three_lines_from_below_needs_15px_more_for_each_extra_line():
     (f,) = sent_from(OUTER, sender, "below", gap - 30, make).failures
     assert f.kind == "text_on_box" and f.elements == ("a.war->Tomcat", "App Server")
     assert sent_from(OUTER, sender, "below", gap, make).passed
-    assert "아래·위 간격에 한 줄마다 15px를 더한다" in D.TIPS
+    assert "보내는 요소가 아래나 위일 때 간격에 한 줄마다 15px를 더한다" in D.TIPS
 
 
 CLUSTER = [device("Application Server Cluster", 0, 0),
@@ -294,7 +307,7 @@ def test_sender_above_closer_than_the_tip_puts_the_label_on_the_outer_border_eve
     (f,) = report([close, *OUTER], [make("w", "Tomcat", via=tip_bend(OUTER, close))]).failures
     assert f.kind == "text_on_box" and f.elements == ("w->Tomcat", "App Server")
     assert report([far, *OUTER], [make("w", "Tomcat", via=tip_bend(OUTER, far))]).passed
-    assert "바깥 노드 윗변에서 80px 이상 떼어(선 글자가 여러 줄이면 위대로 더한다)" in D.TIPS
+    assert "바깥 노드 윗변에서 80px 이상 떼어(선 글자가 여러 줄이면 한 줄마다 15px 더)" in D.TIPS
 
 
 def test_returned_places_draw_the_same_picture():
