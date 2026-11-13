@@ -105,8 +105,8 @@ class Shape:
     outside_name: bool = False    # 이름을 모양 밖에 쓰는지(쪽은 name_side)
     default_width: float = 0      # width를 주지 않았을 때의 최소 폭
 
-    def read(self, r: Reader, o: dict, path: str, kind: str) -> Any:
-        """제 필드를 읽는다. 문제는 r.fail로 알린다."""
+    def read(self, r: Reader, o: dict, path: str, kind: Optional[str]) -> Any:
+        """제 필드를 읽는다. 문제는 r.fail로 알린다. kind가 None이면 입력의 kind가 틀렸다(문제만 모으고 값은 쓰지 않는다)."""
         return None
 
     def keyword(self, e: Element) -> Optional[str]:
@@ -459,7 +459,11 @@ class _Reader(Reader):
         kind = self.choice(o["kind"], _at(path, "kind"), tuple(spec.shapes)) if "kind" in o else spec.default_kind
         shape = spec.shapes.get(kind) if kind is not None else None
         stereotype = self.stereotype(o, path)
-        data = shape.read(self, o, path, kind) if shape is not None and kind is not None else None
+        reader = shape
+        if reader is None:  # kind가 틀렸어도 받은 필드를 맡는 모양이 하나뿐이면 그 모양으로 읽어 문제를 함께 알린다
+            owners = {id(s): s for s in spec.shapes.values() if any(f in o for f in s.fields)}
+            reader = next(iter(owners.values())) if len(owners) == 1 else None
+        data = reader.read(self, o, path, kind) if reader is not None else None
         parent = self.text(o["in"], _at(path, "in"), name=True) if "in" in o else None
         left = self.number(o["left"], _at(path, "left")) if "left" in o else None
         top = self.number(o["top"], _at(path, "top")) if "top" in o else None

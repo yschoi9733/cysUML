@@ -482,6 +482,15 @@ def test_wrong_input_says_where_and_what(change, expected):
     assert any(p.startswith(expected) for p in e.value.problems), e.value.problems
 
 
+def test_wrong_kind_still_reports_problems_in_members():
+    # kind가 틀려도 속성·연산의 문제를 함께 알린다(열거 값은 kind를 알아야 가리므로 보지 않는다)
+    with pytest.raises(C.InputError) as e:
+        C.parse({"classes": [{"name": "A", "kind": "klass", "left": 0, "top": 0, "attributes": [{"nam": "x"}],
+                              "literals": ["X"]}]})
+    assert [p.split(":")[0] for p in e.value.problems] == ["classes[0].kind", "classes[0].attributes[0].nam",
+                                                           "classes[0].attributes[0]"]
+
+
 @pytest.mark.parametrize("box", [{"name": "A", "top": 0}, {"name": "A", "left": 0, "top": 0, "x": 1}])
 def test_box_missing_or_unknown_field_is_not_built(box):
     reader = B._Reader(C.SPEC)

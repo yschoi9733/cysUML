@@ -162,12 +162,12 @@ class ClassShape(Shape):
     fields = ("attributes", "operations", "literals")
     default_width = MIN_WIDTH
 
-    def read(self, r: Reader, o: dict, path: str, kind: str) -> ClassParts:
+    def read(self, r: Reader, o: dict, path: str, kind: Optional[str]) -> ClassParts:
         literals: tuple[Row, ...] = ()
         if "literals" in o and kind == "enum":
             found = [r.text(s, _at(_at(path, "literals"), i)) for i, s in enumerate(r.items(o["literals"], _at(path, "literals")))]
             literals = tuple(Row(s) for s in found if s is not None)
-        elif "literals" in o:
+        elif "literals" in o and kind is not None:
             r.fail(_at(path, "literals"), f"열거 값은 kind가 'enum'인 상자에만 쓴다(이 상자는 {kind!r})")
         return ClassParts(literals, _rows(r, o, "attributes", path, operation=False),
                           _rows(r, o, "operations", path, operation=True))

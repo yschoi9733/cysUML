@@ -204,16 +204,13 @@ def _save(png: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[Path]
     return path, None
 
 
-def _boxes(drawing: boxdiagram.Drawing) -> list[str]:
-    return ["상자 자리(왼, 위, 폭×높이): " + ", ".join(f"{p.key}({fmt_rect(p.rect)})" for p in drawing.layout.boxes)]
-
-
 def _places(drawing: boxdiagram.Drawing) -> list[str]:
-    """새 그림 도구의 요소 자리. 모양 밖 이름이 있는 요소는 모양 자리를 함께 적는다."""
+    """AI가 배치하는 그림의 요소마다 그린 자리(클래스도는 "상자 자리"). 모양 밖 이름이 있는 요소는 모양 자리를 함께 적는다."""
     def one(p: boxdiagram.PlacedBox) -> str:
         shape = f", 모양 {fmt_rect(p.shape_rect)}" if p.shape_rect != p.rect else ""
         return f"{p.key}({fmt_rect(p.rect)}{shape})"
-    return ["요소 자리(왼, 위, 폭×높이): " + ", ".join(one(p) for p in drawing.layout.boxes)]
+    noun = drawing.layout.spec.words.noun
+    return [f"{noun} 자리(왼, 위, 폭×높이): " + ", ".join(one(p) for p in drawing.layout.boxes)]
 
 
 D = TypeVar("D", boxdiagram.Drawing, sequencediagram.Drawing)
@@ -276,7 +273,7 @@ def draw_class_diagram(
         scale: Scale = SCALE,
 ) -> CallToolResult:
     data = {"classes": classes} if relations is None else {"classes": classes, "relations": relations}
-    return _draw(file_name, lambda: classdiagram.render(data, scale), classcheck.check, out_dir, _boxes)
+    return _draw(file_name, lambda: classdiagram.render(data, scale), classcheck.check, out_dir, _places)
 
 
 @mcp.tool(name="draw_package_diagram", description=packagediagram.TOOL)

@@ -156,6 +156,8 @@ def test_overlapping_elements_inside_a_package_fail_but_holder_and_held_do_not()
 def test_element_placed_over_a_package_without_in_is_an_overlap_with_a_hint():
     (f,) = report([el("package", "P", 0, 0, width=200, height=150), el("class", "A", 40, 60)]).failures
     assert f.kind == "box_overlap" and "A를 P 안에 두려면 A의 in에 P를 준다" in f.hint
+    (f,) = report([el("package", "결제", 0, 0, width=200, height=150), el("class", "주문", 40, 60)]).failures
+    assert "주문을 결제 안에 두려면 주문의 in에 결제를 준다" in f.hint
     # 탭 오른쪽에서 몸통으로 걸친 요소는 in을 줘도 칸 밖이라 그 힌트를 붙이지 않는다
     (f,) = report([el("package", "P", 0, 0, width=300, height=150), el("class", "A", 150, 10)]).failures
     assert f.kind == "box_overlap" and "in에" not in f.hint

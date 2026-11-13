@@ -5,6 +5,9 @@
 """
 from __future__ import annotations
 
+from functools import lru_cache
+from typing import Optional
+
 from .boxdiagram import Element, NameZone, PlacedBox, Shape
 from .canvas import Canvas
 from .classdiagram import CLASS_SHAPES, MIN_WIDTH, draw_head, head_height, head_lines, head_width
@@ -23,6 +26,12 @@ DEPTH = 8          # 노드 두께 띠의 폭. BOX_CLEARANCE의 두 배 안이�
 NODE_BODY = 24     # 노드 앞면에서 이름 줄 밖에 더하는 높이
 
 
+@lru_cache(maxsize=1024)
+def _tab_of(keyword: Optional[str], names: tuple[str, ...]) -> tuple[tuple[tuple[str, bool], ...], float, float]:
+    head = head_lines(keyword, names)
+    return tuple(head), max(TAB_MIN, head_width(head)), head_height(head)
+
+
 class _HeadShape(Shape):
     """이름을 클래스 머리 칸처럼 쓰는 모양: «스테레오타입» 줄 아래에 이름 줄(굵게)."""
 
@@ -37,9 +46,9 @@ class PackageShape(_HeadShape):
 
     holds = True
 
-    def _tab(self, e: Element) -> tuple[list[tuple[str, bool]], float, float]:
-        head = self.head(e)
-        return head, max(TAB_MIN, head_width(head)), head_height(head)
+    def _tab(self, e: Element) -> tuple[tuple[tuple[str, bool], ...], float, float]:
+        """(탭 머리 칸 줄, 탭 폭, 탭 높이). 모양의 메서드마다 부르므로 글자 폭은 한 번만 잰다."""
+        return _tab_of(self.keyword(e), e.name)
 
     def size(self, e: Element) -> tuple[float, float]:
         _, tab_w, tab_h = self._tab(e)
