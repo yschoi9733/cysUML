@@ -393,11 +393,14 @@ class ClassRules(Rules):
                         "된다")
             return None
 
+        # 거꾸로 가는 실체화도 있으면 둘 다 상속으로 바꾸면 고리가 된다 — 하나만 바꾸라고 한다
+        mutual = "거꾸로 가는 실체화도 있다 — 둘 가운데 하나를 지우고 남은 것의 " if (rel.target, rel.source) in realized else ""
         if s in INTERFACES:
             problem = f"실체화를 하는 쪽이 인터페이스다({_end('from', rel.source, s)})."
             if s == t == "interface":
                 why = blocked()
-                hint = f"{why} — 이 실체화를 지운다." if why else "인터페이스끼리는 kind를 'generalization'으로 바꾼다."
+                hint = (f"{why} — 이 실체화를 지운다." if why else
+                        f"{mutual or '인터페이스끼리는 '}kind를 'generalization'으로 바꾼다.")
             else:
                 hint = _elsewhere(spec, rel, s, t, realized)
         elif s in NOT_INHERITED:
@@ -413,6 +416,8 @@ class ClassRules(Rules):
                 hint = _elsewhere(spec, rel, s, t, realized)
             elif why := blocked():
                 hint = f"{why} — 인터페이스를 구현하는 것이면 to를 인터페이스로 고치고, 아니면 이 실체화를 지운다."
+            elif mutual:
+                hint = f"{mutual}kind를 'generalization'으로 바꾼다(상속을 뜻했을 때). 인터페이스를 구현하는 것이면 to를 인터페이스로 고친다."
             else:
                 hint = "상속을 뜻했으면 kind를 'generalization'으로 바꾸고, 인터페이스를 구현하는 것이면 to를 인터페이스로 고친다."
         else:

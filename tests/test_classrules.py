@@ -309,6 +309,16 @@ def test_inheritance_hint_is_left_out_when_inheriting_would_close_a_cycle():
     assert n.hint == "to('J')가 이미 from('I')을 상속해 generalization으로 바꾸면 고리가 된다 — 이 실체화를 지운다."
 
 
+@pytest.mark.parametrize("kind", ["interface", "class"])
+def test_mutual_realizations_are_told_to_keep_only_one_as_inheritance(kind):
+    # A -> B와 B -> A 실체화를 둘 다 상속으로 바꾸면 고리 오류가 난다 — 둘 가운데 하나만 바꾸라고 한다
+    notices = class_report([box("A", 0, kind=kind), box("B", 300, kind=kind)],
+                           [rel("realization", "A", "B"), rel("realization", "B", "A", via=[[345, -60], [45, -60]])]).notices
+    assert len(notices) == 2
+    for n in notices:
+        assert "거꾸로 가는 실체화도 있다 — 둘 가운데 하나를 지우고 남은 것의 kind를 'generalization'으로 바꾼다" in n.hint
+
+
 def test_inheritance_hint_is_left_out_when_the_same_inheritance_already_exists():
     # 같은 from·to의 상속이 이미 있으면 실체화를 상속으로 바꾸라고 하지 않는다(두 선이 겹쳐 그려진다)
     (n,) = class_report([box("A", 0), box("B", 300)], [rel("generalization", "A", "B"),
