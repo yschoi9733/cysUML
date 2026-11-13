@@ -651,9 +651,9 @@ def test_open_end_shape_whose_middle_point_goes_into_its_element_fails():
 
 
 @pytest.mark.parametrize("via, problem", [
-    ([[-3, 12]], r"to 쪽 끝 구간 길이 3가 끝 모양 길이와 띄운 거리\(6\)보다 길지 않다"),
+    ([[-3, 12]], r"to 쪽 끝 구간 길이 3가 끝 모양 길이와 띄운 거리를 더한 길이\(6\)보다 길지 않다"),
     # 띄운 거리와 꼭 같아도 — 당긴 선 끝이 앞 점에 겹쳐 길이 0인 선이 되므로 입력 오류다
-    ([[-6, 12]], r"to 쪽 끝 구간 길이 6가 끝 모양 길이와 띄운 거리\(6\)보다 길지 않다"),
+    ([[-6, 12]], r"to 쪽 끝 구간 길이 6가 끝 모양 길이와 띄운 거리를 더한 길이\(6\)보다 길지 않다"),
 ])
 def test_end_segment_not_longer_than_the_gap_is_an_input_error(via, problem):
     with pytest.raises(InputError, match=problem):
@@ -671,7 +671,7 @@ def test_only_the_end_with_a_gap_speaks_of_the_gap():
 
 
 def test_a_straight_line_exactly_as_long_as_the_gap_is_an_input_error_not_a_crash():
-    with pytest.raises(InputError, match=r"선 길이 6가 양 끝 모양 길이와 띄운 거리\(0\+6\)보다 길지 않다"):
+    with pytest.raises(InputError, match=r"선 길이 6가 양 끝 모양 길이와 띄운 거리를 더한 길이\(0\+6\)보다 길지 않다"):
         draw([dot("Api", 0, 0, name_side="right"), el("class", "A", -96, -12)], [rel("uses", "A", "Api")], spec=SOCKET_SPEC)
 
 

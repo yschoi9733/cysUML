@@ -420,9 +420,11 @@ def test_line_to_a_component_icon_is_straight_when_aligned_to_the_box_without_it
     assert K.check(d).passed, K.check(d).summary()
 
 
-def test_slanted_line_from_the_left_passes_with_its_last_bend_at_the_height_of_the_aim_point():
-    # 도구 설명의 요령: 마지막 꺾는 점을 선이 향하는 점(가운데 높이 24)에 두면 마지막 구간이 가로가 되어 부품 네모 사이로 닿는다
-    d = draw([el("component_icon", "C", 0, 0), el("class", "A", -200, -100)], [rel("dependency", "A", "C", via=[[-40, 24]])])
+@pytest.mark.parametrize("source, target, via", [("A", "C", [[-40, 24]]), ("C", "A", [[-40, 24], [-90, -76]])])
+def test_slanted_line_on_the_left_passes_with_the_bend_next_to_the_component_at_the_aim_height(source, target, via):
+    # 도구 설명의 요령: 컴포넌트 쪽 끝에 붙은 꺾는 점(들어오는 선은 마지막, 나가는 선은 첫 꺾는 점)을 선이 향하는 점의 높이(24)에
+    # 두면 컴포넌트에 닿는 구간이 가로가 되어 부품 네모 사이로 지난다
+    d = draw([el("component_icon", "C", 0, 0), el("class", "A", -200, -100)], [rel("dependency", source, target, via=via)])
     assert K.check(d).passed, K.check(d).summary()
 
 

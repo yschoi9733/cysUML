@@ -159,7 +159,8 @@ class ComponentIconShape(_HeadShape):
         return rect[0] + PART[0] / 2, rect[1], rect[2], rect[3]
 
     def _parts(self, rect: Box) -> tuple[Box, Box]:
-        l, cy = rect[0], (rect[1] + rect[3]) / 2
+        """부품 네모 둘 — 선이 향하는 점(상자 가운데를 정수로 내린 점)의 높이에서 위아래로 같게 떨어뜨린다."""
+        l, cy = rect[0], floored(self._body(rect))[1]
         w, h = PART
         return (l, cy - PART_OFF - h, l + w, cy - PART_OFF), (l, cy + PART_OFF, l + w, cy + PART_OFF + h)
 
