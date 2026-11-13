@@ -393,10 +393,10 @@ def test_component_icon_is_a_box_with_two_parts_straddling_its_left_edge():
     box, *parts = owned(d, "C", Rect)
     assert (box.left, box.top, box.width, box.height) == (8, 0, w - 8, h)
     cy = h / 2
-    assert [(r.left, r.top, r.width, r.height) for r in parts] == [(0, cy - 21, 16, 6), (0, cy + 15, 16, 6)]
+    assert [(r.left, r.top, r.width, r.height) for r in parts] == [(0, cy - 18, 16, 6), (0, cy + 12, 16, 6)]
     assert p.border == G.RectBorder((8, 0, w, h))
     assert w % 2 == 1 and p.anchor == (math.floor((8 + w) / 2), cy)  # 폭이 홀수(123)라 상자 가운데 65.5를 정수로 내린다
-    assert p.zones == tuple(B.NameZone((0, top, 16, top + 6), True, "부품 네모", lettered=False) for top in (cy - 21, cy + 15))
+    assert p.zones == tuple(B.NameZone((0, top, 16, top + 6), True, "부품 네모", lettered=False) for top in (cy - 18, cy + 12))
     texts = owned(d, "C", Text)
     assert [t.text for t in texts] == ["«component»", "C"] and texts[0].x == texts[1].x == (8 + w) / 2
 
@@ -408,6 +408,13 @@ def test_lines_into_a_component_icon_pass_from_above_below_right_and_straight_fr
     end = d.layout.relations[0].points[-1]
     assert any(G.distance((end, end), e, 0) < 1e-9 for e in placed(d, "C").border.edges())
     assert K.check(d).passed, K.check(d).summary()
+
+
+@pytest.mark.parametrize("kind", ["aggregation", "composition"])
+def test_diamond_leaving_a_component_icon_straight_to_the_left_passes_between_its_parts(kind):
+    # 마름모(반폭 6)도 네모 사이(24px)로 지나간다 — 부품 네모 간격(PART_OFF 12)의 근거
+    r = report([el("component_icon", "C", 0, 0), el("class", "A", -200, 0)], [rel(kind, "C", "A")])
+    assert r.passed, r.summary()
 
 
 @pytest.mark.parametrize("more, x", [({}, 53), ({"stereotype": "component"}, 65)])
@@ -432,13 +439,13 @@ def test_line_through_a_part_of_a_component_icon_fails_and_is_not_called_a_name_
     # 왼쪽에서 비스듬히 들어와 위쪽 부품 네모에 걸린다 — 그 컴포넌트가 끝인 선이어도 불합격
     r = report([el("component_icon", "C", 0, 0), el("class", "A", -200, -100)], [rel("dependency", "A", "C")])
     (f,) = r.failures
-    assert f.kind == "line_through_name" and "부품 네모(0, 3, 16×6)" in f.problem and "이름 칸" not in f.problem + f.hint
+    assert f.kind == "line_through_name" and "부품 네모(0, 6, 16×6)" in f.problem and "이름 칸" not in f.problem + f.hint
 
 
 def test_element_or_label_on_a_part_of_a_component_icon_fails():
     # A는 상자(x 8부터)에는 닿지 않고 튀어나온 부품 네모(x 0~16)에만 걸친다
     assert kinds(report([el("component_icon", "C", 0, 0), el("class", "A", -88, 0)])) == ["box_overlap"]
-    # 세로선 T→U(x −30)의 가운데가 위쪽 부품 네모(0, 3, 16×6) 높이에 온다. 이름 자리 둘 가운데 왼쪽은 상자 D가 막아 오른쪽(네모 위)에 놓인다
+    # 세로선 T→U(x −30)의 가운데가 위쪽 부품 네모(0, 6, 16×6) 높이에 온다. 이름 자리 둘 가운데 왼쪽은 상자 D가 막아 오른쪽(네모 위)에 놓인다
     r = report([el("component_icon", "C", 0, 0), el("class", "T", -75, -246), el("class", "U", -75, 206),
                 el("class", "D", -135, -20)], [rel("association", "T", "U", name="uses")])
     (f,) = r.failures
