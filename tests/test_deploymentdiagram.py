@@ -42,6 +42,10 @@ def report(elements, relations=()):
     return K.check(draw(elements, relations))
 
 
+def kinds(r):
+    return [f.kind for f in r.failures]
+
+
 def placed(drawing, key):
     return drawing.layout.by_key[key]
 
@@ -170,11 +174,33 @@ def size_of(element):
     return p.width, p.height
 
 
-def side_gaps(outer, label):
-    """요령의 간격: (왼쪽, 오른쪽, 아래). 옆은 바깥 노드 테두리 ~ 안쪽 노드 거리 + 선 글자 폭 + 20, 아래는 그 거리 + 40."""
+def internet(*names):
+    """«internet» 스테레오타입과 이름 줄(names)을 단 통신 경로 — 선 글자가 1 + 이름 줄 수만큼의 줄이다."""
+    def make(source, target, **more):
+        return path(source, target, stereotype="internet", name=list(names), **more)
+    return make
+
+
+LABELS = {  # 선 글자 → (선 만들기, 줄)
+    "deploy": (deploy, ("«deploy»",)),
+    "https": (https, ("HTTPS",)),
+    "two-lines": (internet("HTTPS"), ("«internet»", "HTTPS")),
+    "three-lines": (internet("HTTPS", "port 443"), ("«internet»", "HTTPS", "port 443")),
+}
+
+
+def side_gaps(outer, lines):
+    """요령의 간격: (왼쪽, 오른쪽, 아래). 옆은 바깥 노드 테두리 ~ 안쪽 노드 거리 + 가장 긴 줄의 폭 + 20, 아래는 그 거리 + 40 +
+    줄이 늘 때마다 15."""
     d = draw(outer)
     o, i = placed(d, outer[0]["name"]).rect, placed(d, "Tomcat").rect
-    return i[0] - o[0] + text_width(label) + 20, o[2] - i[2] + text_width(label) + 20, o[3] - i[3] + 40
+    width = max(text_width(s) for s in lines)
+    return i[0] - o[0] + width + 20, o[2] - i[2] + width + 20, o[3] - i[3] + 40 + 15 * (len(lines) - 1)
+
+
+def above_gap(lines):
+    """요령의 위쪽 간격: 80 + 줄이 늘 때마다 15."""
+    return 80 + 15 * (len(lines) - 1)
 
 
 def sent_from(outer, sender, side, gap, make):
@@ -186,12 +212,13 @@ def sent_from(outer, sender, side, gap, make):
     return report([{**sender, "left": left, "top": top}, *outer], [make(sender["name"], "Tomcat")])
 
 
-@pytest.mark.parametrize("make, label", [(deploy, "«deploy»"), (https, "HTTPS")])
-def test_line_into_a_nested_node_from_above_crosses_the_outer_name_but_not_from_the_side_or_below(make, label):
+@pytest.mark.parametrize("label", LABELS)
+def test_line_into_a_nested_node_from_above_crosses_the_outer_name_but_not_from_the_side_or_below(label):
+    make, lines = LABELS[label]
     sender = el("artifact", "order.war", 60, -140)
-    (f,) = report([sender, *OUTER], [make("order.war", "Tomcat")]).failures
-    assert f.kind == "line_through_name" and f.elements == ("order.war->Tomcat", "App Server")
-    for side, gap in zip(("left", "right", "below"), side_gaps(OUTER, label)):
+    r = report([sender, *OUTER], [make("order.war", "Tomcat")])
+    assert ("line_through_name", ("order.war->Tomcat", "App Server")) in [(f.kind, f.elements) for f in r.failures]
+    for side, gap in zip(("left", "right", "below"), side_gaps(OUTER, lines)):
         r = sent_from(OUTER, sender, side, gap, make)
         assert r.passed, (side, gap, r.summary())
 
@@ -203,11 +230,22 @@ def test_side_or_below_sender_closer_than_the_tip_puts_the_label_on_the_outer_bo
     outer = [device("App", 0, 0), el("node", "Tomcat", 140, 66, stereotype="executionEnvironment", **{"in": "App"}),
              inside("Tomcat", "component", "Svc", 160, 132)]
     sender = el("artifact", "a.war", 0, 0)
-    gap = dict(zip(("left", "right", "below"), side_gaps(outer, "«deploy»")))[side]
+    gap = dict(zip(("left", "right", "below"), side_gaps(outer, ("«deploy»",))))[side]
     (f,) = sent_from(outer, sender, side, gap - 30, deploy).failures
     assert f.kind == "text_on_box" and f.elements == ("a.war->Tomcat", "App")
     assert sent_from(outer, sender, side, gap, deploy).passed
-    assert "거리 + 선 글자 폭 + 20px 이상" in D.TIPS and "안쪽 노드 아랫변까지의 거리 + 40px 이상" in D.TIPS
+    assert "거리 + 선 글자 폭(가장 긴 줄) + 20px" in D.TIPS and "안쪽 노드 아랫변까지의 거리 + 40px 이상" in D.TIPS
+
+
+def test_label_of_three_lines_from_below_needs_15px_more_for_each_extra_line():
+    # «internet»·HTTPS·port 443 세 줄 글자는 아래 간격 + 40만으로는 바깥 노드 아랫변에 걸리고, 줄마다 15px를 더하면 합격한다
+    make, lines = LABELS["three-lines"]
+    sender = el("artifact", "a.war", 0, 0)
+    gap = side_gaps(OUTER, lines)[2]
+    (f,) = sent_from(OUTER, sender, "below", gap - 30, make).failures
+    assert f.kind == "text_on_box" and f.elements == ("a.war->Tomcat", "App Server")
+    assert sent_from(OUTER, sender, "below", gap, make).passed
+    assert "아래·위 간격에 한 줄마다 15px를 더한다" in D.TIPS
 
 
 CLUSTER = [device("Application Server Cluster", 0, 0),
@@ -228,13 +266,13 @@ def above(outer, sender, left, gap):
 
 
 @pytest.mark.parametrize("outer, left", [(OUTER, -50), (OUTER, 190), (CLUSTER, -140), (CLUSTER, 280)])
-@pytest.mark.parametrize("make", [deploy, https])
-def test_sender_above_beside_the_name_follows_the_tip_with_one_bend(outer, left, make):
-    # 이름 칸 바로 위는 아니지만 곧은 선이 이름 칸을 지나는 자리(바깥 노드 윗변에서 80px 위)에서, 요령의 꺾는 점을 하나 주면
-    # 합격한다. 이름이 길어 이름 칸 옆 앞면이 34px뿐이라 꺾는 점이 앞면 밖에 놓여도 같다
-    sender = above(outer, el("artifact", "order.war", 0, 0), left, 80)
-    (f,) = report([sender, *outer], [make("order.war", "Tomcat")]).failures
-    assert f.kind == "line_through_name"
+@pytest.mark.parametrize("label", LABELS)
+def test_sender_above_beside_the_name_follows_the_tip_with_one_bend(outer, left, label):
+    # 이름 칸 바로 위는 아니지만 곧은 선이 이름 칸을 지나는 자리(바깥 노드 윗변에서 요령의 간격만큼 위)에서, 요령의 꺾는 점을
+    # 하나 주면 합격한다. 이름이 길어 이름 칸 옆 앞면이 34px뿐이라 꺾는 점이 앞면 밖에 놓여도 같다
+    make, lines = LABELS[label]
+    sender = above(outer, el("artifact", "order.war", 0, 0), left, above_gap(lines))
+    assert "line_through_name" in kinds(report([sender, *outer], [make("order.war", "Tomcat")]))
     holder = placed(draw(outer), outer[0]["name"])
     ((x, _),) = via = tip_bend(outer, sender)
     if outer is CLUSTER:
@@ -246,14 +284,17 @@ def test_sender_above_beside_the_name_follows_the_tip_with_one_bend(outer, left,
 
 
 @pytest.mark.parametrize("left", [-20, 190])
-def test_sender_above_closer_than_80px_puts_the_label_on_the_outer_border_even_with_the_bend(left):
-    # 요령의 꺾는 점을 줘도, 보내는 요소를 바깥 노드 윗변에서 60px(기본 세로 간격)만 떼면 선 글자가 바깥 노드 테두리에 걸린다
+@pytest.mark.parametrize("label, near", [("deploy", 60), ("two-lines", 80)])
+def test_sender_above_closer_than_the_tip_puts_the_label_on_the_outer_border_even_with_the_bend(left, label, near):
+    # 요령의 꺾는 점을 줘도, 한 줄 글자는 바깥 노드 윗변에서 60px(기본 세로 간격)만, 두 줄 글자는 한 줄 기준 80px만 떼면 선
+    # 글자가 바깥 노드 테두리에 걸린다. 요령대로(80px, 줄마다 15px 더) 떼면 합격한다
+    make, lines = LABELS[label]
     sender = el("artifact", "w", 0, 0)
-    near, far = above(OUTER, sender, left, 60), above(OUTER, sender, left, 80)
-    (f,) = report([near, *OUTER], [deploy("w", "Tomcat", via=tip_bend(OUTER, near))]).failures
+    close, far = above(OUTER, sender, left, near), above(OUTER, sender, left, above_gap(lines))
+    (f,) = report([close, *OUTER], [make("w", "Tomcat", via=tip_bend(OUTER, close))]).failures
     assert f.kind == "text_on_box" and f.elements == ("w->Tomcat", "App Server")
-    assert report([far, *OUTER], [deploy("w", "Tomcat", via=tip_bend(OUTER, far))]).passed
-    assert "바깥 노드 윗변에서 80px 이상 떼어" in D.TIPS
+    assert report([far, *OUTER], [make("w", "Tomcat", via=tip_bend(OUTER, far))]).passed
+    assert "바깥 노드 윗변에서 80px 이상 떼어(선 글자가 여러 줄이면 위대로 더한다)" in D.TIPS
 
 
 def test_returned_places_draw_the_same_picture():
