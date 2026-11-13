@@ -231,7 +231,9 @@ RELATIONS = {
 # ---------------------------------------------------------------- 관계 규칙(이 관계를 받는 도구가 함께 쓴다)
 
 GENERALIZATION, REALIZATION = "generalization", "realization"
-SAME_KIND = {"abstract": "class"}  # 상속에서 같은 종류로 치는 요소 종류
+SAME_KIND = {"abstract": "class",  # 상속에서 같은 종류로 치는 요소 종류 → 그 기본 종류
+             "component_icon": "component", "artifact_icon": "artifact"}  # 아이콘 표기는 같은 요소를 다르게 그린 것이다
+ICONS = ("component_icon", "artifact_icon")
 NOT_INHERITED = {  # 상속의 끝이 될 수 없는 요소 종류 → (부르는 말, 고치는 법)
     "package": ("패키지", "패키지가 끝인 관계는 dependency로 긋는다(패키지 사이 «import» 등은 stereotype으로 단다)"),
     "lollipop": ("제공 인터페이스 원", "인터페이스 사이 상속은 kind 'interface' 상자끼리 긋는다"),
@@ -256,6 +258,7 @@ REALIZED = {
                           "컴포넌트를 실현하는 것은 클래스다 — 아티팩트가 컴포넌트를 구현하는 것이면 dependency에 stereotype "
                           "'manifest'를 달고, 다른 뜻이면 dependency를 쓴다."),
 }
+REALIZED["component_icon"] = REALIZED["component"]  # 아이콘 표기 컴포넌트도 클래스가 실현한다
 
 
 def _end(side: str, key: str, kind: str) -> str:
@@ -322,7 +325,7 @@ class ClassRules(Rules):
             if s is None or t is None or rel.source == rel.target:
                 continue
             if rel.kind == GENERALIZATION:
-                if self._generalization(r, path, rel, s, t, realized):
+                if self._generalization(r, spec, path, rel, s, t, realized):
                     parents.setdefault(rel.source, []).append(rel.target)
                     inherits.append((path, rel))
             elif rel.kind == REALIZATION:
@@ -343,7 +346,8 @@ class ClassRules(Rules):
         return [n for n in found if n is not None]
 
     @staticmethod
-    def _generalization(r: Reader, path: str, rel: B.Relation, s: str, t: str, realized: set[tuple[str, str]]) -> bool:
+    def _generalization(r: Reader, spec: Spec, path: str, rel: B.Relation, s: str, t: str,
+                        realized: set[tuple[str, str]]) -> bool:
         """상속의 두 끝 종류를 본다. 맞으면 True, 틀렸으면 알리고 False. 실체화를 뜻했을 수 있으면(그 실체화가 알림 없이 받아지면)
         실체화로 고치라고 하되, 그 실체화가 이미 있으면(realized — 실체화의 (from, to)) 선이 겹치니 이 상속을 지우라고 한다."""
         if _realizable(s, t):
@@ -361,8 +365,10 @@ class ClassRules(Rules):
                 return False
         if _same_kind(s, t):
             return True
+        icons = "·".join(k for k in ICONS if k in spec.shapes)
+        same = "class와 abstract는 같은 종류로 친다" + (f", 아이콘 표기({icons})도 기본 표기와 같은 종류로 친다" if icons else "")
         r.fail(path, f"상속의 두 끝 종류가 다르다({_end('from', rel.source, s)}, {_end('to', rel.target, t)}) — 상속은 같은 "
-                     f"종류끼리 긋는다(class와 abstract는 같은 종류로 친다). {fix or 'from·to나 요소의 kind를 고친다'}")
+                     f"종류끼리 긋는다({same}). {fix or 'from·to나 요소의 kind를 고친다'}")
         return False
 
     @staticmethod
@@ -410,12 +416,19 @@ class ClassRules(Rules):
         def quoted(kinds) -> str:
             return "·".join(f'"{k}"' for k in dict.fromkeys(kinds) if k in spec.shapes)
 
-        kinds = [k for k in spec.shapes if k not in NOT_INHERITED and k not in SAME_KIND]
-        groups = ", ".join('"class"·"abstract"끼리' if k == "class" and "abstract" in spec.shapes else f'"{k}"끼리' for k in kinds)
+        families: dict[str, list[str]] = {}  # 같은 종류로 치는 것끼리 — 기본 종류 → 그 종류들(도구가 받는 차례)
+        for k in spec.shapes:
+            if k not in NOT_INHERITED:
+                families.setdefault(SAME_KIND.get(k, k), []).append(k)
+        groups = ", ".join(f"{quoted(ks)}끼리" for ks in families.values())
         never = quoted(NOT_INHERITED)
         quiet = quoted(k for k, d in REALIZED.items() if d.doers is None)
-        but = "".join(f"(to가 {quoted([k])}이고 from이 {quoted(d.doers)}인 것은 빼고)" for k, d in REALIZED.items()
-                      if d.doers is not None and k in spec.shapes)
+        limited: dict[tuple[str, ...], list[str]] = {}  # 하는 쪽이 정해진 대상들 — 하는 쪽 종류 → 대상 종류들
+        for k, d in REALIZED.items():
+            if d.doers is not None and k in spec.shapes:
+                limited.setdefault(d.doers, []).append(k)
+        but = "".join(f"(to가 {quoted(ks)}{' 가운데 하나' if len(ks) > 1 else ''}이고 from이 {quoted(by)}인 것은 빼고)"
+                      for by, ks in limited.items())
         doers = quoted((*INTERFACES, *NOT_INHERITED))
         doers += " 가운데 하나" if "·" in doers else ""
         return "\n".join([

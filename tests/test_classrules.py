@@ -277,6 +277,26 @@ def test_only_classes_realize_components_quietly(source):
     assert report(P, [el("abstract", "a", 0, 250), el("component", "c", 0)], [rel("realization", "a", "c")]).notices == ()
 
 
+@pytest.mark.parametrize("module", [P, CD, D])
+def test_icon_notations_count_as_the_kind_they_draw(module):
+    # 아이콘 표기(#45)는 같은 요소를 다르게 그린 것 — 기본 표기와 서로 상속하고, 클래스가 아이콘 컴포넌트를 실현해도 알리지 않는다
+    for icon, plain in (("component_icon", "component"), ("artifact_icon", "artifact")):
+        d = module.parse({"elements": [el(icon, "a", 0), el(plain, "b", 400)], "relations": [rel("generalization", "a", "b")]})
+        assert len(d.relations) == 1 and d.notices == ()
+    r = report(module, [el("class", "Impl", 250, 0), el("component_icon", "C", 0)], [rel("realization", "Impl", "C")])
+    assert r.notices == (), r.summary()
+
+
+def test_icon_notation_mistakes_name_the_icon_kinds():
+    # 종류가 다른 상속 오류는 아이콘 표기도 같은 종류로 친다고 적고, 아이콘 아티팩트가 하는 컴포넌트 실현은 «manifest»를 권한다
+    (p,) = problems(P, [el("class", "a", 0), el("component_icon", "c", 400)], [rel("generalization", "a", "c")])
+    assert ("(class와 abstract는 같은 종류로 친다, 아이콘 표기(component_icon·artifact_icon)도 기본 표기와 같은 종류로 친다). "
+            "클래스가 컴포넌트를 실현하는 것이면 kind를 'realization'으로 바꾼다") in p
+    (n,) = report(P, [el("artifact_icon", "a", 0, 250), el("component_icon", "c", 0)], [rel("realization", "a", "c")]).notices
+    assert n.problem.startswith("실체화를 하는 쪽이 to를 실현하지 않는 종류다(from 'a': 'artifact_icon'")
+    assert "stereotype 'manifest'" in n.hint
+
+
 def test_inheritance_hint_is_left_out_when_inheriting_would_close_a_cycle():
     # B가 이미 A를 상속하는데 A -> B 실체화를 상속으로 바꾸면 고리 오류가 난다 — 그 말 대신 실체화를 지우라고 한다
     (n,) = class_report([box("A", 0), box("B", 300)], [rel("generalization", "B", "A"),
@@ -399,13 +419,14 @@ def test_tool_descriptions_state_the_rules_of_the_kinds_the_tool_takes():
             "인터페이스를 구현하는 것은 realization이다.") in server.CLASS_TOOL
     assert ('  - 알림: 다음 실체화는 그리되 검사 결과에 알림을 준다(불합격이 아니다) — from이 "interface"인 것, to가 '
             '"interface" 밖의 종류인 것. ') in server.CLASS_TOOL
-    assert ('"interface"끼리, "enum"끼리, "component"끼리, "artifact"끼리, "node"끼리). 상속의 끝이 될 수 없는 종류: '
-            '"package".') in P.TOOL
+    # 아이콘 표기는 기본 표기와 같은 종류로 묶어 적는다
+    assert ('"interface"끼리, "enum"끼리, "component"·"component_icon"끼리, "artifact"·"artifact_icon"끼리, "node"끼리). '
+            '상속의 끝이 될 수 없는 종류: "package".') in P.TOOL
     assert '상속의 끝이 될 수 없는 종류: "package"·"lollipop".' in CD.TOOL
     assert ('from이 "interface"·"lollipop"·"package" 가운데 하나인 것, to가 "interface"·"lollipop" 밖의 종류인 것(to가 '
-            '"component"이고 from이 "class"·"abstract"인 것은 빼고).') in CD.TOOL
-    assert ('from이 "interface"·"package" 가운데 하나인 것, to가 "interface" 밖의 종류인 것(to가 "component"이고 from이 '
-            '"class"·"abstract"인 것은 빼고).') in D.TOOL
+            '"component"·"component_icon" 가운데 하나이고 from이 "class"·"abstract"인 것은 빼고).') in CD.TOOL
+    assert ('from이 "interface"·"package" 가운데 하나인 것, to가 "interface" 밖의 종류인 것(to가 "component"·"component_icon" '
+            '가운데 하나이고 from이 "class"·"abstract"인 것은 빼고).') in D.TOOL
     # 따옴표 친 종류 이름 바로 뒤에 받침에 따라 갈리는 조사를 붙이지 않는다("lollipop"는은 틀린다 — 이고·인 같은 서술은 괜찮다)
     for tool in (server.CLASS_TOOL, P.TOOL, CD.TOOL, D.TOOL):
         rules = "\n".join(line for line in tool.splitlines() if line.startswith(("  - 규칙:", "  - 알림:")))
