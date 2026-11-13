@@ -95,7 +95,8 @@ names the one it sits in with `in`, and the outer element grows right and down t
 }
 ```
 
-It gets back the same things as the class diagram tool, with the place of every element. Besides the class diagram
+It gets back the same things as the class diagram tool, with the place of every element (and, for a package, the
+point its lines aim at, since that is not the middle of the package). Besides the class diagram
 checks, the check fails when an element inside another sits too close to its edge or name tab, or a line runs along
 the edge of a package it starts or ends in, or through a package's name tab.
 
@@ -188,7 +189,8 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   상속끼리, 실체화끼리는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 써도 된다(꺾는 점을 주는 법은 도구 설명에 있다).
 - **패키지도**는 `draw_package_diagram`으로 그린다. 패키지와 패키지 사이 의존을 그리고, 패키지 안에 클래스·패키지를 넣는다.
   컴포넌트·아티팩트·노드도 한 그림에 함께 그린다. 요소마다 `kind`를 주고, 다른 요소 안에 둘 요소는 `in`으로 품은 요소를
-  가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다.
+  가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다(패키지는
+  선이 가운데가 아니라 탭 오른쪽 몸통의 가운데를 향하므로 그 점도 함께).
   클래스도 검사에 더해, 안의 요소가 바깥 요소의 테두리·이름 탭에 붙거나, 선이 그 끝을 품은 패키지의 테두리를 따라가거나 패키지
   탭을 지나면 불합격이다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는

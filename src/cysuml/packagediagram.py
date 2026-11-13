@@ -12,7 +12,8 @@ from .boxcheck import KINDS
 from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Spec
 from .canvas import SCALE
 from .classdiagram import RELATIONS
-from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, PLACES_RESULT, flow, relation_fields
+from .guide import (AIM_PLACES, COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, PLACES_RESULT, flow,
+                    relation_fields)
 from .shapes import SHAPES
 
 SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="to")
@@ -33,9 +34,6 @@ TIPS = """패키지도 배치 요령:
 패키지 폭과 이름 길이(탭 폭)에 따라 달라서 위아래로 쌓은 패키지라도 폭이나 이름 길이가 다르면 선이 비스듬히 들어와 아래 패키지 \
 탭을 지나기 쉽다. 그러면 아래 패키지 탭 오른쪽 끝에서 20px쯤 오른쪽, 아래 패키지 top에서 30px쯤 위에 꺾는 점(via)을 하나 준다 \
 (탭 자리는 불합격 항목의 "이름 칸"에 나온다).
-- 패키지를 공유 줄기로 모을 때 패키지의 x는 가운데 대신 자리 오른 변에서 20px 왼쪽을 쓴다. 선이 향하는 탭 오른쪽 몸통의 가운데는 \
-결과에 나오지 않고, 가운데 x를 주면 이름이 긴 패키지는 선이 제 탭을 지난다. 패키지 폭은 늘 탭 폭보다 40px 이상 넓어 이 x는 탭 \
-오른쪽 끝에서 20px 이상 떨어진다.
 - 요소 사이는 관계 이름·스테레오타입 글자가 들어갈 만큼 띄운다. 가로 80px·세로 60px쯤에서 시작하고, 글자가 길면 더 띄운다.
 - 요소 크기는 도구가 글자와 안의 요소에 맞춰 늘린다. 그린 크기는 결과의 "요소 자리"에서 보고 다음 배치에 쓴다."""
 
@@ -54,6 +52,7 @@ TOOL = f"""패키지도를 그려 PNG 파일로 저장하고, 검사 결과와 �
 
 결과
 {PLACES_RESULT}
+{AIM_PLACES}
 {IMAGE_RESULT}
 - elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
 그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.

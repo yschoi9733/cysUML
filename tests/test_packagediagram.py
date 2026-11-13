@@ -152,11 +152,20 @@ def test_lines_aim_at_the_middle_of_the_body_right_of_the_tab():
         assert (x1 - x0) * (ay - y0) == pytest.approx((y1 - y0) * (ax - x0))  # 선이 그 점을 향한다
 
 
+def test_result_adds_the_aim_point_of_packages_only():
+    d = draw([el("package", "P", 0, 0, width=300), inside("P", "class", "A", 20, 44), el("component", "K", 400, 0),
+              el("node", "N", 400, 150)])
+    (line,) = server._places(d)
+    p = placed(d, "P")
+    assert p.anchor == ((50 + 300) / 2, (HEAD + p.height) / 2)
+    assert f"P(0, 0, 300×{p.height:g}, 향하는 점 175, {p.anchor[1]:g})" in line
+    assert "A(20, 44, 90×48)" in line and line.count("향하는 점") == 1
+
+
 @pytest.mark.parametrize("parent", ["base", "infrastructure.persistence"])
-def test_packages_share_one_trunk_at_twenty_left_of_their_right_edge(parent):
-    # 배치 요령대로 패키지의 x는 자리(결과에 나오는 값) 오른 변에서 20px 왼쪽 — 선이 향하는 탭 오른쪽 몸통의 가운데는 결과에
-    # 없고, 자리 가운데 x로 주면 이름이 긴 패키지는 첫 구간이 제 탭을 지난다
-    assert "자리 오른 변에서 20px 왼쪽을 쓴다" in P.TIPS
+def test_packages_share_one_trunk_at_the_x_their_lines_aim_at(parent):
+    # 공유 줄기 — 패키지의 x는 결과에 덧붙는 향하는 점(탭 오른쪽 몸통의 가운데)의 x다. 자리 가운데 x로 주면 이름이 긴 패키지는
+    # 첫 구간이 제 탭을 지난다
     elements = [el("package", parent, 200, 0)] + [el("package", n, left, 150) for n, left in
                                                  (("infrastructure", 0), ("web", 220), ("persistence.jpa", 420))]
     boxes = {p.key: p for p in draw(elements).layout.boxes}
@@ -165,7 +174,7 @@ def test_packages_share_one_trunk_at_twenty_left_of_their_right_edge(parent):
     def trunk(x):
         return [rel("generalization", k, parent, via=[[x(k), y], [x(parent), y]]) for k in boxes if k != parent]
 
-    assert report(elements, trunk(lambda k: boxes[k].rect[2] - 20)).passed
+    assert report(elements, trunk(lambda k: boxes[k].anchor[0])).passed
     middle = report(elements, trunk(lambda k: (boxes[k].rect[0] + boxes[k].rect[2]) / 2))
     assert "line_through_name" in kinds(middle)
 

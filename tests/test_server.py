@@ -154,32 +154,41 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
                    f"가장 위 자식 {noun}의 위 {edge} 사이 가운데쯤에 둔다",
                    f"부모 아래 {edge}에서 삼각형 길이 {boxdiagram.TRIANGLE[0]}px보다 가까우면 입력 오류다"):
         assert phrase in text, phrase
-    # 새 도구는 모양 밖 이름과, 선이 가운데가 아닌 점을 향하는 요소 종류(패키지)를 함께 적는다
-    assert ("모양 자리가 덧붙어 있으면 모양 자리로" in text) == spec.extended
-    assert ("배치 요령에 적은 x를 쓴다" in text) == spec.extended
+    # 새 도구는 결과에 덧붙는 모양 자리(모양 밖 이름)와 향하는 점(패키지)을 함께 적는다
+    assert ("모양 자리가 덧붙어 있으면 모양 자리로 셈하고, 향하는 점이 덧붙어 있으면 그 x를 쓴다" in text) == spec.extended
 
 
-PLACE = re.compile(r"(\w+)\((-?[\d.]+), (-?[\d.]+), ([\d.]+)×([\d.]+)\)")
+PLACE = re.compile(r"(\w+)\((-?[\d.]+), (-?[\d.]+), ([\d.]+)×([\d.]+)(?:, 향하는 점 (-?[\d.]+), -?[\d.]+)?\)")
+INNER = {"kind": "class", "name": "Inner", "in": "P", "left": 300, "top": 44}  # 부모 패키지를 오른쪽·아래로 넓힌다
 
 
-@pytest.mark.parametrize("name, field, parent_kind, kind", [  # 패키지가 부모인 줄기는 test_packagediagram이 본다
-    ("draw_class_diagram", "classes", "class", "generalization"),
-    ("draw_class_diagram", "classes", "interface", "realization"),
-    ("draw_package_diagram", "elements", "class", "generalization"),
+@pytest.mark.parametrize("name, field, parent, children, more, kind, child_top, points", [
+    ("draw_class_diagram", "classes", {"kind": "class"}, "class", [], "generalization", 120, [2, 1, 2]),
+    ("draw_class_diagram", "classes", {"kind": "interface"}, "class", [], "realization", 120, [2, 1, 2]),
+    ("draw_package_diagram", "elements", {"kind": "class"}, "class", [], "generalization", 120, [2, 1, 2]),
+    ("draw_package_diagram", "elements", {"kind": "package"}, "package", [], "generalization", 120, [2, 1, 2]),
+    ("draw_package_diagram", "elements", {"kind": "package", "width": 500}, "package", [], "generalization", 120, [2, 2, 2]),
+    ("draw_package_diagram", "elements", {"kind": "package"}, "package", [INNER], "generalization", 180, [2, 2, 2]),
 ])
-def test_shared_trunk_given_as_the_description_says_passes(tmp_path, name, field, parent_kind, kind):
-    """부모 하나·자식 셋(가운데 자식은 부모 바로 아래)을 놓고, 결과의 자리에서 가운데 x를 읽어 설명대로 꺾는 점을 준다."""
-    boxes = [{"kind": parent_kind, "name": "P", "left": 200, "top": 0}]
-    boxes += [{"kind": "class", "name": f"C{i}", "left": left, "top": 120} for i, left in enumerate((50, 200, 350))]
+def test_shared_trunk_given_as_the_description_says_passes(tmp_path, name, field, parent, children, more, kind, child_top,
+                                                          points):
+    """부모 하나·자식 셋을 놓고, 결과의 자리에서 가운데 x(향하는 점이 덧붙어 있으면 그 x)를 읽어 설명대로 꺾는 점을 준다.
+    폭을 같게 준 가운데 자식은 부모와 x가 같아 점 하나를 받는다. 넓은 부모 패키지는 향하는 점이 가운데에서 멀다."""
+    boxes = [{**parent, "name": "P", "left": 200, "top": 0}, *more]
+    boxes += [{"kind": children, "name": f"C{i}", "left": left, "top": child_top, "width": 140}
+              for i, left in enumerate((0, 200, 400))]
+    boxes[0].setdefault("width", 140)
     args = {"file_name": "trunk", field: boxes, "out_dir": str(tmp_path)}
     (first,) = run(server.mcp, (name, args))[2]
-    places = {key: tuple(map(float, rest)) for key, *rest in PLACE.findall(text(first))}
-    middle = {key: left + width / 2 for key, (left, top, width, height) in places.items()}
+    places = {key: (float(left), float(top), float(width), float(height), aim)
+              for key, left, top, width, height, aim in PLACE.findall(text(first))}
+    assert bool(places["P"][4]) == (parent["kind"] == "package")
+    middle = {key: float(aim) if aim else left + width / 2 for key, (left, top, width, height, aim) in places.items()}
     parent_bottom = places["P"][1] + places["P"][3]
-    y = (parent_bottom + 120) / 2
+    y = (parent_bottom + child_top) / 2
     assert y - parent_bottom > boxdiagram.TRIANGLE[0]
     via = {k: [[middle["P"], y]] if middle[k] == middle["P"] else [[middle[k], y], [middle["P"], y]] for k in ("C0", "C1", "C2")}
-    assert [len(v) for v in via.values()] == [2, 1, 2]
+    assert [len(v) for v in via.values()] == points
     relations = [{"kind": kind, "from": k, "to": "P", "via": v} for k, v in via.items()]
     (r,) = run(server.mcp, (name, {**args, "relations": relations}))[2]
     assert not r.is_error and text(r).startswith("합격"), text(r)
@@ -192,6 +201,14 @@ def test_relation_fields_say_where_lines_start_for_each_tool():
     assert "탭 오른쪽 몸통의 가운데를 향한다" in packagediagram.TOOL
     # 패키지도에는 모양 밖 이름이 있는 요소가 없어 그 결과 문장을 넣지 않는다
     assert guide.PLACES_RESULT in packagediagram.TOOL and guide.OUTSIDE_PLACES not in packagediagram.TOOL
+
+
+def test_tools_whose_shapes_aim_off_center_tell_that_the_result_carries_the_aim_point():
+    _, tools, _ = run(server.mcp)
+    for name, (_, _, spec) in PLACED_TOOLS.items():
+        aims = any(type(s).anchor is not boxdiagram.Shape.anchor for s in spec.shapes.values())
+        assert (guide.AIM_PLACES in tools[name].description) == aims, name
+    assert guide.AIM_PLACES in packagediagram.TOOL
 
 
 def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):

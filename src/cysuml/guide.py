@@ -73,6 +73,8 @@ PLACES_RESULT = ("- 글: 검사 결과, 요소마다 그린 자리(열쇠와 왼
                  "입력에 넣으면 요소가 움직이지 않는다.")
 OUTSIDE_PLACES = ("  모양 밖 이름이 있는 요소의 자리는 모양과 이름을 함께 덮고, 그 뒤에 모양 자리를 \"모양 왼, 위, 폭×높이\"로 "
                   "덧붙인다(꺾는 점을 모양 둘레에 줄 때 쓴다).")  # 모양 밖 이름이 있는 모양을 받는 도구만 PLACES_RESULT 뒤에 붙인다
+AIM_PLACES = ("  선이 테두리 가운데가 아닌 점을 향하는 요소(패키지)는 그 뒤에 그 점을 \"향하는 점 x, y\"로 덧붙인다(꺾는 점을 "
+              "그 점의 위아래나 옆에 줄 때 쓴다).")  # 그런 모양(Shape.anchor)을 받는 도구만 PLACES_RESULT 뒤에 붙인다
 
 MEMBERS = """속성·연산은 한 줄 문자열(그대로 쓴다)이나 객체다. 속성 객체는 name(필수)·type·default·visibility(기본 "-")·static, \
 연산 객체는 name(필수)·params(문자열 목록)·returns·visibility(기본 "+")·static. visibility는 "+"·"-"·"#"·"~"·""(안 씀)이고, \
@@ -170,7 +172,7 @@ def _trunk(types: list[RelationType], words: Words, box: bool) -> str:
     noun, edge = words.noun, words.edge
     x = f"결과의 {noun} 자리에서 왼 + 폭/2"
     if not box:
-        x += " — 모양 자리가 덧붙어 있으면 모양 자리로. 선이 가운데가 아닌 점을 향하는 요소 종류는 배치 요령에 적은 x를 쓴다"
+        x += " — 모양 자리가 덧붙어 있으면 모양 자리로 셈하고, 향하는 점이 덧붙어 있으면 그 x를 쓴다"
     ga = josa(head, "이", "가")
     return (f"  - 공유 줄기: 같은 부모(to)로 가는 {pairs}는 여러 선을 한 줄기로 모아 {head} 하나를 함께 쓰게 그려도 된다. "
             f"{head}{ga} 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다(종류가 다른 선을 섞거나 {head}{ga} 조금이라도 "
