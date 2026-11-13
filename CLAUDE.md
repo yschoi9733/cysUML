@@ -3,7 +3,7 @@
 ## 프로젝트
 
 - **cysUML** — AI가 배치하고 도구가 그리는, 문서에 바로 넣을 UML 그림을 뽑는 MCP 서버. 설계 정본은 이슈 #1.
-- Python 3.10 이상 · uv · MCP 공식 Python SDK · Pillow. 첫 버전은 클래스도·교류도를 PNG로 그린다.
+- Python 3.10 이상 · uv · MCP 공식 Python SDK · Pillow. UML 그림을 PNG로 그린다(그림 목록은 README).
 - 레포·화면 이름은 `cysUML`, 파이썬 패키지·실행 명령은 소문자 `cysuml`.
 
 ## 코딩 규칙

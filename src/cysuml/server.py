@@ -1,7 +1,8 @@
-"""MCP 서버: 클래스도·교류도를 그리는 도구를 stdio로 내놓는다.
+"""MCP 서버: UML 그림을 그리는 도구를 stdio로 내놓는다(그림 목록은 README).
 
 도구는 그린 PNG를 파일로 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이 너무 커서 PNG로 못
 그리거나, 저장할 폴더에 쓸 수 없으면 저장하지 않고 오류 결과(isError)로 돌려준다 — AI가 읽고 고칠 수 있게 예외 대신 결과로 낸다.
+새 그림의 도구 설명은 그 그림 모듈이 guide의 공용 조각으로 만든다(처음부터 있던 두 도구의 설명은 여기 있다).
 """
 from __future__ import annotations
 
@@ -21,37 +22,15 @@ from mcp.types import CallToolResult, ImageContent, TextContent
 from PIL import Image
 from pydantic import Field, WithJsonSchema
 
-from . import classcheck, classdiagram, sequencecheck, sequencediagram
+from . import boxcheck, boxdiagram, classcheck, classdiagram, packagediagram, sequencecheck, sequencediagram
 from .canvas import MIN_SCALE, SCALE
-from .classdiagram import InputError
+from .guide import COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, MAX_IMAGE_EDGE, MEMBERS, flow, relation_fields
+from .parsing import InputError
 from .report import Report, fmt_rect
 from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
 
-MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
-DEFAULT_DIR = "diagrams"
 MAX_NAME_BYTES = 200  # 파일 이름(확장자 빼고) UTF-8 길이 상한. 파일 시스템 한도는 보통 255바이트
 NAME_FORBIDDEN = set('/\\:*?"<>|')
-
-KIND_NAMES = {  # 불합격 종류(classcheck.KINDS)를 도구 설명에 쓰는 말
-    "box_overlap": "상자끼리 겹치거나 붙음",
-    "line_through_box": "선이 양 끝이 아닌 상자를 지나감",
-    "line_along_own_box": "선이 제 끝 상자 변에 붙어 감",
-    "head_near_own_box": "선 끝 모양이 그 선의 다른 끝 상자 변에 붙음",
-    "head_under_own_box": "선 끝 모양이 제 상자에 가려짐",
-    "line_overlap": "선끼리 포개지거나 선이 왔던 길을 되짚음",
-    "line_through_head": "선이 다른 선 끝 모양(삼각형·마름모·화살촉)에 닿음",
-    "head_overlap": "선 끝 모양끼리 겹침",
-    "line_through_text": "선이 선 글자(관계 이름·다중도)를 지나감",
-    "text_on_box": "선 글자가 상자에 겹침",
-    "text_overlap": "선 글자끼리 겹침",
-}
-
-CLASS_FLOW = """클래스도 그리는 흐름 — 검사에 합격할 때까지 되풀이한다:
-1. 상자 자리(left·top)와, 필요하면 관계선의 꺾는 점(via)을 정해 그린다.
-2. 돌려받은 검사 결과와 그림을 본다. 불합격 항목마다 걸린 요소, 자리(논리 좌표 왼, 위, 폭×높이), 고치는 법이 붙는다. \
-고치는 법은 종류마다 다르니(상자를 옮긴다, 꺾는 점을 고친다, 두 상자를 떼어 놓는다 등) 항목에 적힌 대로 고친다.
-3. 고친 입력을 같은 file_name으로 다시 그린다(파일을 덮어쓴다).
-선끼리 엇갈린 곳과 그림 크기는 알림이라 불합격이 아니다. 다만 엇갈림은 적을수록 읽기 좋다."""
 
 CLASS_TIPS = """클래스도 배치 요령:
 - 연결이 가장 많은 클래스를 가운데에 둔다.
@@ -72,21 +51,16 @@ SEQUENCE_FLOW = f"""교류도 그리는 흐름:
 그림 크기는 알림이라 불합격이 아니다. 다만 개수 한도 안이어도 그림이 너무 크면 PNG로 그리지 못해 오류가 되니, 메시지가 많아 \
 그림이 길면 나눈다."""
 
-INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리고, 선이 상자나 글자를 지나는지 검사해 그림과 함께 돌려준다.
+INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리고, 선이 요소나 글자를 지나는지 검사해 그림과 함께 돌려준다.
 - 클래스도는 draw_class_diagram으로 그린다. 배치는 부르는 AI가 하고, cysUML은 받은 좌표대로 그린다.
+- 패키지도는 draw_package_diagram으로 그린다. 배치는 부르는 AI가 한다. 패키지 안에 클래스·패키지를 넣고, 컴포넌트·아티팩트·노드도 \
+함께 그린다.
 - 교류도는 draw_sequence_diagram으로 그린다. 배치는 cysUML이 하고, AI는 참여자·메시지·프레임의 차례만 준다.
+불합격 종류와 그림마다의 배치 요령은 각 도구 설명에 있다.
 
-{CLASS_FLOW}
-
-{CLASS_TIPS}
+{flow()}
 
 {SEQUENCE_FLOW}"""
-
-COMMON_INPUT = f"""- file_name: 저장할 파일 이름(확장자 없이). 같은 이름이면 덮어쓴다.
-- out_dir: 저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/이고, 상대 경로도 서버 작업 폴더 기준이다.
-- scale: 출력 배율(기본 {SCALE:g}, {MIN_SCALE:g} 이상). 보통은 주지 않는다."""
-
-IMAGE_RESULT = f"- 그림: 저장한 PNG. 긴 변이 {MAX_IMAGE_EDGE}px를 넘으면 그 길이로 줄여 돌려준다(저장한 파일은 줄이지 않는다)."
 
 CLASS_TOOL = f"""클래스도를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 상자는 준 왼쪽 위(left·top) 그대로, \
 관계선은 준 꺾는 점(via)을 따라 그리고, 상자 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다.
@@ -97,20 +71,10 @@ CLASS_TOOL = f"""클래스도를 그려 PNG 파일로 저장하고, 검사 결�
   - left·top(필수): 상자 왼쪽 위.
   - kind: "class"(기본)·"abstract"·"interface"·"enum".
   - stereotype: «» 없이 이름만.
-  - attributes·operations: 한 줄 문자열(그대로 쓴다)이나 객체. 속성 객체는 name(필수)·type·default·visibility(기본 "-")·static, \
-연산 객체는 name(필수)·params(문자열 목록)·returns·visibility(기본 "+")·static. visibility는 "+"·"-"·"#"·"~"·""(안 씀)이고, \
-static이 true면 밑줄을 긋는다.
+  - attributes·operations: {MEMBERS}
   - literals: 열거 값 목록(kind가 "enum"일 때만).
   - width·height: 최소 크기. 글자가 더 길면 그만큼 늘어난다(폭 기본 90).
-- relations: 관계 목록(없어도 된다).
-  - kind(필수): "association"·"aggregation"·"composition"·"generalization"·"realization"·"dependency".
-  - from·to(필수): 상자 이름. 상속·실체화·의존은 from이 자식·구현하는 쪽·의존하는 쪽이고 삼각형·화살촉이 to 쪽에 붙는다. \
-집합·합성의 마름모는 from 쪽에 붙는다.
-  - name: 관계 이름.
-  - from_multiplicity·to_multiplicity·navigable: 연관·집합·합성만 쓴다. navigable은 화살촉을 둘 쪽 "to"(기본)·"from"·"both"·"none"이다\
-(집합·합성은 "to"·"none"만).
-  - via: 꺾는 점 [[x, y], …]. 선은 상자 가운데에서 첫 꺾는 점(없으면 상대 상자 가운데)으로 가는 선이 상자 변과 만나는 곳에서 \
-시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다.
+{relation_fields(classdiagram.SPEC)}
 {COMMON_INPUT}
 
 결과
@@ -119,9 +83,7 @@ static이 true면 밑줄을 긋는다.
 - classes·relations·file_name이 틀리면 그리지 않고 틀린 곳을 classes[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
 그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.
 
-불합격(선이 상자나 글자를 지나는 등 문서에 넣을 수 없는 그림) {len(KIND_NAMES)}가지: {", ".join(KIND_NAMES.values())}.
-
-{CLASS_FLOW}
+{flow(classcheck.KINDS, classdiagram.SPEC.words)}
 
 {CLASS_TIPS}"""
 
@@ -242,11 +204,16 @@ def _save(png: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[Path]
     return path, None
 
 
-def _boxes(drawing: classdiagram.Drawing) -> list[str]:
-    return ["상자 자리(왼, 위, 폭×높이): " + ", ".join(f"{p.box.name}({fmt_rect(p.rect)})" for p in drawing.layout.boxes)]
+def _places(drawing: boxdiagram.Drawing) -> list[str]:
+    """AI가 배치하는 그림의 요소마다 그린 자리(클래스도는 "상자 자리"). 모양 밖 이름이 있는 요소는 모양 자리를 함께 적는다."""
+    def one(p: boxdiagram.PlacedBox) -> str:
+        shape = f", 모양 {fmt_rect(p.shape_rect)}" if p.shape_rect != p.rect else ""
+        return f"{p.key}({fmt_rect(p.rect)}{shape})"
+    noun = drawing.layout.spec.words.noun
+    return [f"{noun} 자리(왼, 위, 폭×높이): " + ", ".join(one(p) for p in drawing.layout.boxes)]
 
 
-D = TypeVar("D", classdiagram.Drawing, sequencediagram.Drawing)
+D = TypeVar("D", boxdiagram.Drawing, sequencediagram.Drawing)
 
 
 def _draw(file_name: str, render: Callable[[], D], check: Callable[[D], Report], out_dir: Optional[str],
@@ -306,7 +273,19 @@ def draw_class_diagram(
         scale: Scale = SCALE,
 ) -> CallToolResult:
     data = {"classes": classes} if relations is None else {"classes": classes, "relations": relations}
-    return _draw(file_name, lambda: classdiagram.render(data, scale), classcheck.check, out_dir, _boxes)
+    return _draw(file_name, lambda: classdiagram.render(data, scale), classcheck.check, out_dir, _places)
+
+
+@mcp.tool(name="draw_package_diagram", description=packagediagram.TOOL)
+def draw_package_diagram(
+        file_name: FileName,
+        elements: Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")],
+        relations: Annotated[Any, _listed("관계 목록. 필드는 도구 설명에 있다.")] = None,
+        out_dir: OutDir = None,
+        scale: Scale = SCALE,
+) -> CallToolResult:
+    data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
+    return _draw(file_name, lambda: packagediagram.render(data, scale), boxcheck.check, out_dir, _places)
 
 
 @mcp.tool(name="draw_sequence_diagram", description=SEQUENCE_TOOL)

@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from cysuml import classcheck as K
+from cysuml import boxcheck as K
 from cysuml import sequencecheck as SC
 from cysuml import sequencediagram as S
 
@@ -418,8 +418,10 @@ def test_elements_are_input_places(base):
     assert ("messages[1]", "participants[1]") in [f.elements for f in found if f.kind == "text_on_bar"]
 
 
-def test_kind_names_shared_with_the_class_check_mean_the_same():
-    # 두 검사 결과를 같은 꼴로 돌려주므로, 이름이 같으면 뜻도 같다(선끼리 포개진다·선이 글자를 지난다·글자끼리 겹친다)
+def test_kind_names_shared_with_the_placed_diagram_check_mean_the_same():
+    # 두 검사 결과를 같은 꼴로 돌려주므로, 이름이 같으면 뜻도 같다(선끼리 포개진다·선이 글자를 지난다·글자끼리 겹친다).
+    # AI가 배치하는 그림의 검사(boxcheck)는 클래스도와 새 그림 도구가 함께 쓴다
+
     assert set(SC.KINDS) & set(K.KINDS) == {"line_overlap", "line_through_text", "text_overlap"}
 
 
