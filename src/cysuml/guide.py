@@ -20,9 +20,12 @@ from .report import fmt_num
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
 DEFAULT_DIR = "diagrams"
-TRUNK_SPLIT = 20  # 같은 부모로 오는 종류가 다른 두 줄기의 높이 차(px). 둘째 줄기는 첫 줄기보다 이만큼 아래(자식 쪽)에 둔다
-TRUNK_SIDE = 30  # 둘째 줄기를 부모 옆 변으로 들일 때 그 변에서 떼는 거리(px). 끝 구간이 끝 모양 길이보다 길어야 한다(_trunk가 본다)
-TRUNK_ROOM = 60  # 두 줄기를 둘 때 부모와 자식 사이 간격(px). 첫 줄기를 가운데에 두면 둘째 줄기가 자식 위 변에서 10px 떨어진다
+# 같은 부모로 종류가 다른 두 줄기를 둘 때의 수(px). 맞물리는 조건은 test_server가 본다
+TRUNK_SPLIT = 20  # 둘째 줄기는 첫 줄기보다 이만큼 아래(자식 쪽)에 둔다
+TRUNK_SIDE = 30  # 둘째 줄기를 부모 옆 변으로 들일 때 그 변에서 떼는 거리. 끝 구간이 끝 모양 길이보다 길어야 한다
+TRUNK_CLEAR = 10  # 둘째 줄기가 자식 위 변에서 떨어져야 하는 거리(실측 5px까지 합격 — 붙어 감 판정은 4px)
+TRUNK_ROOM = 60  # 부모와 자식 사이 간격. 첫 줄기를 가운데에 두면 둘째 줄기가 자식 위 변에서 TRUNK_CLEAR 떨어진다
+TRUNK_NEAR = 4  # 첫 종류 자식의 세로 줄이 둘째 줄기의 세로 줄에서 이만큼 안이면 포개진다(boxcheck.OVERLAP_GAP 2 + 여유)
 
 KIND_NAMES = {  # 불합격 종류(boxcheck.KINDS)를 도구 설명에 쓰는 말. "요소"는 도구의 말(클래스도는 상자)로 바꿔 쓴다(kind_names)
     "box_overlap": "요소끼리 겹치거나 붙음",
@@ -191,8 +194,6 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
     pairs = ", ".join(f"{t.label}끼리" for t in types)
     head = _joined(t.end.name for t in types if t.end is not None)
     longest = max(t.end.length for t in types if t.end is not None)
-    if TRUNK_SIDE <= longest:
-        raise ValueError(f"둘째 줄기의 끝 구간({TRUNK_SIDE})이 끝 모양 길이({fmt_num(longest)})보다 길어야 한다")
     noun, edge = spec.words.noun, spec.words.edge
     ga = josa(head, "이", "가")
     shape = " — 모양 자리가 덧붙어 있으면 모양 자리로 셈한다" if _outside(spec) else ""
@@ -208,10 +209,15 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
              f"그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다."]
     if len(types) > 1:
         labels = _joined(t.label for t in types)
-        side = f"부모 오른쪽 {edge}의 x(왼 + 폭{', 모양 자리로' if shape else ''}) + {TRUNK_SIDE}"
-        lines.append(f"    - 같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오면 종류마다 줄기를 따로 둔다. 한 종류는 위대로 아래 "
-                     f"{edge}에 모으고, 다른 종류는 y보다 {TRUNK_SPLIT}px 아래(자식 쪽)에 줄기 높이 y2를 정해 자식마다 via에 "
-                     f"[자식 가운데 x, y2], [{side}, y2], [{side}, 부모 가운데 y] 세 점을 주어 부모 오른쪽 {edge}에 모은다. "
-                     f"y2를 y보다 위에 두면 첫 줄기와 포개지고, y2가 자식 {noun}에 붙으면 불합격이니 부모와 자식 사이를 "
-                     f"{TRUNK_ROOM}px 이상 띄운다.")
+        within = ", 모양 자리로" if shape else ""
+        lines += [f"    - 같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오면 종류마다 줄기를 따로 둔다. 한 종류는 위대로 아래 "
+                  f"{edge}에 모은다. 다른 종류는 세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {TRUNK_SIDE}, 줄기 높이 "
+                  f"y2 = y + {TRUNK_SPLIT}(첫 줄기보다 아래, 자식 쪽)로 정하고 자식마다 via에 [자식 가운데 x, y2], [x2, y2], "
+                  f"[x2, 부모 가운데 y] 세 점을 주어 부모 오른쪽 {edge}에 모은다. 자식 가운데 x가 x2와 같으면 [x2, 부모 가운데 y] "
+                  f"하나만 준다.",
+                  f"    - x2 줄(y2에서 부모 가운데 y까지)에 다른 {noun}{josa(noun, '이', '가')} 걸리거나 첫 종류 자식의 가운데 x가 x2에서 "
+                  f"{TRUNK_NEAR}px 안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 {edge}의 x(왼{within}) − {TRUNK_SIDE}로 두어 왼쪽 "
+                  f"{edge}에 모은다.",
+                  f"    - 두 줄기를 둘 때는 y2가 가장 위 자식의 위 {edge}보다 {TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
+                  f"{TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다."]
     return "\n".join(lines)

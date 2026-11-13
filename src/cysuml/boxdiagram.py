@@ -133,7 +133,8 @@ class Shape:
 
     def anchor(self, e: Element, rect: T.Box) -> Optional[Point]:
         """선이 향하는 점 — 선 끝은 이 점에서 첫·마지막 꺾는 점(없으면 상대 요소의 이 점)으로 가는 선이 테두리와 만나는 곳이다.
-        테두리 안이어야 한다. None(기본)이면 테두리 가운데다."""
+        테두리 안이어야 한다. None(기본)이면 테두리 가운데다. 고친 모양은 늘 점을 돌려준다 — 도구 설명과 결과 글은 고쳤는지만 보고
+        (aims_off_center) 그 모양의 향하는 점을 결과에 덧붙인다."""
         return None
 
     def name_zones(self, e: Element, rect: T.Box) -> tuple[NameZone, ...]:

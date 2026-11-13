@@ -157,11 +157,14 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
                    "    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다",
                    "자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다",
                    "    - 같은 부모로 상속·실체화가 함께 오면 종류마다 줄기를 따로 둔다",
-                   f"y보다 {guide.TRUNK_SPLIT}px 아래(자식 쪽)에 줄기 높이 y2를 정해",
-                   f"[자식 가운데 x, y2], [부모 오른쪽 {edge}의 x(왼 + 폭) + {guide.TRUNK_SIDE}, y2], "
-                   f"[부모 오른쪽 {edge}의 x(왼 + 폭) + {guide.TRUNK_SIDE}, 부모 가운데 y] 세 점",
-                   f"y2를 y보다 위에 두면 첫 줄기와 포개지고, y2가 자식 {noun}에 붙으면 불합격이니 부모와 자식 사이를 "
-                   f"{guide.TRUNK_ROOM}px 이상 띄운다."):
+                   f"세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭) + {guide.TRUNK_SIDE}, 줄기 높이 y2 = y + {guide.TRUNK_SPLIT}"
+                   "(첫 줄기보다 아래, 자식 쪽)",
+                   "via에 [자식 가운데 x, y2], [x2, y2], [x2, 부모 가운데 y] 세 점을 주어",
+                   "자식 가운데 x가 x2와 같으면 [x2, 부모 가운데 y] 하나만 준다.",
+                   f"첫 종류 자식의 가운데 x가 x2에서 {guide.TRUNK_NEAR}px 안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 {edge}의 "
+                   f"x(왼) − {guide.TRUNK_SIDE}로 두어",
+                   f"y2가 가장 위 자식의 위 {edge}보다 {guide.TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
+                   f"{guide.TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다."):
         assert phrase in text, phrase
     # 가운데는 그 도구의 결과에 덧붙는 것으로 셈한다 — 패키지도는 향하는 점이 붙고, 모양 밖 이름이 있는 모양은 아직 없다
     aims = any(boxdiagram.aims_off_center(s) for s in spec.shapes.values())
@@ -169,10 +172,13 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     assert "모양 자리" not in text
 
 
-def test_trunk_text_refuses_a_side_leg_shorter_than_the_end_shape(monkeypatch):
-    monkeypatch.setattr(guide, "TRUNK_SIDE", boxdiagram.TRIANGLE[0])
-    with pytest.raises(ValueError, match="끝 모양 길이"):
-        guide.relation_fields(classdiagram.SPEC)
+def test_trunk_numbers_fit_together():
+    # 둘째 줄기를 옆 변으로 들이는 끝 구간이 끝 모양보다 길고(짧으면 입력 오류), 가장 좁은 간격에서 y를 가운데에 두면 둘째 줄기가
+    # 자식 위 변에서 TRUNK_CLEAR 떨어진다. 붙어 감 판정(BOX_CLEARANCE)보다 넉넉하다
+    for _, _, spec in PLACED_TOOLS.values():
+        assert guide.TRUNK_SIDE > max(t.end.length for t in spec.relations.values() if t.trunk and t.end is not None)
+    assert guide.TRUNK_ROOM / 2 - guide.TRUNK_SPLIT >= guide.TRUNK_CLEAR > boxcheck.BOX_CLEARANCE
+    assert guide.TRUNK_NEAR > boxcheck.OVERLAP_GAP
 
 
 PLACE = re.compile(r"([^\s(),:]+)\((-?[\d.]+), (-?[\d.]+), ([\d.]+)×([\d.]+)(?:, 향하는 점 (-?[\d.]+), (-?[\d.]+))?\)")
@@ -222,39 +228,74 @@ def test_shared_trunk_given_as_the_description_says_passes(tmp_path, name, field
     assert not r.is_error and text(r).startswith("합격"), text(r)
 
 
-@pytest.mark.parametrize("name, field", [("draw_class_diagram", "classes"), ("draw_package_diagram", "elements")])
-@pytest.mark.parametrize("kinds", [("realization", "realization", "generalization", "generalization"),
-                                   ("generalization", "realization", "generalization", "realization")])
-@pytest.mark.parametrize("room", [guide.TRUNK_ROOM, 120])
-def test_two_kinds_to_one_parent_given_as_the_description_says_pass(tmp_path, name, field, kinds, room):
-    """인터페이스 P를 클래스가 실체화하고 인터페이스가 상속한다 — 첫 종류는 아래 변에, 다른 종류는 그보다 아래 줄기로 오른쪽 변에.
-    부모와 자식 사이는 설명이 말하는 가장 좁은 간격(TRUNK_ROOM)과 넉넉한 간격."""
-    parent = {"kind": "interface", "name": "P", "left": 200, "top": 0, "width": 140}
+R, G = "realization", "generalization"
+TWO_KINDS = (R, R, G, G), (0, 200, 400, 600)
+
+
+def two_kinds(tmp_path, name, field, kinds, lefts, side="right", room=guide.TRUNK_ROOM, parent_kind="interface", more=()):
+    """부모 P(왼 200, 폭 140) 아래 room 띄운 줄에 자식(kinds[i] — 실체화는 클래스, 상속은 인터페이스)을 두고, 설명대로 첫 종류는
+    아래 변에, 다른 종류는 side 쪽 변에 모은다. (첫 그림 결과 글, 줄기를 준 그림 결과 글, 두 종류를 한 줄기로 모은 그림 결과 글)."""
+    parent = {"kind": parent_kind, "name": "P", "left": 200, "top": 0, "width": 140}
     (left, top, width, height), px, py, _ = middles(name, field, {"file_name": "trunk", field: [parent],
                                                                   "out_dir": str(tmp_path)})["P"]
     child_top = top + height + room
-    boxes = [parent] + [{"kind": "class" if k == "realization" else "interface", "name": f"C{i}", "left": x,
-                         "top": child_top, "width": 140} for i, (k, x) in enumerate(zip(kinds, (0, 200, 400, 600)))]
+    boxes = [parent, *more] + [{"kind": "class" if k == R else "interface", "name": f"C{i}", "left": x, "top": child_top,
+                                "width": 140} for i, (k, x) in enumerate(zip(kinds, lefts))]
     args = {"file_name": "trunk", field: boxes, "out_dir": str(tmp_path)}
     m = middles(name, field, args)
     assert m["P"][:3] == ((left, top, width, height), px, py)
     y = (top + height + child_top) / 2
     y2 = y + guide.TRUNK_SPLIT
-    side = left + width + guide.TRUNK_SIDE
-    relations = []
+    x2 = left + width + guide.TRUNK_SIDE if side == "right" else left - guide.TRUNK_SIDE
+    trunks, together = [], []
     for i, k in enumerate(kinds):
         cx = m[f"C{i}"][1]
+        first = [[px, y]] if cx == px else [[cx, y], [px, y]]
         if k == kinds[0]:
-            via = [[px, y]] if cx == px else [[cx, y], [px, y]]
+            via = first
         else:
-            via = [[cx, y2], [side, y2], [side, py]]
-        relations.append({"kind": k, "from": f"C{i}", "to": "P", "via": via})
-    (r,) = run(server.mcp, (name, {**args, "relations": relations}))[2]
-    assert not r.is_error and text(r).startswith("합격"), text(r)
-    # 두 종류를 한 줄기로 모으면(오른쪽 변으로 나누지 않으면) 불합격이다
-    together = [{**rel, "via": [[m[rel["from"]][1], y], [px, y]] if m[rel["from"]][1] != px else [[px, y]]} for rel in relations]
-    (r,) = run(server.mcp, (name, {**args, "relations": together}))[2]
-    assert text(r).startswith("불합격")
+            via = [[x2, py]] if cx == x2 else [[cx, y2], [x2, y2], [x2, py]]
+        trunks.append({"kind": k, "from": f"C{i}", "to": "P", "via": via})
+        together.append({"kind": k, "from": f"C{i}", "to": "P", "via": first})
+    return [text(r) for r in run(server.mcp, (name, {**args, "relations": trunks}), (name, {**args, "relations": together}))[2]]
+
+
+@pytest.mark.parametrize("name, field", [("draw_class_diagram", "classes"), ("draw_package_diagram", "elements")])
+@pytest.mark.parametrize("kinds", [(R, R, G, G), (G, R, G, R)])
+@pytest.mark.parametrize("room", [guide.TRUNK_ROOM, 120])
+def test_two_kinds_to_one_parent_given_as_the_description_says_pass(tmp_path, name, field, kinds, room):
+    """인터페이스 P를 클래스가 실체화하고 인터페이스가 상속한다 — 첫 종류는 아래 변에, 다른 종류는 그보다 아래 줄기로 오른쪽 변에.
+    부모와 자식 사이는 설명이 말하는 가장 좁은 간격(TRUNK_ROOM)과 넉넉한 간격. 두 종류를 한 줄기로 모으면 불합격이다."""
+    passed, together = two_kinds(tmp_path, name, field, kinds, TWO_KINDS[1], room=room)
+    assert passed.startswith("합격"), passed
+    assert together.startswith("불합격")
+
+
+@pytest.mark.parametrize("side", ["right", "left"])
+def test_two_kinds_to_a_package_parent_pass_on_either_side(tmp_path, side):
+    # 패키지는 향하는 점(탭 오른쪽 몸통의 가운데)이 가운데다 — 왼쪽 변으로 들어가는 선도 탭 아래 몸통에 닿는다
+    passed, _ = two_kinds(tmp_path, "draw_package_diagram", "elements", (G, R, G, R), TWO_KINDS[1], side=side,
+                          parent_kind="package")
+    assert passed.startswith("합격"), passed
+
+
+@pytest.mark.parametrize("kinds, lefts, more", [
+    ((R, R, G, G), TWO_KINDS[1], [{"kind": "class", "name": "S", "left": 360, "top": 0}]),  # x2 줄에 다른 상자
+    ((G, R, G), (0, 500, 300), []),  # 첫 종류 자식 C2의 가운데 x(370)가 x2와 같다
+])
+def test_second_trunk_goes_to_the_left_when_the_right_column_is_taken(tmp_path, kinds, lefts, more):
+    right, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", kinds, lefts, more=more)
+    assert right.startswith("불합격")
+    left, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", kinds, lefts, side="left", more=more)
+    assert left.startswith("합격"), left
+
+
+@pytest.mark.parametrize("lefts, side", [((0, 300), "right"), ((300, 100), "left")])
+def test_second_kind_child_right_under_the_column_gets_one_point(tmp_path, lefts, side):
+    # 둘째 종류 자식의 가운데 x가 x2(오른쪽 370, 왼쪽 170)와 같으면 [x2, 부모 가운데 y] 하나만 — 세 점을 주면 앞 점과 같아 입력 오류
+    kinds = (G, R) if side == "right" else (R, G)
+    passed, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", kinds, lefts, side=side)
+    assert passed.startswith("합격"), passed
 
 
 def test_relation_fields_say_where_lines_start_for_each_tool():
