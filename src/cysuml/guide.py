@@ -168,11 +168,13 @@ def _trunk(types: list[RelationType], words: Words, box: bool) -> str:
     head = _joined(t.end.name for t in types if t.end is not None)
     length = fmt_num(max(t.end.length for t in types if t.end is not None))
     noun, edge = words.noun, words.edge
-    x = f"결과의 {noun} 자리에서 왼 + 폭/2" + ("" if box else ", 요소 종류에 따로 적은 모양은 그 점의 x")
+    x = f"결과의 {noun} 자리에서 왼 + 폭/2"
+    if not box:
+        x += " — 모양 자리가 덧붙어 있으면 모양 자리로. 선이 가운데가 아닌 점을 향하는 요소 종류는 배치 요령에 적은 x를 쓴다"
     ga = josa(head, "이", "가")
     return (f"  - 공유 줄기: 같은 부모(to)로 가는 {pairs}는 여러 선을 한 줄기로 모아 {head} 하나를 함께 쓰게 그려도 된다. "
             f"{head}{ga} 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다(종류가 다른 선을 섞거나 {head}{ga} 조금이라도 "
             f"어긋나면 불합격이다). 줄기 높이 y를 하나 정하고, 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 "
             f"준다(가운데 x는 {x}). 마지막 점이 모두 같아 {head}{ga} 한 자리에 그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 "
-            f"같아지니 [부모 가운데 x, y] 하나만 준다. y는 부모 {noun}의 아래 {edge}{josa(edge, '과', '와')} 자식 {noun}의 위 {edge} 사이 "
-            f"가운데쯤에 둔다 — 부모 아래 {edge}에서 {head} 길이 {length}px보다 가까우면 입력 오류다.")
+            f"같아지니 [부모 가운데 x, y] 하나만 준다. y는 부모 {noun}의 아래 {edge}{josa(edge, '과', '와')} 가장 위 자식 {noun}의 위 "
+            f"{edge} 사이 가운데쯤에 둔다 — 부모 아래 {edge}에서 {head} 길이 {length}px보다 가까우면 입력 오류다.")

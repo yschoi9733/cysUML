@@ -127,7 +127,6 @@ def test_description_names_the_failure_kinds_of_each_tool_in_check_order():
 
 def test_relation_fields_follow_the_relation_kinds_a_tool_takes():
     # 유즈케이스도처럼 연관·의존·일반화만 받고 연관의 기본 방향이 '없음'인 도구
-    from cysuml import boxdiagram, classdiagram
     kinds = ("association", "dependency", "generalization")
     spec = boxdiagram.Spec(classdiagram.CLASS_SHAPES, {k: classdiagram.RELATIONS[k] for k in kinds}, navigable="none")
     text = guide.relation_fields(spec)
@@ -142,18 +141,22 @@ def test_relation_fields_follow_the_relation_kinds_a_tool_takes():
 
 @pytest.mark.parametrize("name", PLACED_TOOLS)
 def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
-    _, tools, _ = run(server.mcp)
-    tool = tools[name].description
+    # 도구 설명에 관계 필드가 그대로 들어가는 것은 test_each_tool_carries_its_flow_and_tips_…가 본다
     spec = PLACED_TOOLS[name][2]
     assert any(t.trunk for t in spec.relations.values())
+    text = guide.relation_fields(spec)
     noun, edge = spec.words.noun, spec.words.edge
     for phrase in ("  - 공유 줄기: 같은 부모(to)로 가는 상속끼리, 실체화끼리는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 쓰게 "
                    "그려도 된다. 삼각형이 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다",
                    "자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다",
                    f"(가운데 x는 결과의 {noun} 자리에서 왼 + 폭/2",
                    "자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다",
-                   f"부모 아래 {edge}에서 삼각형 길이 18px보다 가까우면 입력 오류다"):
-        assert phrase in tool, phrase
+                   f"가장 위 자식 {noun}의 위 {edge} 사이 가운데쯤에 둔다",
+                   f"부모 아래 {edge}에서 삼각형 길이 {boxdiagram.TRIANGLE[0]}px보다 가까우면 입력 오류다"):
+        assert phrase in text, phrase
+    # 새 도구는 모양 밖 이름과, 선이 가운데가 아닌 점을 향하는 요소 종류(패키지)를 함께 적는다
+    assert ("모양 자리가 덧붙어 있으면 모양 자리로" in text) == spec.extended
+    assert ("배치 요령에 적은 x를 쓴다" in text) == spec.extended
 
 
 PLACE = re.compile(r"(\w+)\((-?[\d.]+), (-?[\d.]+), ([\d.]+)×([\d.]+)\)")
@@ -174,7 +177,7 @@ def test_shared_trunk_given_as_the_description_says_passes(tmp_path, name, field
     middle = {key: left + width / 2 for key, (left, top, width, height) in places.items()}
     parent_bottom = places["P"][1] + places["P"][3]
     y = (parent_bottom + 120) / 2
-    assert y - parent_bottom > 18
+    assert y - parent_bottom > boxdiagram.TRIANGLE[0]
     via = {k: [[middle["P"], y]] if middle[k] == middle["P"] else [[middle[k], y], [middle["P"], y]] for k in ("C0", "C1", "C2")}
     assert [len(v) for v in via.values()] == [2, 1, 2]
     relations = [{"kind": kind, "from": k, "to": "P", "via": v} for k, v in via.items()]
