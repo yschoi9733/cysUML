@@ -6,7 +6,7 @@ from cysuml import deploymentdiagram as D
 from cysuml import guide
 from cysuml.canvas import Line, Text
 from cysuml.parsing import InputError
-from cysuml.shapes import NODE
+from cysuml.shapes import DEPTH, NODE
 
 
 def el(kind, name, left, top, **more):
@@ -113,6 +113,9 @@ def test_communication_path_has_no_arrowhead_unless_navigable_says_so():
     one_way, = draw(nodes, [path("A", "B", navigable="to")]).drawn
     assert [h for h in one_way.heads if isinstance(h, Line)]
     assert '"to"·"from"·"both"·"none"(기본)' in D.TOOL and guide.relation_fields(D.SPEC) in D.TOOL
+    # 기본 방향은 도구 전체에 걸리므로(클래스끼리 이은 연관도 화살촉 없이 그린다) 표기 절이 그것을 알린다
+    classes, = draw([el("class", "Order", 0, 0), el("class", "Customer", 200, 0)], [path("Order", "Customer")]).drawn
+    assert classes.heads == () and "클래스끼리 이은 연관·집합·합성도 같으니, 화살촉이 필요하면 navigable을 준다" in D.TOOL
 
 
 def test_path_takes_a_name_and_a_stereotype_on_the_line():
@@ -182,19 +185,28 @@ def test_side_sender_too_close_puts_the_label_on_the_outer_border():
     assert "선 가운데가 바깥 노드 테두리에 오지 않게 떼어 놓는다" in D.TIPS
 
 
-@pytest.mark.parametrize("left", [-50, 190])
+CLUSTER = [device("Application Server Cluster", 0, 0),
+           el("node", "Tomcat", 20, 66, stereotype="executionEnvironment", **{"in": "Application Server Cluster"}),
+           inside("Tomcat", "component", "Svc", 40, 132)]
+
+
+@pytest.mark.parametrize("outer, left", [(OUTER, -50), (OUTER, 190), (CLUSTER, -140), (CLUSTER, 280)])
 @pytest.mark.parametrize("make", [deploy, https])
-def test_sender_above_beside_the_name_follows_the_tip_with_one_bend(left, make):
-    # 이름 칸(81~171) 바로 위는 아니지만 곧은 선이 이름 칸을 지나는 자리에서, 이름 칸에서 보내는 요소 쪽으로 40px 바깥·이름 칸
-    # 아랫변 10px 아래에 꺾는 점을 하나 주면 합격한다
+def test_sender_above_beside_the_name_follows_the_tip_with_one_bend(outer, left, make):
+    # 이름 칸 바로 위는 아니지만 곧은 선이 이름 칸을 지나는 자리에서, 이름 칸에서 보내는 요소 쪽으로 40px 바깥·이름 칸 아랫변
+    # 10px 아래에 꺾는 점을 하나 주면 합격한다. 이름이 길어 이름 칸 옆 앞면이 34px뿐이라 꺾는 점이 앞면 밖에 놓여도 같다
     sender = el("artifact", "order.war", left, -140)
-    (f,) = report([sender, *OUTER], [make("order.war", "Tomcat")]).failures
+    (f,) = report([sender, *outer], [make("order.war", "Tomcat")]).failures
     assert f.kind == "line_through_name"
-    zone = placed(draw(OUTER), "App Server").zones[0].rect
+    holder = placed(draw(outer), outer[0]["name"])
+    zone = holder.zones[0].rect
     x = zone[0] - 40 if left + 56 < (zone[0] + zone[2]) / 2 else zone[2] + 40
-    r = report([sender, *OUTER], [make("order.war", "Tomcat", via=[[x, zone[3] + 10]])])
+    if outer is CLUSTER:
+        assert holder.rect[2] - DEPTH - zone[2] < 40 and not holder.rect[0] < x < holder.rect[2] - DEPTH
+    r = report([sender, *outer], [make("order.war", "Tomcat", via=[[x, zone[3] + 10]])])
     assert r.passed, r.summary()
     assert "40px쯤 바깥, 이름 칸 아랫변에서 10px 아래에 꺾는 점(via)을 하나 준다" in D.TIPS
+    assert "꺾는 점이 앞면 밖(두께 띠나 노드 밖)에 놓여도 된다" in D.TIPS
 
 
 def test_returned_places_draw_the_same_picture():
