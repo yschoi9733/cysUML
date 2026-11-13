@@ -97,6 +97,66 @@ It gets back the same things as the class diagram tool, with the place of every 
 checks, the check fails when an element inside another sits too close to its edge or name tab, or a line runs along
 the edge of a package it starts or ends in, or through a package's name tab.
 
+### State diagrams
+
+The tool is `draw_state_diagram`. It draws start and end points, states and choice diamonds joined by transitions. A
+state lists its `entry /`, `do /` and `exit /` lines in `actions`, written as given, and can hold other states with
+`in`. Start and end points and choices have no name, so they get an `id` for transitions to point to. The transition
+`name` is written as given too, brackets and slash included:
+
+```json
+{
+  "file_name": "order-states",
+  "elements": [
+    {"kind": "initial", "id": "start", "left": 85, "top": 0},
+    {"kind": "state", "name": "Waiting", "left": 25, "top": 60, "width": 140},
+    {"kind": "state", "name": "Checking", "left": 25, "top": 180, "width": 140,
+     "actions": ["entry / reserve stock", "do / wait for payment"]},
+    {"kind": "final", "id": "end", "left": 83, "top": 340}
+  ],
+  "relations": [
+    {"from": "start", "to": "Waiting"},
+    {"from": "Waiting", "to": "Checking", "name": "order [in stock] / accept"},
+    {"from": "Waiting", "to": "Waiting", "name": "tick", "via": [[190, 60], [190, 100]]},
+    {"from": "Checking", "to": "end", "name": "paid"}
+  ]
+}
+```
+
+It gets back the same things as the package diagram tool. The check also fails when a line runs through the name and
+actions of a state it starts or ends in, or a label sits on them.
+
+### Activity diagrams
+
+The tool is `draw_activity_diagram`. It draws start and end points, actions, and decision and merge diamonds joined
+by flows. The guard of a flow out of a decision goes in its `name`, brackets included:
+
+```json
+{
+  "file_name": "order-flow",
+  "elements": [
+    {"kind": "initial", "id": "start", "left": 140, "top": 0},
+    {"kind": "action", "name": "Take order", "left": 95, "top": 60, "width": 110},
+    {"kind": "decision", "id": "stock?", "left": 135, "top": 150},
+    {"kind": "action", "name": "Ship", "left": 0, "top": 230},
+    {"kind": "action", "name": "Restock", "left": 200, "top": 230},
+    {"kind": "merge", "id": "done?", "left": 135, "top": 320},
+    {"kind": "final", "id": "end", "left": 138, "top": 400}
+  ],
+  "relations": [
+    {"from": "start", "to": "Take order"},
+    {"from": "Take order", "to": "stock?"},
+    {"from": "stock?", "to": "Ship", "name": "[in stock]", "via": [[45, 165]]},
+    {"from": "stock?", "to": "Restock", "name": "[out of stock]", "via": [[245, 165]]},
+    {"from": "Ship", "to": "done?", "via": [[45, 335]]},
+    {"from": "Restock", "to": "done?", "via": [[245, 335]]},
+    {"from": "done?", "to": "end"}
+  ]
+}
+```
+
+It gets back the same things as the package diagram tool, and checks the same way.
+
 ### Sequence diagrams
 
 The tool is `draw_sequence_diagram`. The assistant sends no coordinates: only the participants, the messages in
@@ -188,6 +248,12 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다.
   클래스도 검사에 더해, 안의 요소가 바깥 요소의 테두리·이름 탭에 붙거나, 선이 그 끝을 품은 패키지의 테두리를 따라가거나 패키지
   탭을 지나면 불합격이다.
+- **상태도**는 `draw_state_diagram`으로 그린다. 시작·끝 점, 상태, 선택 마름모를 전이로 잇는다. 상태의 `entry /`·`do /`·`exit /`
+  줄은 `actions`에 주면 받은 그대로 쓰고, 상태 안에 상태를 넣을 때는 `in`으로 품은 상태를 가리킨다. 이름이 없는 시작·끝 점과
+  선택은 `id`를 주어 전이가 가리키게 한다. 전이 글자(`name`)도 대괄호·빗금까지 받은 그대로 쓴다. 결과는 패키지도와 같다. 선이 그
+  끝을 품은 상태의 이름·동작 칸을 지나거나 전이 글자가 그 칸에 겹쳐도 불합격이다.
+- **액티비티도**는 `draw_activity_diagram`으로 그린다. 시작·끝 점, 행동, 결정·합류 마름모를 흐름으로 잇는다. 결정에서 나가는
+  흐름의 조건은 `name`에 대괄호까지 쓴다. 결과와 검사는 패키지도와 같다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
   프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
   파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면
