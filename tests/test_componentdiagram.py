@@ -360,6 +360,22 @@ def test_line_through_a_socket_half_circle_fails_and_is_not_called_an_arrowhead(
     assert "소켓 반원" in f.problem and "화살촉" not in f.problem
 
 
+@pytest.mark.parametrize("above, passed", [(6, False), (12, True)])
+def test_socket_line_bent_around_the_ball_beside_its_own_half_circle(above, passed):
+    # 소켓 선이 원(지름 20) 위 above px를 가로로 지나 왼쪽으로 돌아 원 왼쪽에서 들어온다. 반원(반지름 15)은 위 끝이 원 가운데 바로
+    # 위 15px이라, 원 위 6px(가운데 위 16px)을 지나는 가로 구간은 반원 위 끝에서 1px 떨어져 반원과 한데 붙어 보인다
+    c = ball_center()
+    y = c[1] - 10 - above
+    r = report([el("lollipop", "Api", 0, 0), el("component", "U", c[0] + 255, y - 24)],
+               [rel("requires", "U", "Api", via=[[c[0] - 30, y], [c[0] - 30, c[1]]])])
+    assert r.passed is passed, r.summary()
+    if not passed:
+        (f,) = r.failures
+        assert f.kind == "line_through_head" and f.elements == ("U->Api",)
+        assert "선이 제 선 끝 모양에 닿는다" in f.problem and "소켓 반원" in f.problem
+        assert "화살촉" not in f.hint  # 화살촉 쪽 꺾음 거리는 화살촉에만 붙인다
+
+
 def test_socket_input_errors():
     c = ball_center()
     users = [el("lollipop", "Api", 0, 0), around("U", 180, c, 300), el("lollipop", "Other", 300, 300)]

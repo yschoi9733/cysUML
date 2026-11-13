@@ -18,11 +18,11 @@ import operator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
-from .boxdiagram import (BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, Layout, NameZone, PlacedBox, PlacedRelation,
-                         Words, josa)
+from .boxdiagram import (ARROW_BEND, ARROW_HEAD, BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, Layout, NameZone, PlacedBox,
+                         PlacedRelation, Words, josa)
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
-                   grow, hits, inside, meets, outline, overlap, span, touches)
+                   grow, hits, inside, meets, outline, overlap, span)
 from .report import Finding, Notice, fmt_num, fmt_rect, round1
 from .report import Report as _Report
 
@@ -64,6 +64,13 @@ def label_hint(w: Words) -> str:
 
 def crossing_hint(w: Words) -> str:
     return f"엇갈림을 줄이려면 {w.noun} 순서·자리를 바꾸거나, 꺾는 점(via)을 주어 돌아가게 한다."
+
+
+def bend_away(w: Words) -> str:
+    """화살촉 쪽 끝 구간을 꺾을 때 꺾는 점을 뗄 거리. 도구 설명(guide.arrow_bend)과, 선이 끝에 단 화살촉에 닿는 항목의 고치는 법이
+    함께 쓴다."""
+    return (f"화살촉 쪽 끝 구간을 꺾을 때는 그 꺾는 점을 {w.noun} {w.edge}에서 {ARROW_BEND}px 이상 뗀다(앞 구간이 화살촉 쪽으로 "
+            "비스듬히 되돌아오면 더 뗀다)")
 
 
 def _passed(w: Words) -> str:
@@ -151,11 +158,6 @@ class _Head:
         """선분 끝점이 이 모양(삼각형·마름모) 안에 있는지."""
         return self.closed and any(inside(v, self.points) for s in segments for v in s)
 
-    def touches(self, segments: Iterable[Segment]) -> bool:
-        """선분들이 이 모양에 닿는지 — 테두리에 닿거나 안에 든다."""
-        segments = tuple(segments)
-        return any(touches(s, e, LINE_EPS) for s in segments for e in self.edges) or self.holds(segments)
-
     def near(self, segments: Iterable[Segment]) -> bool:
         """선분들이 이 모양 테두리에서 OVERLAP_GAP 안으로 다가오거나 안에 드는지 — 그만큼 붙으면 모양과 선이 한데 붙어 보인다."""
         segments = tuple(segments)
@@ -216,12 +218,24 @@ class _Relation:
     def over_own(self, head: _Head) -> list[Segment]:
         """이 선이 제 선 끝 모양 head를 지나는 구간들. 그 모양이 얹힌 끝 구간은 빼고, 삼각형·마름모는 안쪽으로 OWN_MARGIN 넘게
         들어간 구간만 친다 — 테두리에 닿거나 따라가는 것(끝 구간이 모양 길이와 같은 직교 꺾음, 밑변으로 올라와 붙는 꺾음)은 선이
-        모양에 이어진 것이다. 화살촉은 갈래가 끝 구간(화살촉 길이 이상)보다 짧아, 다른 구간이 닿으면 정말 지난 것이다."""
-        end = 0 if math.dist(head.tip, self.points[0]) <= LINE_EPS else len(self.path) - 1
+        모양에 이어진 것이다. 열린 모양(화살촉·소켓 반원)은 끝 구간에만 붙어 있어, 다른 구간이 다른 관계의 선처럼 OVERLAP_GAP 안으로
+        다가오면 모양과 선이 한데 붙어 보인다(끝 구간이 화살촉 길이와 같은 직각 꺾음은 갈래 끝 옆 1.2px을 지난다)."""
+        end = self._end_of(head)
         rest = [s for i, s in enumerate(self.path) if i != end]
         if head.closed:
             return [s for s in rest if enters(s, head.points, OWN_MARGIN)]
-        return [s for s in rest if head.touches([s])]
+        return [s for s in rest if head.near([s])]
+
+    def _end_of(self, head: _Head) -> int:
+        """선 끝 모양 head가 얹힌 끝 구간의 차례(path)."""
+        return 0 if math.dist(head.tip, self.points[0]) <= LINE_EPS else len(self.path) - 1
+
+    def bent_beside(self, head: _Head, hit: tuple[Segment, ...]) -> bool:
+        """화살촉이 얹힌 끝 구간과 꺾여 이어진 앞 구간이 그 화살촉에 닿았는지 — 꺾는 점을 끝 요소에서 더 떼면 풀리는 경우다(멀리 있는
+        다른 구간이 화살촉을 지나는 것은 꺾는 점을 떼어도 안 풀린다)."""
+        end = self._end_of(head)
+        nxt = 1 if end == 0 else end - 1
+        return head.name == ARROW_HEAD.name and len(self.path) > 1 and any(_same(self.path[nxt], s) for s in hit)
 
 
 @dataclass(frozen=True, eq=False)
@@ -602,8 +616,7 @@ def _overlap_pieces(overlaps: list[Overlap]) -> dict[frozenset[str], list[Segmen
 def _by_overlap(near: dict[frozenset[str], list[Segment]], a: _Relation, b: _Relation, head: _Head) -> bool:
     """포개진 두 선 a·b는 포개진 조각 끝의 선 끝 모양에도 닿기 마련이다 — 그 조각에 붙은(OVERLAP_GAP 안) 선 끝 모양은 포개짐으로
     이미 알린 것으로 본다."""
-    pieces = near.get(frozenset((a.owner, b.owner)), ())
-    return any(distance(s, e, LINE_EPS) <= OVERLAP_GAP for s in pieces for e in head.edges) or head.holds(pieces)
+    return head.near(near.get(frozenset((a.owner, b.owner)), ()))
 
 
 def _lines_through_heads(relations: list[_Relation], pairs: Pairs, near: dict[frozenset[str], list[Segment]],
@@ -628,11 +641,12 @@ def _lines_through_heads(relations: list[_Relation], pairs: Pairs, near: dict[fr
             for h in o.heads:
                 if (hit := [s for s in r.path if h.near([s])]) and not _by_overlap(near, r, o, h):
                     note(r, o, h, hit)
-    for own, h, passers, owners in found.values():
+    for (_, _, hit), (own, h, passers, owners) in found.items:
         where = span(h.points)
         if own:
             problem = f"선이 제 선 끝 모양에 닿는다: {_titles(passers)}, {h.name}(자리 {fmt_rect(where)})."
-            hint = "꺾는 점(via)을 고쳐 선이 제 선 끝 모양을 비켜 가게 한다."
+            hint = "꺾는 점(via)을 고쳐 선이 제 선 끝 모양을 비켜 가게 한다" + (
+                f" — {bend_away(w)}." if any(r.bent_beside(h, hit) for r in passers) else ".")
         else:
             whose = "·".join(f"관계 {o.name}" for o in sorted(owners, key=_index))
             problem = f"선이 다른 관계의 선 끝 모양에 닿는다: {_titles(passers)}, {whose}의 {h.name}(자리 {fmt_rect(where)})."

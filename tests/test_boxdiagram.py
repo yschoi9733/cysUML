@@ -7,7 +7,7 @@ import pytest
 from cysuml import boxcheck as K
 from cysuml import boxdiagram as B
 from cysuml import geom as G
-from cysuml import server
+from cysuml import guide, server
 from cysuml import text as T
 from cysuml.canvas import Ellipse, Line, Polygon, Text
 from cysuml.classdiagram import CLASS_SHAPES, RELATIONS
@@ -454,6 +454,14 @@ def test_default_direction_of_associations_is_set_per_tool():
     assert arrows == []
     assert len([r for r in draw(elements, relations).canvas.records if isinstance(r, Line) and len(r.points) == 3]) == 1
     assert draw(elements, [rel("association", "A", "B")], plain).layout.relations[0].relation.navigable == "none"
+
+
+def test_bend_distance_is_told_only_by_tools_that_draw_arrowheads():
+    words = B.ELEMENT_WORDS
+    with_arrows = B.Spec(SHAPES, {"flow": FLOW}, words)
+    lines_only = B.Spec(SHAPES, {"line": B.RelationType("선")}, words)
+    assert guide.arrow_bend(words) in guide.relation_fields(with_arrows)
+    assert guide.arrow_bend(words) not in guide.relation_fields(lines_only)
 
 
 def test_a_tool_with_one_relation_kind_reads_a_relation_without_kind_as_that_kind():

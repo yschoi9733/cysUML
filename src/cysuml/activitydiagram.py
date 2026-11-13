@@ -13,7 +13,7 @@ from .boxcheck import NESTED_KINDS
 from .boxdiagram import ARROW_HEAD, ELEMENT_WORDS, Diagram, Drawing, RelationType, Spec
 from .canvas import SCALE
 from .flowshapes import ACTION, DIAMOND, DIAMOND_SIZE, FINAL, FINAL_POINT, START, START_POINT, ends_errors, parse_flow
-from .guide import box_tool, spacing_tips
+from .guide import arrow_bend, box_tool, spacing_tips
 
 FLOW = RelationType("흐름", end=ARROW_HEAD)
 SHAPES = {"initial": START_POINT, "final": FINAL_POINT, "action": ACTION, "decision": DIAMOND, "merge": DIAMOND}
@@ -55,6 +55,6 @@ INPUTS = f"""- elements: 요소 목록(하나 이상).
   - name: 흐름 글자. 받은 그대로 쓴다 — 결정에서 나가는 흐름의 조건은 "[재고 있음]"처럼 대괄호까지 쓴다(도구가 씌우지 않는다). \
 길면 줄마다 문자열인 목록으로 나눈다. stereotype: "공용 입력(열쇠·이름)" 절.
   - via: 꺾는 점 [[x, y], …]. 선은 요소 가운데에서 첫 꺾는 점(없으면 상대 요소 가운데)으로 가는 선이 요소 테두리와 만나는 곳에서 \
-시작한다. 같은 요소로 돌아오는 흐름은 꺾는 점이 둘 이상 있어야 한다."""
+시작한다. 같은 요소로 돌아오는 흐름은 꺾는 점이 둘 이상 있어야 한다. {arrow_bend(SPEC.words)}"""
 
 TOOL = box_tool(INTRO, SPEC, INPUTS, TIPS, kinds=KINDS, errors=ends_errors(SPEC))

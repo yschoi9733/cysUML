@@ -13,7 +13,7 @@ from .canvas import SCALE
 from .classdiagram import ROW, SECTION_PAD
 from .flowshapes import (DIAMOND, DIAMOND_SIZE, FINAL, FINAL_POINT, NAME_BAND, START, START_POINT, STATE, ends_errors,
                          parse_flow)
-from .guide import box_tool, spacing_tips
+from .guide import arrow_bend, box_tool, spacing_tips
 
 TRANSITION = RelationType("전이", end=ARROW_HEAD)
 SHAPES = {"initial": START_POINT, "final": FINAL_POINT, "state": STATE, "choice": DIAMOND}
@@ -63,6 +63,6 @@ INPUTS = f"""- elements: 요소 목록(하나 이상).
   - name: 전이 글자. "사건 [조건] / 동작" 꼴을 받은 그대로 쓴다 — 대괄호·빗금도 쓴다(도구가 씌우지 않는다). 길면 줄마다 문자열인 \
 목록으로 나눈다. stereotype: "공용 입력(열쇠·이름)" 절.
   - via: 꺾는 점 [[x, y], …]. 선은 요소 가운데에서 첫 꺾는 점(없으면 상대 요소 가운데)으로 가는 선이 요소 테두리와 만나는 곳에서 \
-시작한다. 같은 상태로 돌아오는 전이(자기 전이)는 꺾는 점이 둘 이상 있어야 한다."""
+시작한다. 같은 상태로 돌아오는 전이(자기 전이)는 꺾는 점이 둘 이상 있어야 한다. {arrow_bend(SPEC.words)}"""
 
 TOOL = box_tool(INTRO, SPEC, INPUTS, TIPS, errors=ends_errors(SPEC))

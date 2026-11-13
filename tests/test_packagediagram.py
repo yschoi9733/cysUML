@@ -525,6 +525,67 @@ def test_icon_kinds_sit_in_packages_and_nodes_and_the_outer_element_covers_them(
         assert i.rect[3] + B.NEST_PAD <= o.inner[3]
 
 
+# ---------------------------------------------------------------- 끝에 단 화살촉 옆을 지나는 선
+
+
+@pytest.mark.parametrize("end, passed", [(10, False), (11, True)])
+def test_dependency_bent_beside_its_own_arrowhead(end, passed):
+    # 클래스 B(0, 0)의 왼쪽 가운데로 오는 의존을 via [[−end, 24]]에서 직각으로 꺾는다. 끝 구간이 화살촉 길이(10)와 같으면 앞 세로
+    # 구간이 화살촉 갈래 끝(x ≈ −8.83)에서 1.2px 떨어져 지나 갈래와 한데 붙어 보인다
+    r = report([el("class", "B", 0, 0), el("class", "A", -end - 45, 200)], [rel("dependency", "A", "B", via=[[-end, 24]])])
+    assert r.passed is passed, r.summary()
+    if not passed:
+        (f,) = r.failures
+        assert f.kind == "line_through_head" and f.elements == ("A->B",)
+        assert "선이 제 선 끝 모양에 닿는다" in f.problem and "화살촉" in f.problem
+        assert K.bend_away(P.SPEC.words) in f.hint
+
+
+@pytest.mark.parametrize("side", [1, -1])
+@pytest.mark.parametrize("beta", [0, 30, 50])
+def test_bend_at_the_advised_distance_clears_its_own_arrowhead(beta, side):
+    # 도구 설명이 권하는 거리(ARROW_BEND)에 꺾는 점을 두면, 꺾은 앞 구간(길이 20)이 직각에서 화살촉 쪽으로 β만큼 더 기울어도(꺾는
+    # 점을 요소 가운데 줄에서 비켜 둔 꼴) 화살촉 갈래 끝에서 OVERLAP_GAP 넘게 떨어진다. 아래(side 1)·위(−1)에서 와도 같다
+    corner = (-K.ARROW_BEND, 24)
+    b = math.radians(beta)
+    p = (corner[0] + 20 * math.sin(b), corner[1] + side * 20 * math.cos(b))
+    r = report([el("class", "B", 0, 0), el("class", "A", p[0] - 300, p[1] - 24 + side * 200)],
+               [rel("dependency", "A", "B", via=[list(p), list(corner)])])
+    assert r.passed, r.summary()
+
+
+def test_short_end_segment_error_tells_the_bend_distance_only_for_an_arrowhead():
+    with pytest.raises(InputError) as e:
+        draw([el("class", "B", 0, 0), el("class", "A", -50, 200)],
+             [rel("dependency", "A", "B", via=[[-5, 24]]), rel("generalization", "A", "B", via=[[-5, 30]])])
+    arrow, triangle = e.value.problems
+    assert arrow == (f"relations[0]: to 쪽 끝 구간 길이 5가 끝 모양 길이(10)보다 짧다 — 마지막 꺾는 점을 요소에서 {K.ARROW_BEND}px "
+                     "이상 떼어 놓는다")
+    assert triangle.startswith("relations[1]: to 쪽") and triangle.endswith("마지막 꺾는 점을 요소에서 더 떼어 놓는다")
+
+
+def test_hint_tells_the_bend_distance_when_the_bent_segment_meets_its_arrowhead():
+    # 앞 구간이 직각에서 화살촉 쪽으로 60° 더 기울면 권하는 거리(ARROW_BEND)로도 갈래 끝에 붙는다. 꺾는 점을 더 떼면 풀리니 고치는
+    # 법은 거리와 "비스듬히 되돌아오면 더"를 함께 말한다
+    corner = (-K.ARROW_BEND, 24)
+    p = (corner[0] + 20 * math.sin(math.radians(60)), corner[1] + 20 * math.cos(math.radians(60)))
+    r = report([el("class", "B", 0, 0), el("class", "A", p[0] - 300, p[1] + 176)],
+               [rel("dependency", "A", "B", via=[list(p), list(corner)])])
+    (f,) = r.failures
+    assert f.kind == "line_through_head" and "화살촉" in f.problem
+    assert K.bend_away(P.SPEC.words) in f.hint
+
+
+def test_hint_leaves_out_the_bend_distance_when_a_far_segment_meets_its_arrowhead():
+    # 끝 구간은 60px이고, 그보다 앞의 세로 구간(x −9)이 B 앞 화살촉의 갈래 끝(x ≈ −8.83) 곁을 지난다. 꺾는 점을 떼어도 안 풀린다
+    r = report([el("class", "B", 0, 0), el("class", "A", -350, -150)],
+               [rel("dependency", "A", "B", via=[[-9, -60], [-9, 100], [-60, 100], [-60, 24]])])
+    assert "line_through_head" in kinds(r)
+    (f,) = [f for f in r.failures if f.kind == "line_through_head"]
+    assert "선이 제 선 끝 모양에 닿는다" in f.problem
+    assert K.bend_away(P.SPEC.words) not in f.hint
+
+
 # ---------------------------------------------------------------- 섞어 그리기·도구
 
 

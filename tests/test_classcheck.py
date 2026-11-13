@@ -405,6 +405,18 @@ def test_own_end_shape_on_its_own_end_segments_is_fine():
                   [rel("composition", "A", "B", via=[[108, 24], [108, 100], [345, 100]])]).passed
 
 
+@pytest.mark.parametrize("end, passed", [(10, False), (10.5, False), (11, True)])
+def test_line_bent_beside_its_own_arrowhead_fails_within_the_overlap_gap(end, passed):
+    # B 왼쪽 가운데 (400, 24)로 오는 화살표가 아래에서 올라와 끝 구간 end에서 직각으로 꺾는다. 화살촉(길이 10, 갈래 28°)의 갈래 끝은
+    # x = 400 − 10·cos 28° ≈ 391.17이라, 끝 구간이 10.83 이하면 앞 세로 구간이 OVERLAP_GAP(2) 안을 지나 갈래 끝에 붙어 보인다
+    r = report([box("A", 400 - end - 45, 200), box("B", 400, 0)], [rel("association", "A", "B", via=[[400 - end, 24]])])
+    assert r.passed is passed, r.summary()
+    if not passed:
+        (f,) = r.failures
+        assert f.kind == "line_through_head" and f.elements == ("A->B",)
+        assert "선이 제 선 끝 모양에 닿는다" in f.problem and "화살촉" in f.problem
+
+
 def test_overlap_hides_only_the_end_shapes_it_reaches():
     # C→D가 A→B 가로선의 가운데(x 120~250)에 포개진 뒤, 멀리 B 앞 화살촉(x 391~400)을 세로로 지난다
     r = report([box("A", 0, 0), box("B", 400, 0), box("C", 75, -200), box("D", 350, 100)],
