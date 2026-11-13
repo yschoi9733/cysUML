@@ -10,7 +10,7 @@ from typing import Any
 
 from . import boxdiagram as B
 from .boxcheck import KINDS
-from .boxdiagram import ELEMENT_WORDS, NEST_PAD, Diagram, Drawing, Spec
+from .boxdiagram import ELEMENT_WORDS, LABEL_LINE, NEST_PAD, Diagram, Drawing, Spec
 from .canvas import SCALE
 from .classdiagram import HEAD, NAME_LINE, RELATIONS
 from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, PLACES_RESULT, flow, relation_fields
@@ -33,10 +33,11 @@ NOTATION = """배치도(deployment diagram) 표기:
 이은 연관·집합·합성도 같으니, 화살촉이 필요하면 navigable을 준다). 선 위에 프로토콜 같은 이름(name — "HTTPS"·"JDBC" 등)이나 \
 stereotype을 쓴다.
 - «deploy»: 노드 밖에 둔 컴포넌트·아티팩트에서 노드로 kind "dependency", stereotype "deploy"를 긋는다(점선 화살표). 한 그림에서 \
-어떤 요소는 노드 안에 두고 어떤 요소는 «deploy»로 이어도 된다. UML 2의 정석은 아티팩트를 노드에 배치하고, 컴포넌트는 그것을 \
-담은 아티팩트에서 «manifest»로 잇는 것이다. 다만 노드 안에 둔 요소에서 그 노드(나 그 노드를 품은 노드)로는 \
+어떤 요소는 노드 안에 두고 어떤 요소는 «deploy»로 이어도 된다. 다만 노드 안에 둔 요소에서 그 노드(나 그 노드를 품은 노드)로는 \
 긋지 않는다 — 품은 요소와 그 안의 요소를 잇는 선은 입력 오류다.
-- «manifest»: 아티팩트에서 그 아티팩트가 담은 컴포넌트로 kind "dependency", stereotype "manifest"를 긋는다.
+- «manifest»: 아티팩트에서 그 아티팩트가 담은 컴포넌트로 kind "dependency", stereotype "manifest"를 긋는다. UML 2의 정석은 \
+아티팩트를 노드에 두고(안에 두거나 «deploy»로) 컴포넌트는 그 아티팩트에서 «manifest»로 잇는 것이고, 컴포넌트를 노드 안에 바로 두는 \
+간단한 표기도 흔히 쓴다. 한 문서 안에서는 한 가지로 맞춘다.
 - 노드 종류: 노드의 stereotype에 "device"·"executionEnvironment" 등을 주면 이름 위 줄에 쓴다. 모양은 같은 입체 상자다."""
 
 INNER_TOP = DEPTH + HEAD + NEST_PAD  # 이름 한 줄 노드에서 안의 요소를 둘 수 있는 가장 위(노드 top에서)
@@ -51,14 +52,15 @@ TIPS = f"""배치도(deployment diagram) 자리 잡기 요령:
 top + {INNER_TOP + 2 * NAME_LINE:g}).
 - 노드 밖에서 노드 안의 요소(노드 안의 노드 포함 — 아래에서 "끝 요소")로 가는 선이 끝 요소를 품은 노드들의 이름(앞면 위 가운데)을 \
 지나면 불합격이다. 선을 보내는 요소는 가장 바깥 노드의 옆에 끝 요소와 같은 높이로(보내는 요소의 top을 끝 요소의 윗변과 아랫변 \
-사이에) 두거나, 아래에 끝 요소와 같은 가로 자리로(보내는 요소의 left를 끝 요소의 왼변과 오른변 사이에) 둔다. 그 선의 글자\
+사이에) 두거나, 아래에 끝 요소와 같은 가로 자리로(보내는 요소의 left를 끝 요소의 왼변과 오른변 사이에) 둔다. 왼쪽·오른쪽·아래 \
+가운데 노드 테두리에서 끝 요소까지 가는 길에 다른 요소가 없는 쪽을 고른다. 그 선의 글자\
 («deploy»·프로토콜 이름)는 선 가운데쯤에 놓여 노드 테두리에 걸리기 쉬우니, 요소 사이 기본 간격("요소 사이는" 항목)보다 더 띄운다 \
 — 옆이면 가장 바깥 노드와의 간격을 그 노드 테두리에서 끝 요소까지의 거리 + 선 글자 폭(가장 긴 줄) + 20px 이상, 아래면 그 노드 \
 아랫변에서 끝 요소 아랫변까지의 거리 + 40px 이상으로 한다. 선 글자 폭은 영문·숫자·ASCII 기호 한 글자 11px(W·@·%는 14px), 한글 \
 12px, 그 밖의 글자 14px로 어림하고, 불합격 항목에 글자 자리(폭×높이)가 나오면 그 폭으로 고친다. 선 글자가 여러 줄(스테레오타입과 \
-이름 등)이면 보내는 요소가 아래나 위일 때 간격에 한 줄마다 15px를 더한다.
+이름 등)이면 보내는 요소가 아래나 위일 때 간격에 한 줄마다 {LABEL_LINE:g}px를 더한다.
 - 끝 요소가 가장 바깥 노드 바로 안의 노드이면 선을 보내는 요소를 위에 둘 수도 있다. 이름 칸 바로 위는 피하고, 바깥 노드 윗변에서 \
-80px 이상 떼어(선 글자가 여러 줄이면 한 줄마다 15px 더), 이름 칸에서 보내는 요소 쪽으로 40px쯤 바깥, 이름 칸 아랫변에서 10px \
+80px 이상 떼어(선 글자가 여러 줄이면 한 줄마다 {LABEL_LINE:g}px 더), 이름 칸에서 보내는 요소 쪽으로 40px쯤 바깥, 이름 칸 아랫변에서 10px \
 아래에 꺾는 점(via)을 하나 준다(이름 칸 옆 앞면이 40px보다 좁아 꺾는 점이 앞면 밖(두께 띠나 노드 밖)에 놓여도 된다. 이름 칸 \
 자리는 불합격 항목의 "이름 칸"에 나온다). 끝 요소가 더 깊으면 위에 두지 않는다 — 이 꺾는 점으로는 안쪽 노드의 이름을 비키지 못한다.
 - 요소 사이는 관계 이름·스테레오타입 글자가 들어갈 만큼 띄운다. 가로 80px·세로 60px쯤에서 시작하고, 글자가 길면 더 띄운다.

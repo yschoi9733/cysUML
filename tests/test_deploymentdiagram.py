@@ -9,7 +9,7 @@ from cysuml import guide
 from cysuml.canvas import Line, Text
 from cysuml.parsing import InputError
 from cysuml.shapes import DEPTH, NODE
-from cysuml.text import is_korean, text_width
+from cysuml.text import text_width
 
 
 def el(kind, name, left, top, **more):
@@ -291,6 +291,18 @@ def test_side_or_below_sender_reaches_a_deeper_end_with_the_gap_measured_to_that
             r = sent_from(outer, sender, side, gap, make, end, offset)
             assert r.passed, (side, offset, r.summary())
     assert "그 노드 테두리에서 끝 요소까지의 거리" in D.TIPS and "끝 요소와 같은 높이로" in D.TIPS
+
+
+def test_side_sender_picks_the_side_with_nothing_in_the_way():
+    # Server 안에 A(왼쪽)와 B(오른쪽). 왼쪽에서 B로 보내면 선이 A를 지나고, 길이 빈 오른쪽·아래에서 보내면 합격한다
+    server = [device("Server", 0, 0), inside("Server", "artifact", "A", 20, 66), inside("Server", "artifact", "B", 200, 66)]
+    sender = el("artifact", "x.war", 0, 0)
+    gaps = dict(zip(("left", "right", "below"), side_gaps(server, ("«deploy»",), "B")))
+    r = sent_from(server, sender, "left", gaps["left"], deploy, "B")
+    assert ("line_through_box", ("x.war->B", "A")) in [(f.kind, f.elements) for f in r.failures]
+    for side in ("right", "below"):
+        assert sent_from(server, sender, side, gaps[side], deploy, "B").passed, side
+    assert "끝 요소까지 가는 길에 다른 요소가 없는 쪽을 고른다" in D.TIPS
 
 
 def test_bend_from_above_does_not_reach_a_deeper_end():
