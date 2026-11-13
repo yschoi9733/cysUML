@@ -35,6 +35,11 @@ DASH = (5, 4)
 TRIANGLE = (18, 9)  # 상속·실체화 빈 삼각형의 길이와 반폭
 DIAMOND = 18        # 집합·합성 마름모 길이(그림판 기본값)
 ARROW = 10          # 열린 화살촉 길이(그림판 기본값)
+# 화살촉 쪽 끝 구간을 꺾을 때 꺾는 점을 끝 요소에서 뗄 거리(입력 오류·도구 설명·고치는 법에 쓴다). 꺾은 앞 구간이 화살촉 갈래 끝에서
+# 검사 여유(boxcheck.OVERLAP_GAP 2) 넘게 떨어지려면, 앞 구간이 직각에서 화살촉 쪽으로 β만큼 더 기울 때 끝 구간이
+# 10·cos 28° + (2 + 10·sin 28°·sin β) / cos β보다 길어야 한다(직각 10.83, β 30° 13.85, 50° 17.54 — 실측과 맞음). 꺾는 점을 요소
+# 가운데 줄에서 비켜 두면 끝 구간이 기울어 β가 생기므로 β 50°까지 덮게 잡는다
+ARROW_BEND = 20
 MAX_LINE = 200_000  # 관계선 하나의 길이 상한 — 그림판 점선 칸 수 상한(MAX_DASHES × 무늬)보다 넉넉히 작게
 EDGE_SLACK = 0.5    # 선이 끝 요소 안을 지나는지 볼 때 테두리에서 이만큼 안쪽부터 "안"으로 친다(테두리를 따라 가는 선은 괜찮다)
 
@@ -818,9 +823,14 @@ class _Spots:
 
 def shape_lengths(r: Relation, t: RelationType) -> tuple[float, float]:
     """선 처음(from)과 끝(to)에 그리는 모양이 선을 따라 차지하는 길이."""
-    start = t.start.length if t.start else ARROW if t.navigable and r.navigable in ("from", "both") else 0
-    end = t.end.length if t.end else ARROW if t.navigable and r.navigable in ("to", "both") else 0
-    return start, end
+    start, end = (_end_shape(r, t, key) for key in ("from", "to"))
+    return (start.length if start else 0), (end.length if end else 0)
+
+
+def _end_shape(r: Relation, t: RelationType, key: str) -> Optional[EndShape]:
+    """선 처음(from)이나 끝(to)에 그리는 모양."""
+    fixed = t.start if key == "from" else t.end
+    return fixed or (ARROW_HEAD if t.navigable and r.navigable in (key, "both") else None)
 
 
 def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
@@ -872,11 +882,13 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
         if (why := short(lengths[0], (head, tail), any(gaps))) is not None:
             problems.append(f"{path}: 선 길이 {fmt_num(lengths[0])}가 양 {why} — {w.noun}를 더 떼어 놓는다")
     else:
-        for length, need, gap, key, which in ((lengths[0], head, gaps[0], "from", "첫"),
-                                              (lengths[-1], tail, gaps[1], "to", "마지막")):
+        arrows = [_end_shape(r, t, "from") is ARROW_HEAD, _end_shape(r, t, "to") is ARROW_HEAD]
+        for length, need, gap, key, which, arrow in ((lengths[0], head, gaps[0], "from", "첫", arrows[0]),
+                                                     (lengths[-1], tail, gaps[1], "to", "마지막", arrows[1])):
             if (why := short(length, (need,), bool(gap))) is not None:
+                bend = f"(화살촉 쪽 끝 구간을 꺾으면 {ARROW_BEND}px 이상)" if arrow else ""
                 problems.append(f"{path}: {key} 쪽 끝 구간 길이 {fmt_num(length)}가 {why} — {which} 꺾는 점을 {w.noun}에서 더 "
-                                "떼어 놓는다")
+                                f"떼어 놓는다{bend}")
     if sum(lengths) > MAX_LINE:
         problems.append(f"{path}: 선 길이 {fmt_num(sum(lengths))}가 {MAX_LINE}을 넘는다 — {w.noun}를 가까이 모은다")
     return (None if problems else _shorten(points, *gaps)), problems

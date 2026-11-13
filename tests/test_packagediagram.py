@@ -554,6 +554,16 @@ def test_bend_at_the_advised_distance_clears_its_own_arrowhead(beta, side):
     assert r.passed, r.summary()
 
 
+def test_short_end_segment_error_tells_the_bend_distance_only_for_an_arrowhead():
+    with pytest.raises(InputError) as e:
+        draw([el("class", "B", 0, 0), el("class", "A", -50, 200)],
+             [rel("dependency", "A", "B", via=[[-5, 24]]), rel("generalization", "A", "B", via=[[-5, 30]])])
+    arrow, triangle = e.value.problems
+    assert arrow.startswith("relations[0]: to 쪽 끝 구간 길이 5가 끝 모양 길이(10)보다 짧다")
+    assert arrow.endswith(f"더 떼어 놓는다(화살촉 쪽 끝 구간을 꺾으면 {K.ARROW_BEND}px 이상)")
+    assert triangle.startswith("relations[1]: to 쪽") and triangle.endswith("더 떼어 놓는다")
+
+
 def test_hint_tells_the_bend_distance_only_when_a_longer_end_segment_would_help():
     # 앞 구간이 직각에서 화살촉 쪽으로 60° 더 기울면 권하는 거리(ARROW_BEND)로도 갈래 끝에 붙는다. 꺾는 점이 이미 그만큼 떨어져
     # 있으니 고치는 법은 거리를 다시 말하지 않는다
