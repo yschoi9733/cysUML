@@ -1,7 +1,8 @@
 """AI가 배치하는 그림의 공용 검사: 그린 결과(boxdiagram.Drawing)를 읽어 합격·불합격과 알림을 낸다.
 
 불합격은 문서에 못 넣는 그림이다 — 선(선 끝 모양 포함)이 요소·글자·다른 선을 가로지르거나 그것들에 붙어 한데
-보이는 것, 요소나 글자끼리 겹치는 것이다. 종류는 KINDS에 낸 차례대로 있다. 선끼리 엇갈린 곳과 그림 크기는 알림으로만 준다.
+보이는 것, 요소나 글자끼리 겹치는 것이다. 종류는 KINDS에 낸 차례대로 있다. 선끼리 엇갈린 곳, 읽기에서 나온 표기 규칙 알림, 그림
+크기는 알림으로만 준다.
 상속·실체화처럼 공유 줄기를 받는 관계에서 자식 여럿의 선이 한 줄기로 부모의 한 삼각형에 모이는 것은 포개짐으로도, 선 끝
 모양에 닿는 것으로도 치지 않는다. 공유 줄기처럼 여러 선이 한 자리에 겹쳐 그려진 곳이 걸리면 한 항목으로 묶어 알린다.
 
@@ -22,7 +23,7 @@ from .boxdiagram import (BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, La
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
                    grow, hits, inside, meets, outline, overlap, span, touches)
-from .report import Finding, fmt_num, fmt_rect, round1
+from .report import Finding, Notice, fmt_num, fmt_rect, round1
 from .report import Report as _Report
 
 # 검사 여유값(논리 좌표 px)
@@ -75,11 +76,13 @@ def _shrink(w: Words) -> str:
 
 @dataclass(frozen=True)
 class Report(_Report):
-    """report.Report에 선끼리 엇갈린 곳(crossings, 알림)을 더한다. Finding의 elements는 요소 열쇠나 관계 기록의 owner이고,
-    불합격 종류는 KINDS, 알림 종류는 crossing이다. words는 합격 문구·고치는 법에 쓰는 말이다."""
+    """report.Report에 선끼리 엇갈린 곳(crossings, 알림)과 표기 규칙 알림(notices — 읽기에서 나온 Drawing.notices)을 더한다.
+    Finding의 elements는 요소 열쇠나 관계 기록의 owner이고, 불합격 종류는 KINDS, 알림 종류는 crossing이다. words는 합격 문구·
+    고치는 법에 쓰는 말이다."""
 
     crossings: tuple[Finding, ...] = field(kw_only=True)
     words: Words = field(kw_only=True, repr=False)
+    notices: tuple[Notice, ...] = field(kw_only=True, default=())
 
     # 클래스에서 읽으면 클래스도 도구의 말(상자)로 쓴 문구이고, 결과마다 그 도구의 말로 바꿔 둔다
     PASSED = _passed(BOX_WORDS)
@@ -90,10 +93,13 @@ class Report(_Report):
         object.__setattr__(self, "SHRINK", _shrink(self.words))
 
     def _extra(self) -> dict:
-        return {"crossings": [f.to_dict() for f in self.crossings]}
+        return {"crossings": [f.to_dict() for f in self.crossings], "notices": [n.to_dict() for n in self.notices]}
 
     def _notices(self) -> list[str]:
-        return ([f"알림 — 선끼리 엇갈린 곳 {len(self.crossings)}곳" + (f". {crossing_hint(self.words)}" if self.crossings else "")]
+        """표기 규칙 알림은 있을 때만 낸다(규칙에 맞는 입력의 결과 글은 그대로다)."""
+        rules = ([f"알림 — 표기 규칙 {len(self.notices)}건(불합격은 아니다 — 뜻한 대로면 그대로 둔다)"]
+                 + [f"- {n}" for n in self.notices]) if self.notices else []
+        return (rules + [f"알림 — 선끼리 엇갈린 곳 {len(self.crossings)}곳" + (f". {crossing_hint(self.words)}" if self.crossings else "")]
                 + [f"- {f.problem}" for f in self.crossings])
 
 
@@ -252,7 +258,7 @@ def check(drawing: Drawing) -> Report:
     if measured is None:
         raise ValueError("그린 것이 없다")
     return Report(tuple(failures), measured.size, measured.png, drawing.canvas.scale,
-                  crossings=tuple(_crossings(relations, pairs, w)), words=w)
+                  crossings=tuple(_crossings(relations, pairs, w)), words=w, notices=drawing.notices)
 
 
 def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:

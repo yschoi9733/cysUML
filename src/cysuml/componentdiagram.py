@@ -1,10 +1,10 @@
 """컴포넌트도: 컴포넌트와 제공 인터페이스 원, 컴포넌트를 구현하는 아티팩트, 컴포넌트를 실현하는 클래스를 그린다.
 
 요소 종류는 shapes.SHAPES(클래스·패키지·컴포넌트·아티팩트·노드와 아이콘 표기 둘)에 제공 인터페이스 원(lollipop)을 더한 것이고, 관계는 클래스도 관계 여섯 가지
-(classdiagram.RELATIONS)에 소켓(requires — 쓰는 쪽에서 원으로 가는 실선이 원을 틈을 두고 감싸는 반원에서 끝난다)을 더한 것이다.
-연관의 기본 방향은 '없음'이다 — 컴포넌트에서 제공 인터페이스 원으로 가는 막대가 화살촉 없는 실선이라서.
-읽기·자리 잡기·그리기는 공용 엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 소켓의 끝 요소 종류만 여기서 읽은 뒤에 본다.
-도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
+(classdiagram.RELATIONS)에 소켓(requires — 쓰는 쪽에서 원으로 가는 실선이 원을 틈을 두고 감싸는 반원에서 끝난다)을 더한 것이고,
+표기 규칙은 클래스도 관계의 규칙(classdiagram.RULES)을 쓴다. 연관의 기본 방향은 '없음'이다 — 컴포넌트에서 제공 인터페이스 원으로
+가는 막대가 화살촉 없는 실선이라서. 읽기·자리 잡기·그리기는 공용 엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 소켓의 끝
+요소 종류만 여기서 읽은 뒤에 본다. 도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .boxcheck import BOX_CLEARANCE, KINDS
 from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Element, EndShape, PlacedBox, RelationType, Shape, Spec, floored
 from .canvas import SCALE, Canvas, Line, Point
 from .classdiagram import RELATIONS as CLASS_RELATIONS
+from .classdiagram import RULES
 from .geom import Border, EllipseBorder
 from .guide import (COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, flow, places_result,
                     relation_fields)
@@ -76,7 +77,8 @@ SOCKET_HEAD = EndShape("소켓 반원", SOCKET_GAP, _socket, gap=SOCKET_GAP)
 REQUIRES = "requires"
 RELATIONS = {**CLASS_RELATIONS, REQUIRES: RelationType("소켓", end=SOCKET_HEAD, role="인터페이스를 쓰는 쪽")}
 
-SPEC = Spec({**SHAPES, "lollipop": LOLLIPOP}, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none")
+SPEC = Spec({**SHAPES, "lollipop": LOLLIPOP}, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none",
+            rules=RULES)
 
 
 def _socket_problems(d: Diagram) -> list[str]:

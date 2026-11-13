@@ -244,9 +244,10 @@ def middles(name, field, args):
     ("draw_class_diagram", "classes", {"kind": "class"}, "class", [], "generalization", 120, [2, 1, 2]),
     ("draw_class_diagram", "classes", {"kind": "interface"}, "class", [], "realization", 120, [2, 1, 2]),
     ("draw_package_diagram", "elements", {"kind": "class"}, "class", [], "generalization", 120, [2, 1, 2]),
-    ("draw_package_diagram", "elements", {"kind": "package"}, "package", [], "generalization", 120, [2, 1, 2]),
-    ("draw_package_diagram", "elements", {"kind": "package", "width": 500}, "package", [], "generalization", 120, [2, 2, 2]),
-    ("draw_package_diagram", "elements", {"kind": "package"}, "package", [INNER], "generalization", 180, [2, 2, 2]),
+    # 패키지는 상속의 끝이 될 수 없어(#37) 패키지 부모의 줄기는 같은 삼각형을 쓰는 실체화로 본다(표기 규칙 알림만 붙는다)
+    ("draw_package_diagram", "elements", {"kind": "package"}, "package", [], "realization", 120, [2, 1, 2]),
+    ("draw_package_diagram", "elements", {"kind": "package", "width": 500}, "package", [], "realization", 120, [2, 2, 2]),
+    ("draw_package_diagram", "elements", {"kind": "package"}, "package", [INNER], "realization", 180, [2, 2, 2]),
     ("draw_component_diagram", "elements", {"kind": "component"}, "component", [], "generalization", 120, [2, 1, 2]),
     ("draw_deployment_diagram", "elements", {"kind": "node"}, "node", [], "generalization", 120, [2, 1, 2]),
 ])
@@ -344,17 +345,17 @@ def test_two_kinds_to_one_parent_given_as_the_description_says_pass(tmp_path, na
 
 @pytest.mark.parametrize("name_side, chosen, other", [("right", "left", "right"), ("left", "right", "left")])
 def test_second_trunk_goes_away_from_the_parent_name_outside_the_shape(tmp_path, name_side, chosen, other):
-    """컴포넌트도의 막대사탕처럼 이름을 모양 밖 옆에 쓰는 부모 — 설명대로 둘째 줄기는 이름 반대쪽 변(이름이 오른쪽이면 왼쪽 거울)에
-    모으고 x2는 모양 자리로 셈한다. 이름 쪽 변으로 모으면 그 이름을 지난다."""
-    parent = {"kind": "lollipop", "id": "P", "name": "Payment API", "left": 200, "top": 0, "name_side": name_side}
+    """이름을 모양 밖 옆에 쓰는 부모(아이콘 표기 아티팩트) — 아티팩트가 상속하고 클래스가 실현한다. 설명대로 둘째 줄기는 이름 반대쪽
+    변(이름이 오른쪽이면 왼쪽 거울)에 모으고 x2는 모양 자리로 셈한다. 이름 쪽 변으로 모으면 그 이름을 지난다."""
+    parent = {"kind": "artifact_icon", "id": "P", "name": "app.jar", "left": 200, "top": 0, "name_side": name_side}
     first = {"file_name": "trunk", "elements": [parent], "out_dir": str(tmp_path)}
-    (left, top, width, height), px, py, _ = middles("draw_component_diagram", "elements", first)["P"]
+    (left, top, width, height), px, py, _ = middles("draw_package_diagram", "elements", first)["P"]
     y = top + height + 30
     kinds = (R, G, R, G)
-    boxes = [parent] + [{"kind": "component", "name": f"C{i}", "left": x, "top": top + height + 60, "width": 140}
-                        for i, x in enumerate(TWO_KINDS[1])]
+    boxes = [parent] + [{"kind": "class" if k == R else "artifact", "name": f"C{i}", "left": x, "top": top + height + 60,
+                         "width": 140} for i, (k, x) in enumerate(zip(kinds, TWO_KINDS[1]))]
     args = {"file_name": "trunk", "elements": boxes, "out_dir": str(tmp_path)}
-    m = middles("draw_component_diagram", "elements", args)
+    m = middles("draw_package_diagram", "elements", args)
 
     def draw_to(side):
         x2 = left + width + guide.TRUNK_SIDE if side == "right" else left - guide.TRUNK_SIDE
@@ -366,19 +367,28 @@ def test_second_trunk_goes_away_from_the_parent_name_outside_the_shape(tmp_path,
             else:
                 via = [[x2, py]] if cx == x2 else [[cx, y + guide.TRUNK_SPLIT], [x2, y + guide.TRUNK_SPLIT], [x2, py]]
             relations.append({"kind": k, "from": f"C{i}", "to": "P", "via": via})
-        (r,) = run(server.mcp, ("draw_component_diagram", {**args, "relations": relations}))[2]
+        (r,) = run(server.mcp, ("draw_package_diagram", {**args, "relations": relations}))[2]
         return text(r)
 
     assert draw_to(chosen).startswith("합격"), draw_to(chosen)
     crossed = draw_to(other)
-    assert crossed.startswith("불합격") and "이름 칸" in crossed
+    assert crossed.startswith("불합격") and "이름 칸" in crossed, crossed
 
-@pytest.mark.parametrize("side", ["right", "left"])
-def test_two_kinds_to_a_package_parent_pass_on_either_side(tmp_path, side):
-    # 패키지는 향하는 점(탭 오른쪽 몸통의 가운데)이 가운데다 — 왼쪽 변으로 들어가는 선도 탭 아래 몸통에 닿는다
-    passed, _ = two_kinds(tmp_path, "draw_package_diagram", "elements", (G, R, G, R), TWO_KINDS[1], side=side,
-                          parent_kind="package")
-    assert passed.startswith("합격"), passed
+
+@pytest.mark.parametrize("name, parent, end", [
+    ("draw_package_diagram", {"kind": "package", "name": "P"}, "패키지('P')는"),
+    ("draw_component_diagram", {"kind": "lollipop", "id": "P", "name": "Payment API", "name_side": "right"},
+     "제공 인터페이스 원('P')은"),
+])
+def test_two_kinds_cannot_meet_at_a_package_or_ball_parent(tmp_path, name, parent, end):
+    """패키지·제공 인터페이스 원은 상속의 끝이 될 수 없어(#37) 상속과 실체화 두 종류가 이 부모에 모이는 그림은 입력 오류다 — 둘째
+    줄기를 옆 변에 모으는 법은 두 종류를 받는 부모(클래스·인터페이스·컴포넌트 등)에만 쓰인다."""
+    boxes = [{**parent, "left": 200, "top": 0}, {"kind": "class", "name": "C0", "left": 0, "top": 150},
+             {"kind": "component", "name": "C1", "left": 400, "top": 150}]
+    relations = [{"kind": R, "from": "C0", "to": "P"}, {"kind": G, "from": "C1", "to": "P"}]
+    (r,) = run(server.mcp, (name, {"file_name": "trunk", "elements": boxes, "relations": relations,
+                                   "out_dir": str(tmp_path)}))[2]
+    assert r.is_error and f"relations[1]: {end} 상속의 끝이 될 수 없다" in text(r), text(r)
 
 
 @pytest.mark.parametrize("kinds, lefts, more", [

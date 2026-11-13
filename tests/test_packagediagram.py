@@ -115,12 +115,11 @@ def test_dependency_from_above_onto_the_body_right_of_the_tab_passes():
     assert K.check(d).passed
 
 
-@pytest.mark.parametrize("kind", ["association", "aggregation", "composition", "generalization", "realization",
-                                  "dependency"])
+@pytest.mark.parametrize("kind", ["association", "aggregation", "composition", "realization", "dependency"])
 @pytest.mark.parametrize("source, target", [("a", "b"), ("b", "a")])
 def test_packages_stacked_top_to_bottom_pass_with_a_straight_line_of_any_kind(kind, source, target):
     # 선은 탭 오른쪽 몸통의 가운데를 향하므로, 같은 left로 쌓은 패키지 사이 선은 곧게 내려와 탭 오른쪽에 닿는다 — 아래 패키지
-    # 윗변의 삼각형·마름모·화살촉도 탭 둘레 검사 여유에 닿지 않는다
+    # 윗변의 삼각형·마름모·화살촉도 탭 둘레 검사 여유에 닿지 않는다(패키지는 상속하지 않으니 삼각형은 실체화로 본다)
     d = draw([el("package", "a", 0, 0), el("package", "b", 0, 150)], [rel(kind, source, target)])
     b = placed(d, "b")
     (line,) = d.layout.relations
@@ -129,9 +128,10 @@ def test_packages_stacked_top_to_bottom_pass_with_a_straight_line_of_any_kind(ki
 
 
 @pytest.mark.parametrize("lower", ["order.domain", "infrastructure", "infrastructure.persistence"])
-@pytest.mark.parametrize("kind", ["dependency", "generalization"])
+@pytest.mark.parametrize("kind", ["dependency", "realization"])
 def test_stacked_packages_of_different_names_follow_the_tip_with_one_bend(lower, kind):
     # 이름 길이가 다르면 곧은 선은 아래 패키지 탭을 지난다 — 배치 요령대로 탭 오른쪽 끝 + 20, 아래 top - 30에 꺾는 점을 주면 합격
+    # (삼각형 끝은 실체화로 본다 — 패키지는 상속하지 않는다)
     elements = [el("package", "app", 0, 0), el("package", lower, 0, 150)]
     (f,) = report(elements, [rel(kind, "app", lower)]).failures
     assert f.kind == "line_through_name"
@@ -166,14 +166,14 @@ def test_result_adds_the_aim_point_of_packages_only():
 @pytest.mark.parametrize("parent", ["base", "infrastructure.persistence"])
 def test_packages_share_one_trunk_at_the_x_their_lines_aim_at(parent):
     # 공유 줄기 — 패키지의 x는 결과에 덧붙는 향하는 점(탭 오른쪽 몸통의 가운데)의 x다. 자리 가운데 x로 주면 이름이 긴 패키지는
-    # 첫 구간이 제 탭을 지난다
+    # 첫 구간이 제 탭을 지난다(패키지는 상속의 끝이 될 수 없어 같은 삼각형을 쓰는 실체화로 본다)
     elements = [el("package", parent, 200, 0)] + [el("package", n, left, 150) for n, left in
                                                  (("infrastructure", 0), ("web", 220), ("persistence.jpa", 420))]
     boxes = {p.key: p for p in draw(elements).layout.boxes}
     y = (boxes[parent].rect[3] + 150) / 2
 
     def trunk(x):
-        return [rel("generalization", k, parent, via=[[x(k), y], [x(parent), y]]) for k in boxes if k != parent]
+        return [rel("realization", k, parent, via=[[x(k), y], [x(parent), y]]) for k in boxes if k != parent]
 
     assert report(elements, trunk(lambda k: boxes[k].anchor[0])).passed
     middle = report(elements, trunk(lambda k: (boxes[k].rect[0] + boxes[k].rect[2]) / 2))

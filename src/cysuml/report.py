@@ -48,6 +48,23 @@ class Finding:
 
 
 @dataclass(frozen=True)
+class Notice:
+    """표기 규칙 알림 하나 — 그리기는 했지만 뜻을 확인해 볼 입력(실체화가 인터페이스가 아닌 클래스로 가는 것 등). path는 입력 안의
+    자리(relations[2] 꼴), elements는 걸린 요소의 열쇠, problem은 무엇이 걸렸는지, hint는 고치는 법이다."""
+
+    path: str
+    elements: tuple[str, ...]
+    problem: str
+    hint: str
+
+    def __str__(self) -> str:
+        return f"{self.path}: {self.problem} {self.hint}"
+
+    def to_dict(self) -> dict:
+        return {"path": self.path, "elements": list(self.elements), "problem": self.problem, "hint": self.hint}
+
+
+@dataclass(frozen=True)
 class Report:
     """failures가 비어 있으면 합격이다. size는 그린 것의 범위에 둘레 여백을 둔 논리 좌표 폭·높이, png_size는 scale배로 낼
     PNG의 픽셀 수다 — 그 배율로는 너무 커 PNG를 그릴 수 없으면 None이다(합격과 따로 본다). 둘 다 Canvas.measure 값이다.
