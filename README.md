@@ -9,8 +9,8 @@ cysUML takes the other way round: your AI assistant decides where every box goes
 checks the drawing. If a line crosses a box or a label, the check fails and says what to move. The assistant fixes
 the layout and draws again until the check passes.
 
-- Class diagrams and sequence diagrams. Sequence diagrams are laid out by cysUML from the order of participants and
-  messages, and checked the same way.
+- Several kinds of UML diagram; the list is under [Use](#use). Sequence diagrams are laid out by cysUML from the order
+  of participants and messages, and checked the same way.
 - PNG output. The fonts are bundled, so every machine draws the same picture, Korean text included.
 
 ## Install
@@ -70,6 +70,33 @@ It gets back the check result, the size and place of every box as drawn, the sav
 The check **fails** when boxes overlap, a line runs through a box, a label or another line's arrowhead, or labels
 overlap. Crossing lines and the picture size are reported but don't fail.
 
+### Package diagrams
+
+The tool is `draw_package_diagram`. It draws packages and the dependencies between them, with classes and packages
+inside packages, and takes components, artifacts and nodes in the same picture. Every element has a `kind`. An element
+names the one it sits in with `in`, and the outer element grows right and down to cover it:
+
+```json
+{
+  "file_name": "packages",
+  "elements": [
+    {"kind": "package", "name": "web", "left": 0, "top": 0},
+    {"kind": "class", "name": "OrderController", "in": "web", "left": 20, "top": 44},
+    {"kind": "package", "name": "domain", "left": 0, "top": 180},
+    {"kind": "class", "name": "Order", "in": "domain", "left": 20, "top": 224},
+    {"kind": "class", "name": "Customer", "in": "domain", "left": 200, "top": 224}
+  ],
+  "relations": [
+    {"kind": "dependency", "from": "web", "to": "domain", "stereotype": "use"},
+    {"kind": "association", "from": "Order", "to": "Customer", "name": "places", "to_multiplicity": "1"}
+  ]
+}
+```
+
+It gets back the same things as the class diagram tool, with the place of every element. Besides the class diagram
+checks, the check fails when an element inside another sits too close to its edge or name tab, or a line runs along
+the edge of a package it starts or ends in, or through a package's name tab.
+
 ### Sequence diagrams
 
 The tool is `draw_sequence_diagram`. The assistant sends no coordinates: only the participants, the messages in
@@ -94,7 +121,7 @@ It gets back the check result, the saved file path, and the picture. As cysUML d
 cysUML bug. Each finding still says what to change in the input to get around it: the order of participants or
 messages, the messages a frame covers, shorter text, or splitting the diagram.
 
-### Both tools
+### All tools
 
 - **Saved to** `out_dir`, or `diagrams/` under the server's working folder when `out_dir` is not given. The same
   `file_name` overwrites the file. Some clients start servers in a folder you can't write to (such as `/`); the tool
@@ -132,7 +159,7 @@ AI가 배치하고 도구가 그리는, 문서용 UML 그림 MCP 서버다.
 상자 자리를 정하면 cysUML은 그대로 그리고 그림을 검사한다. 선이 상자나 글자를 지나면 불합격이고, 무엇을 옮길지 알려 준다.
 어시스턴트는 배치를 고쳐 합격할 때까지 다시 그린다.
 
-- 클래스도와 교류도를 그린다. 교류도는 참여자·메시지 차례를 받아 cysUML이 배치하고, 똑같이 검사한다.
+- 여러 UML 그림을 그린다(목록은 아래 [쓰기](#쓰기)). 교류도는 참여자·메시지 차례를 받아 cysUML이 배치하고, 똑같이 검사한다.
 - PNG로 낸다. 글꼴을 함께 넣어 어느 컴퓨터에서든 같은 그림이 나오고, 한글도 그린다.
 
 ### 설치
@@ -156,6 +183,11 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
 - **클래스도**는 `draw_class_diagram`으로 그린다. 어시스턴트가 상자의 왼쪽 위 자리와, 필요하면 관계선의 꺾는 점을 준다. 결과로
   검사 결과, 상자마다 그린 자리와 크기, 저장한 파일 경로, 그림을 돌려준다. 상자끼리 겹치거나, 선이 상자·글자·다른 선의 화살촉을
   지나거나, 글자끼리 겹치면 불합격이다. 선끼리 엇갈린 곳과 그림 크기는 알려 주기만 하고 불합격이 아니다.
+- **패키지도**는 `draw_package_diagram`으로 그린다. 패키지와 패키지 사이 의존을 그리고, 패키지 안에 클래스·패키지를 넣는다.
+  컴포넌트·아티팩트·노드도 한 그림에 함께 그린다. 요소마다 `kind`를 주고, 다른 요소 안에 둘 요소는 `in`으로 품은 요소를
+  가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다.
+  클래스도 검사에 더해, 안의 요소가 바깥 요소의 테두리·이름 탭에 붙거나, 선이 그 끝을 품은 패키지의 테두리를 따라가거나 패키지
+  탭을 지나면 불합격이다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
   프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
   파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면

@@ -1,4 +1,4 @@
-"""클래스도·교류도의 parsing이 함께 쓰는 것: 틀린 입력(InputError), 자리 표기(at), 값 보이기(show), 공용 Reader.
+"""그림마다의 parsing이 함께 쓰는 것(그림 목록은 README): 틀린 입력(InputError), 자리 표기(at), 값 보이기(show), 공용 Reader.
 
 Reader는 틀린 곳을 만나도 멈추지 않고 문제를 모은다. 문제마다 "classes[0].left: …"처럼 입력 안의 자리를 붙인다.
 그림마다 다른 부분은 Reader를 이어받아 더한다.

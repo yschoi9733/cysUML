@@ -11,7 +11,7 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
-from cysuml import classcheck, sequencecheck, sequencediagram, server
+from cysuml import boxcheck, classcheck, guide, packagediagram, sequencecheck, sequencediagram, server
 from cysuml.canvas import SCALE
 from cysuml.report import Finding
 
@@ -56,13 +56,26 @@ def image(result):
     return Image.open(io.BytesIO(base64.b64decode(block.data)))
 
 
-def test_lists_the_class_and_sequence_tools_with_their_inputs():
+TOOLS = [  # 도구 → 필수 입력, 객체 목록 입력, 문자열 목록 입력. 도구를 더하면 줄을 더한다
+    ("draw_class_diagram", ["file_name", "classes"], ("classes", "relations"), ()),
+    ("draw_package_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_sequence_diagram", ["file_name", "participants"], ("participants", "messages", "frames"), ("notes",)),
+]
+EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 더한다
+    "order": "draw_class_diagram",
+    "packages": "draw_package_diagram",
+    "checkout": "draw_sequence_diagram",
+}
+PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령과 날 수 있는 불합격 종류
+    "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS),
+    "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS),
+}
+
+
+def test_lists_every_tool_with_its_inputs():
     _, tools, _ = run(server.mcp)
-    assert list(tools) == ["draw_class_diagram", "draw_sequence_diagram"]
-    for name, required, lists, strings in [
-        ("draw_class_diagram", ["file_name", "classes"], ("classes", "relations"), ()),
-        ("draw_sequence_diagram", ["file_name", "participants"], ("participants", "messages", "frames"), ("notes",)),
-    ]:
+    assert set(tools) == {name for name, *_ in TOOLS}
+    for name, required, lists, strings in TOOLS:
         schema = tools[name].input_schema
         assert schema["required"] == required
         props = schema["properties"]
@@ -72,14 +85,19 @@ def test_lists_the_class_and_sequence_tools_with_their_inputs():
             assert props[key]["items"] == {"type": "string" if key in strings else "object"}
 
 
-def test_each_tool_carries_its_flow_and_the_instructions_carry_both():
+def test_each_tool_carries_its_flow_and_tips_and_the_instructions_carry_the_flows_only():
     instructions, tools, _ = run(server.mcp)
-    class_tool, seq_tool = tools["draw_class_diagram"].description, tools["draw_sequence_diagram"].description
-    for part in (server.CLASS_FLOW, server.CLASS_TIPS):
-        assert part in class_tool and part not in seq_tool
-    assert server.SEQUENCE_FLOW in seq_tool and server.SEQUENCE_FLOW not in class_tool
-    for part in (server.CLASS_FLOW, server.CLASS_TIPS, server.SEQUENCE_FLOW, *tools):
+    seq_tool = tools["draw_sequence_diagram"].description
+    for name, (tips, kinds) in PLACED_TOOLS.items():
+        tool = tools[name].description
+        assert guide.flow(kinds) in tool and tips in tool
+        assert server.SEQUENCE_FLOW not in tool and guide.PLACED_FLOW not in seq_tool
+        assert tips not in instructions
+        assert tips not in seq_tool
+    assert server.SEQUENCE_FLOW in seq_tool
+    for part in (guide.flow(), server.SEQUENCE_FLOW, *tools):
         assert part in instructions
+    assert "불합격(" not in instructions  # 불합격 목록은 도구 설명에만 둔다
 
 
 def test_sequence_description_names_every_field_kind_and_limit_the_reader_takes():
@@ -94,9 +112,12 @@ def test_sequence_description_names_every_field_kind_and_limit_the_reader_takes(
     assert "반환(reply)은 나를 부른 쪽으로 보낸다" in server.SEQUENCE_TOOL
 
 
-def test_description_names_every_failure_kind_in_check_order():
-    assert tuple(server.KIND_NAMES) == classcheck.KINDS
-    assert ", ".join(server.KIND_NAMES.values()) in server.CLASS_TOOL
+def test_description_names_the_failure_kinds_of_each_tool_in_check_order():
+    assert tuple(guide.KIND_NAMES) == boxcheck.KINDS
+    assert set(classcheck.KINDS) == set(boxcheck.KINDS) - set(boxcheck.NESTED_KINDS)
+    assert ", ".join(guide.KIND_NAMES[k] for k in classcheck.KINDS) + "." in server.CLASS_TOOL
+    assert not any(guide.KIND_NAMES[k] in server.CLASS_TOOL for k in boxcheck.NESTED_KINDS)
+    assert ", ".join(guide.KIND_NAMES.values()) + "." in packagediagram.TOOL
 
 
 def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):
@@ -308,17 +329,16 @@ def test_calls_at_the_same_time_all_draw(tmp_path):
 def test_readme_examples_draw_and_pass(tmp_path):
     blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
     examples = [b for b in blocks if "file_name" in b]
-    assert [b["file_name"] for b in examples] == ["order", "checkout"]
+    assert sorted(b["file_name"] for b in examples) == sorted(EXAMPLES)
     for b in examples:
-        tool = "draw_sequence_diagram" if "participants" in b else "draw_class_diagram"
-        (r,) = run(server.mcp, (tool, {**b, "out_dir": str(tmp_path)}))[2]
+        (r,) = run(server.mcp, (EXAMPLES[b["file_name"]], {**b, "out_dir": str(tmp_path)}))[2]
         assert not r.is_error and text(r).startswith("합격"), text(r)
 
 
 def test_command_serves_over_stdio(tmp_path):
     params = StdioServerParameters(command=sys.executable, args=["-m", "cysuml"], cwd=str(tmp_path))
     _, tools, results = run(params, CLASS, SEQUENCE)
-    assert list(tools) == ["draw_class_diagram", "draw_sequence_diagram"]
+    assert {"draw_class_diagram", "draw_sequence_diagram"} <= set(tools)
     assert not any(r.is_error for r in results)
     assert sorted(p.name for p in (tmp_path / "diagrams").iterdir()) == ["checkout.png", "order.png"]
 
