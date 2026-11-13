@@ -217,7 +217,7 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
                   f"하나만 준다.",
                   f"    - x2 줄(y2에서 부모 가운데 y까지)에 다른 {noun}{josa(noun, '이', '가')} 걸리거나 첫 종류 자식의 가운데 x가 x2에서 "
                   f"{TRUNK_NEAR}px 안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 {edge}의 x(왼{within}) − {TRUNK_SIDE}로 두어 왼쪽 "
-                  f"{edge}에 모은다.",
+                  f"{edge}에 모은다. 왼쪽도 그렇게 막히면 걸린 {noun}{josa(noun, '을', '를')} 옮기거나 자식 차례를 바꾼다.",
                   f"    - 두 줄기를 둘 때는 y2가 가장 위 자식의 위 {edge}보다 {TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
                   f"{TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다."]
     return "\n".join(lines)

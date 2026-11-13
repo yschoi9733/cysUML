@@ -163,6 +163,7 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
                    "자식 가운데 x가 x2와 같으면 [x2, 부모 가운데 y] 하나만 준다.",
                    f"첫 종류 자식의 가운데 x가 x2에서 {guide.TRUNK_NEAR}px 안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 {edge}의 "
                    f"x(왼) − {guide.TRUNK_SIDE}로 두어",
+                   f"왼쪽도 그렇게 막히면 걸린 {noun}를 옮기거나 자식 차례를 바꾼다.",
                    f"y2가 가장 위 자식의 위 {edge}보다 {guide.TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
                    f"{guide.TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다."):
         assert phrase in text, phrase
@@ -175,8 +176,10 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
 def test_trunk_numbers_fit_together():
     # 둘째 줄기를 옆 변으로 들이는 끝 구간이 끝 모양보다 길고(짧으면 입력 오류), 가장 좁은 간격에서 y를 가운데에 두면 둘째 줄기가
     # 자식 위 변에서 TRUNK_CLEAR 떨어진다. 붙어 감 판정(BOX_CLEARANCE)보다 넉넉하다
+    # 가장 좁은 간격에서 첫 줄기를 가운데에 두어도 첫 줄기 끝 구간이 끝 모양보다 길다
     for _, _, spec in PLACED_TOOLS.values():
-        assert guide.TRUNK_SIDE > max(t.end.length for t in spec.relations.values() if t.trunk and t.end is not None)
+        longest = max(t.end.length for t in spec.relations.values() if t.trunk and t.end is not None)
+        assert guide.TRUNK_SIDE > longest and guide.TRUNK_ROOM / 2 > longest
     assert guide.TRUNK_ROOM / 2 - guide.TRUNK_SPLIT >= guide.TRUNK_CLEAR > boxcheck.BOX_CLEARANCE
     assert guide.TRUNK_NEAR > boxcheck.OVERLAP_GAP
 
