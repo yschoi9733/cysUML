@@ -44,8 +44,9 @@ claude mcp add cysuml -- uvx cysuml
 ```
 
 **Versions.** `uvx cysuml` runs the newest release: each time the client starts the server, uv asks PyPI and reuses
-the answer for up to ten minutes. To stay on one version, put it after the name: `uvx cysuml@0.1.0` (in JSON, `"args": ["cysuml@0.1.0"]`). The releases are
-listed in the [release history](https://pypi.org/project/cysuml/#history).
+the answer for up to ten minutes. If you installed it with `uv tool install cysuml`, uvx runs that copy instead;
+update it with `uv tool upgrade cysuml`. To stay on one version, put it after the name: `uvx cysuml@0.1.0` (in JSON,
+`"args": ["cysuml@0.1.0"]`). The releases are listed in the [release history](https://pypi.org/project/cysuml/#history).
 
 ## Use
 
@@ -338,7 +339,8 @@ uvx cysuml
 - **Claude Code:** `claude mcp add cysuml -- uvx cysuml`
 - **다른 클라이언트:** 위 영어 안내의 JSON 설정에 같은 명령을 넣는다.
 - **버전:** `uvx cysuml`은 가장 새 버전을 띄운다. 클라이언트가 서버를 띄울 때마다 uv가 PyPI에 묻고, 받은 답은 10분까지 다시
-  쓴다. 한 버전에 머물려면 이름 뒤에 버전을 붙인다 — `uvx cysuml@0.1.0`(JSON에서는 `"args": ["cysuml@0.1.0"]`). 나온 버전은
+  쓴다. `uv tool install cysuml`로 설치해 두었으면 uvx는 그 설치본을 띄우니 `uv tool upgrade cysuml`로 올린다. 한 버전에
+  머물려면 이름 뒤에 버전을 붙인다 — `uvx cysuml@0.1.0`(JSON에서는 `"args": ["cysuml@0.1.0"]`). 나온 버전은
   [PyPI 릴리스 기록](https://pypi.org/project/cysuml/#history)에 있다.
 
 ### 쓰기

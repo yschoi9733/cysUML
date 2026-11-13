@@ -1,4 +1,3 @@
-# v<버전> 태그를 달면 빌드하고, 빌드한 휠로 테스트를 돌린 뒤 PyPI에 올린다.
 # PyPI에는 비밀 값 없이 trusted publishing으로 올린다 — PyPI의 cysuml 프로젝트에 이 레포·이 파일 이름·환경 pypi를 등록해 둔다.
 name: publish
 
