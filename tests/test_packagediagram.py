@@ -528,16 +528,30 @@ def test_icon_kinds_sit_in_packages_and_nodes_and_the_outer_element_covers_them(
 # ---------------------------------------------------------------- 제 화살촉 옆을 지나는 선
 
 
-@pytest.mark.parametrize("end, passed", [(10, False), (11, True), (K.ARROW_BEND, True)])
+@pytest.mark.parametrize("end, passed", [(10, False), (11, True)])
 def test_dependency_bent_beside_its_own_arrowhead(end, passed):
     # 클래스 B(0, 0)의 왼쪽 가운데로 오는 의존을 via [[−end, 24]]에서 직각으로 꺾는다. 끝 구간이 화살촉 길이(10)와 같으면 앞 세로
-    # 구간이 화살촉 갈래 끝(x ≈ −8.83)에서 1.2px 떨어져 지나 갈래와 한데 붙어 보인다. 도구 설명이 권하는 거리(ARROW_BEND)는 합격한다
+    # 구간이 화살촉 갈래 끝(x ≈ −8.83)에서 1.2px 떨어져 지나 갈래와 한데 붙어 보인다
     r = report([el("class", "B", 0, 0), el("class", "A", -end - 45, 200)], [rel("dependency", "A", "B", via=[[-end, 24]])])
     assert r.passed is passed, r.summary()
     if not passed:
         (f,) = r.failures
         assert f.kind == "line_through_head" and f.elements == ("A->B",)
         assert "선이 제 선 끝 모양에 닿는다" in f.problem and "화살촉" in f.problem
+        assert K.bend_away(P.SPEC.words) in f.hint
+
+
+@pytest.mark.parametrize("side", [1, -1])
+@pytest.mark.parametrize("beta", [0, 30, 50])
+def test_bend_at_the_advised_distance_clears_its_own_arrowhead(beta, side):
+    # 도구 설명이 권하는 거리(ARROW_BEND)에 꺾는 점을 두면, 꺾은 앞 구간(길이 20)이 직각에서 화살촉 쪽으로 β만큼 더 기울어도(꺾는
+    # 점을 요소 가운데 줄에서 비켜 둔 꼴) 화살촉 갈래 끝에서 OVERLAP_GAP 넘게 떨어진다. 아래(side 1)·위(−1)에서 와도 같다
+    corner = (-K.ARROW_BEND, 24)
+    b = math.radians(beta)
+    p = (corner[0] + 20 * math.sin(b), corner[1] + side * 20 * math.cos(b))
+    r = report([el("class", "B", 0, 0), el("class", "A", p[0] - 300, p[1] - 24 + side * 200)],
+               [rel("dependency", "A", "B", via=[list(p), list(corner)])])
+    assert r.passed, r.summary()
 
 
 # ---------------------------------------------------------------- 섞어 그리기·도구

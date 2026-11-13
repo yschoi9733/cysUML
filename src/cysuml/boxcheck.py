@@ -18,7 +18,7 @@ import operator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
-from .boxdiagram import (BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, Layout, NameZone, PlacedBox, PlacedRelation,
+from .boxdiagram import (ARROW_HEAD, BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, Layout, NameZone, PlacedBox, PlacedRelation,
                          Words, josa)
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
@@ -35,9 +35,11 @@ PARALLEL_SIN = 0.05  # 두 선분 사이 각의 사인이 이 안이면(약 3°)
 LINE_EPS = 1e-6  # 점이 선에서 이 안이면 선 위로 본다(엇갈림이 아니라 맞닿음)
 HEAD_HIDE = 2  # 선 끝 모양이 제 끝 요소 안으로 이만큼 넘게 들어가면 가려진(들어간) 것으로 본다(살짝 들어가는 건 테두리 밑으로 일부러 넣은 것)
 OWN_MARGIN = 0.5  # 선이 제 삼각형·마름모는 그 안쪽으로 이만큼 넘게 들어가야 지난 것으로 본다(테두리에 닿거나 따라가면 이어진 것)
-# 화살촉 쪽 끝 구간을 직각으로 꺾을 때 꺾는 점을 끝 요소에서 뗄 거리(도구 설명·고치는 법에 쓴다). 꺾은 앞 구간이 화살촉 갈래
-# 끝(10·cos 28° ≈ 8.83)에서 OVERLAP_GAP 넘게 떨어지려면 10.83보다 길어야 해서(실측) 넉넉히 잡는다
-ARROW_BEND = 12
+# 화살촉 쪽 끝 구간을 꺾을 때 꺾는 점을 끝 요소에서 뗄 거리(bend_away). 꺾은 앞 구간이 화살촉 갈래 끝에서 OVERLAP_GAP 넘게
+# 떨어지려면, 앞 구간이 직각에서 화살촉 쪽으로 β만큼 더 기울 때 끝 구간이 10·cos 28° + (OVERLAP_GAP + 10·sin 28°·sin β) / cos β
+# 보다 길어야 한다(직각 10.83, β 30° 13.85, 50° 17.54 — 실측과 맞음). 꺾는 점을 요소 가운데 줄에서 비켜 두면 끝 구간이 기울어 β가
+# 생기므로 β 50°까지 덮게 잡는다
+ARROW_BEND = 20
 PLACE_EPS = 1e-3  # 여러 선이 걸린 자리가 이 안으로 같으면 한 자리로 묶는다
 
 ROLES = {"name": "이름", "from_multiplicity": "from 쪽 다중도", "to_multiplicity": "to 쪽 다중도"}
@@ -67,6 +69,11 @@ def label_hint(w: Words) -> str:
 
 def crossing_hint(w: Words) -> str:
     return f"엇갈림을 줄이려면 {w.noun} 순서·자리를 바꾸거나, 꺾는 점(via)을 주어 돌아가게 한다."
+
+
+def bend_away(w: Words) -> str:
+    """화살촉 쪽 끝 구간을 꺾을 때 꺾는 점을 뗄 거리. 도구 설명(guide.arrow_bend)과 제 화살촉에 닿는 항목의 고치는 법이 함께 쓴다."""
+    return f"화살촉 쪽 끝 구간을 꺾을 때는 그 꺾는 점을 {w.noun} {w.edge}에서 {ARROW_BEND}px 이상 뗀다"
 
 
 def _passed(w: Words) -> str:
@@ -630,8 +637,8 @@ def _lines_through_heads(relations: list[_Relation], pairs: Pairs, near: dict[fr
         where = span(h.points)
         if own:
             problem = f"선이 제 선 끝 모양에 닿는다: {_titles(passers)}, {h.name}(자리 {fmt_rect(where)})."
-            hint = (f"꺾는 점(via)을 고쳐 선이 제 선 끝 모양을 비켜 가게 한다 — 화살촉 쪽 끝 구간을 직각으로 꺾었으면 그 꺾는 점을 "
-                    f"끝 {w.noun}에서 {ARROW_BEND}px 이상 뗀다.")
+            hint = "꺾는 점(via)을 고쳐 선이 제 선 끝 모양을 비켜 가게 한다" + (
+                f" — {bend_away(w)}." if h.name == ARROW_HEAD.name else ".")
         else:
             whose = "·".join(f"관계 {o.name}" for o in sorted(owners, key=_index))
             problem = f"선이 다른 관계의 선 끝 모양에 닿는다: {_titles(passers)}, {whose}의 {h.name}(자리 {fmt_rect(where)})."

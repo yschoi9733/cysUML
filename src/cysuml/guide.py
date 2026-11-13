@@ -4,7 +4,7 @@
 - NEW_INPUT(나): 새 그림 도구가 모두 받는 입력 규칙(열쇠·여러 줄 이름·관계 스테레오타입).
 - PLACED_ELEMENTS(다): 패키지도·컴포넌트도·배치도(deployment diagram)가 함께 받는 요소 종류.
 - relation_fields(라): 도구 정의가 받는 관계 종류(클래스도 관계 여섯 가지 가운데 고른 것 등)와 연관의 기본 방향, 표기 규칙으로 만드는
-  관계 필드. 공유 줄기를 받는 관계(상속·실체화)가 있으면 그 모양을 쓰는 법도 붙인다. via 설명의 직각 꺾음 거리(arrow_bend)는
+  관계 필드. 공유 줄기를 받는 관계(상속·실체화)가 있으면 그 모양을 쓰는 법도 붙인다. via 설명의 화살촉 쪽 꺾음 거리(arrow_bend)는
   상태도·액티비티도의 via 설명도 쓴다.
 - NESTING(마): 요소 안에 요소 두기.
 - NAME_SIDE(바): 모양 밖 이름의 쪽.
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
-from .boxcheck import ARROW_BEND, KINDS
+from .boxcheck import KINDS, bend_away
 from .boxdiagram import ARROW, ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec, Words, aims_off_center, josa
 from .canvas import MIN_SCALE, SCALE
 from .report import fmt_num
@@ -157,9 +157,8 @@ def _joined(words: Iterable[str]) -> str:
 
 
 def arrow_bend(w: Words) -> str:
-    """via 설명에 붙이는 화살촉 쪽 직각 꺾음 거리(boxcheck.ARROW_BEND)."""
-    return (f"화살촉 쪽 끝 구간을 직각으로 꺾을 때는 그 꺾는 점을 {w.noun} {w.edge}에서 {ARROW_BEND}px 이상 뗀다 — 화살촉 "
-            f"길이({ARROW}px)만큼만 떼면 꺾은 앞 구간이 화살촉 갈래 끝에 붙어 불합격이다.")
+    """via 설명에 붙이는 화살촉 쪽 꺾음 거리(boxcheck.bend_away)."""
+    return f"{bend_away(w)} — 화살촉 길이({ARROW}px)만큼만 떼면 꺾은 앞 구간이 화살촉 갈래 끝에 붙어 불합격이다."
 
 
 def relation_fields(spec: Spec) -> str:

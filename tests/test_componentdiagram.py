@@ -373,6 +373,7 @@ def test_socket_line_bent_around_the_ball_beside_its_own_half_circle(above, pass
         (f,) = r.failures
         assert f.kind == "line_through_head" and f.elements == ("U->Api",)
         assert "선이 제 선 끝 모양에 닿는다" in f.problem and "소켓 반원" in f.problem
+        assert "화살촉" not in f.hint  # 화살촉 쪽 꺾음 거리는 화살촉에만 붙인다
 
 
 def test_socket_input_errors():
