@@ -15,7 +15,7 @@ from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Element, PlacedBox, Sha
 from .canvas import SCALE, Canvas, Point
 from .classdiagram import RELATIONS
 from .geom import Border, EllipseBorder
-from .guide import (COMMON_INPUT, IMAGE_RESULT, NAME_SIDE, NESTING, NEW_INPUT, OUTSIDE_PLACES, PLACED_ELEMENTS, PLACES_RESULT,
+from .guide import (COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, OUTSIDE_PLACES, PLACED_ELEMENTS, PLACES_RESULT,
                     flow, relation_fields)
 from .shapes import SHAPES
 from .text import Box
@@ -68,8 +68,7 @@ def render(data: Any, scale: float = SCALE) -> Drawing:
 
 LOLLIPOP_INPUT = f"""  - 이 도구는 kind "lollipop"(제공 인터페이스 원)도 받는다. 지름 {BALL}px 원과 그 밖에 쓰는 이름이다. \
 클래스 모양 인터페이스(kind "interface"의 «interface» 상자)와 다른 종류이고, 둘 다 쓸 수 있다. name·id·left·top·in·name_side를 \
-받고, stereotype·width·height는 받지 않는다. 선은 원 가운데를 향하고 원 둘레에 닿는다.
-  {NAME_SIDE}"""
+받고, stereotype·width·height는 받지 않는다. 선은 원 가운데를 향하고 원 둘레에 닿는다."""
 
 TIPS = """컴포넌트도 배치 요령:
 - 제공 인터페이스는 원(lollipop)으로 그린다 — 제공하는 컴포넌트에서 원으로 association을 긋고(이 도구의 연관 기본 방향은 "none"이라 \

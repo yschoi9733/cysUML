@@ -97,6 +97,10 @@ It gets back the same things as the class diagram tool, with the place of every 
 checks, the check fails when an element inside another sits too close to its edge or name tab, or a line runs along
 the edge of a package it starts or ends in, or through a package's name tab.
 
+Components and artifacts can also be drawn in icon notation. `component_icon` is the UML 1 component: a box with two
+small rectangles across its left edge, which lines may not cross. `artifact_icon` is a folded-page icon with the name
+(often a file name) outside it, on the side `name_side` gives.
+
 ### Component diagrams
 
 The tool is `draw_component_diagram`. It draws components with the interfaces they provide, the artifacts that
@@ -309,7 +313,8 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   컴포넌트·아티팩트·노드도 한 그림에 함께 그린다. 요소마다 `kind`를 주고, 다른 요소 안에 둘 요소는 `in`으로 품은 요소를
   가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다.
   클래스도 검사에 더해, 안의 요소가 바깥 요소의 테두리·이름 탭에 붙거나, 선이 그 끝을 품은 패키지의 테두리를 따라가거나 패키지
-  탭을 지나면 불합격이다.
+  탭을 지나면 불합격이다. 컴포넌트·아티팩트는 아이콘 표기로도 그린다 — `component_icon`은 왼쪽 변에 작은 네모 둘이 걸친 UML 1
+  표기 컴포넌트(선이 네모를 지나면 불합격), `artifact_icon`은 귀 접힌 문서 아이콘과 그 밖(`name_side`)에 쓰는 이름이다.
 - **컴포넌트도**는 `draw_component_diagram`으로 그린다. 컴포넌트와 제공 인터페이스, 컴포넌트를 구현하는 아티팩트, 컴포넌트를
   실현하는 클래스를 그린다. 패키지도 도구가 받는 요소에 더해 `lollipop`(제공 인터페이스 원 — 작은 원과 그 밖에 쓰는
   이름으로 그린다. 이름 쪽은 `name_side`)을 받는다. 제공하는 컴포넌트는 원과 `association`으로 잇고(이 도구에서는 `navigable`을

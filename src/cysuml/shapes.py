@@ -1,15 +1,17 @@
-"""여러 그림이 함께 쓰는 요소 모양: 패키지·컴포넌트·아티팩트·노드, 그리고 그 넷과 클래스를 한 그림에 섞어 받는 종류 목록(SHAPES).
+"""여러 그림이 함께 쓰는 요소 모양: 패키지·컴포넌트·아티팩트·노드와 컴포넌트·아티팩트의 아이콘 표기, 그리고 이것들과 클래스를 한
+그림에 섞어 받는 종류 목록(SHAPES).
 
-패키지도·컴포넌트도·배치도(deployment diagram)가 같은 모양을 두 번 만들지 않게 여기 둔다. 네 모양 모두 클래스처럼 스테레오타입을 받아 이름 위
-줄에 쓰고, 머리 칸 글자는 클래스 머리 칸과 같은 자리 규칙(classdiagram.draw_head)을 쓴다.
+패키지도·컴포넌트도·배치도(deployment diagram)가 같은 모양을 두 번 만들지 않게 여기 둔다. 문서 아이콘 아티팩트 밖의 모양은 클래스처럼
+스테레오타입을 받아 이름 위 줄에 쓰고, 머리 칸 글자는 클래스 머리 칸과 같은 자리 규칙(classdiagram.draw_head)을 쓴다.
 """
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from typing import Optional
 
 from .boxdiagram import NEST_PAD, Element, NameZone, PlacedBox, Shape
-from .canvas import Canvas
+from .canvas import Canvas, Point
 from .classdiagram import CLASS_SHAPES, MIN_WIDTH, draw_head, head_height, head_lines, head_width
 from .geom import Border, PolygonBorder, RectBorder, Segment
 from .text import Box
@@ -24,6 +26,12 @@ ICON_ROOM = 16     # 컴포넌트·아티팩트 아이콘이 이름과 겹치지
 ICON_MARGIN = 6    # 아이콘과 상자 오른쪽·위 변 사이
 DEPTH = 8          # 노드 두께 띠의 폭. BOX_CLEARANCE의 두 배 안이라 띠 안을 따라가는 선은 늘 띠 한쪽 변에 붙어 걸린다
 NODE_BODY = 24     # 노드 앞면에서 이름 줄 밖에 더하는 높이
+PART = (16, 6)     # UML 1 표기 컴포넌트의 부품 네모 폭·높이. 폭의 반이 상자 왼쪽 변 밖으로 튀어나온다
+# 부품 네모와 상자 세로 가운데 사이. 왼쪽에서 가로로 곧게 들어오는 선의 삼각형(반폭 9)이 네모 둘레 검사 여유(4px)에서 2px 더
+# 떨어진다. 상자가 가장 낮을 때(48)도 네모가 위아래 변에서 3px 안쪽에 든다
+PART_OFF = 15
+PAGE = (30, 38)    # 문서 아이콘 아티팩트의 문서 폭·높이
+FOLD = 10          # 문서 아이콘의 접힌 귀
 
 
 Head = tuple[tuple[tuple[str, bool], ...], float, float]  # (머리 칸 줄, 폭, 높이)
@@ -127,6 +135,80 @@ class ArtifactShape(_IconBox):
         c.line([(x + w - fold, y), (x + w - fold, y + fold), (x + w, y + fold)], owner=owner)
 
 
+class ComponentIconShape(_HeadShape):
+    """UML 1 표기 컴포넌트: 상자 왼쪽 변에 부품 네모 둘이 반쯤 걸쳐 튀어나온다. 자리는 튀어나온 네모까지 덮고, 선이 닿는 테두리는
+    네모를 뺀 상자(_body)다. 부품 네모는 몸통 밖에 붙은 자리라 그 컴포넌트가 끝인 선도 지나가면 안 된다 — 이름 칸 길(NameZone)로
+    넘기되 검사 글은 "부품 네모"라고 부른다. 네모는 상자 세로 가운데에서 위아래로 PART_OFF 떨어져 있어, 왼쪽에서 가로로 곧게 들어오는
+    선은 두 네모 사이로 닿는다. 이름과 스테레오타입은 상자 가운데에 쓴다."""
+
+    def size(self, e: Element) -> tuple[float, float]:
+        _, w, h = self.head(e)
+        return max(MIN_WIDTH, w + PART[0]) + PART[0] / 2, h + BOX_BODY
+
+    def _body(self, rect: Box) -> Box:
+        return rect[0] + PART[0] / 2, rect[1], rect[2], rect[3]
+
+    def _parts(self, rect: Box) -> tuple[Box, Box]:
+        l, cy = rect[0], (rect[1] + rect[3]) / 2
+        w, h = PART
+        return (l, cy - PART_OFF - h, l + w, cy - PART_OFF), (l, cy + PART_OFF, l + w, cy + PART_OFF + h)
+
+    def border(self, e: Element, rect: Box) -> Border:
+        return RectBorder(self._body(rect))
+
+    def name_zones(self, e: Element, rect: Box) -> tuple[NameZone, ...]:
+        return tuple(NameZone(part, True, "부품 네모") for part in self._parts(rect))
+
+    def parts(self, e: Element, rect: Box) -> tuple[Border, ...]:
+        """상자와 부품 네모 둘 — 네모 위아래의 빈 곳은 컴포넌트가 아니다."""
+        return (RectBorder(self._body(rect)), *(RectBorder(part) for part in self._parts(rect)))
+
+    def draw(self, c: Canvas, p: PlacedBox) -> None:
+        l, t, r, b = self._body(p.rect)
+        c.rect(l, t, r - l, b - t, owner=p.key)
+        for pl, pt, pr, pb in self._parts(p.rect):
+            c.rect(pl, pt, pr - pl, pb - pt, owner=p.key)
+        lines, _, h = self.head(p.box)
+        draw_head(c, list(lines), (l + r) / 2, (t + b - h) / 2, p.key)
+
+
+class ArtifactIconShape(Shape):
+    """문서 아이콘 표기 아티팩트: 귀가 접힌 문서 아이콘을 정해진 크기(PAGE)로 그리고, 이름(흔히 파일 이름)은 모양 밖(name_side, 기본
+    아래)에 쓴다. 선 끝은 문서 테두리(볼록 오각형)에 닿고, 선은 문서 사각형 가운데를 정수로 내린 점을 향한다. 볼록 다각형의 기본
+    중심(넓이 중심)은 귀 반대쪽으로 쏠리고, 모양 밖 이름은 모양 자리를 반 픽셀에 놓기도 해서다 — 그대로면 가운데를 맞춘 컴포넌트와 잇는
+    세로 선이 계단처럼 보인다. 문서도 그 점에 맞춰 그린다."""
+
+    outside_name = True
+    sized = False
+    stereotyped = False
+
+    def size(self, e: Element) -> tuple[float, float]:
+        return PAGE
+
+    def _page(self, rect: Box) -> Box:
+        """가운데를 정수로 내린 문서 사각형."""
+        l, t, r, b = rect
+        dx, dy = math.floor((l + r) / 2) - (l + r) / 2, math.floor((t + b) / 2) - (t + b) / 2
+        return l + dx, t + dy, r + dx, b + dy
+
+    def _corners(self, rect: Box) -> tuple[Point, ...]:
+        l, t, r, b = self._page(rect)
+        return (l, t), (r - FOLD, t), (r, t + FOLD), (r, b), (l, b)
+
+    def anchor(self, e: Element, rect: Box) -> Point:
+        l, t, r, b = self._page(rect)
+        return (l + r) / 2, (t + b) / 2
+
+    def border(self, e: Element, rect: Box) -> Border:
+        return PolygonBorder(self._corners(rect))
+
+    def draw(self, c: Canvas, p: PlacedBox) -> None:
+        page = self._corners(p.shape_rect)
+        c.poly(page, owner=p.key)
+        (fx, top), (right, fy) = page[1], page[2]
+        c.line([(fx, top), (fx, fy), (right, fy)], owner=p.key)
+
+
 class NodeShape(_HeadShape):
     """노드: 오른쪽과 위에 두께(DEPTH)가 보이는 입체 상자. 선 끝은 겉 테두리(육각형)에 닿는다. 이름은 앞면 위쪽 가운데에 쓰고(이름
     칸 좌우로 NEST_PAD 이상 앞면이 남는다 — 안의 요소를 잇는 선이 이름 옆으로 앞면 윗변을 건널 자리), 안에 요소를 두는 칸은 이름 줄
@@ -174,7 +256,10 @@ class NodeShape(_HeadShape):
 PACKAGE = PackageShape()
 COMPONENT = ComponentShape()
 ARTIFACT = ArtifactShape()
+COMPONENT_ICON = ComponentIconShape()
+ARTIFACT_ICON = ArtifactIconShape()
 NODE = NodeShape()
 
 # 패키지도·컴포넌트도·배치도(deployment diagram)가 함께 받는 요소 종류
-SHAPES = {**CLASS_SHAPES, "package": PACKAGE, "component": COMPONENT, "artifact": ARTIFACT, "node": NODE}
+SHAPES = {**CLASS_SHAPES, "package": PACKAGE, "component": COMPONENT, "artifact": ARTIFACT, "component_icon": COMPONENT_ICON,
+          "artifact_icon": ARTIFACT_ICON, "node": NODE}

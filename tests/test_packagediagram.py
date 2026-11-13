@@ -1,5 +1,6 @@
 """패키지도와 여러 그림이 함께 쓰는 모양(패키지·컴포넌트·아티팩트·노드): 중첩, 탭·두께 띠 규칙, 그리는 차례, 모양 기록."""
 import dataclasses
+import math
 
 import pytest
 
@@ -353,6 +354,121 @@ def test_node_is_drawn_as_a_box_with_thickness():
     assert edges == [((0, 8), (w - 8, 8), (w - 8, h)), ((w - 8, 8), (w, 0))]
     (t,) = owned(d, "N", Text)
     assert t.x == (w - 8) / 2 and t.y == 8 + 13
+
+
+# ---------------------------------------------------------------- 아이콘 표기(UML 1 표기 컴포넌트·문서 아이콘 아티팩트)
+
+
+def test_component_icon_is_a_box_with_two_parts_straddling_its_left_edge():
+    d = draw([el("component_icon", "C", 0, 0, stereotype="component")])
+    p = placed(d, "C")
+    w, h = p.width, p.height
+    box, *parts = owned(d, "C", Rect)
+    assert (box.left, box.top, box.width, box.height) == (8, 0, w - 8, h)
+    cy = h / 2
+    assert [(r.left, r.top, r.width, r.height) for r in parts] == [(0, cy - 21, 16, 6), (0, cy + 15, 16, 6)]
+    assert p.border == G.RectBorder((8, 0, w, h)) and p.anchor == ((8 + w) / 2, cy)
+    assert p.zones == tuple(B.NameZone((0, top, 16, top + 6), True, "부품 네모") for top in (cy - 21, cy + 15))
+    texts = owned(d, "C", Text)
+    assert [t.text for t in texts] == ["«component»", "C"] and texts[0].x == texts[1].x == (8 + w) / 2
+
+
+@pytest.mark.parametrize("where, kind", [((150, -150), "dependency"), ((-100, 150), "dependency"),
+                                         ((250, -60), "dependency"), ((-200, 0), "realization")])
+def test_lines_into_a_component_icon_pass_from_above_below_right_and_straight_from_the_left(where, kind):
+    d = draw([el("component_icon", "C", 0, 0), el("class", "A", *where)], [rel(kind, "A", "C")])
+    end = d.layout.relations[0].points[-1]
+    assert any(G.distance((end, end), e, 0) < 1e-9 for e in placed(d, "C").border.edges())
+    assert K.check(d).passed, K.check(d).summary()
+
+
+def test_line_through_a_part_of_a_component_icon_fails_and_is_not_called_a_name_area():
+    # 왼쪽에서 비스듬히 들어와 위쪽 부품 네모에 걸린다 — 그 컴포넌트가 끝인 선이어도 불합격
+    r = report([el("component_icon", "C", 0, 0), el("class", "A", -200, -100)], [rel("dependency", "A", "C")])
+    (f,) = r.failures
+    assert f.kind == "line_through_name" and "부품 네모(0, 3, 16×6)" in f.problem and "이름 칸" not in f.problem + f.hint
+
+
+def test_element_or_label_on_a_part_of_a_component_icon_fails():
+    # A는 상자(x 8부터)에는 닿지 않고 튀어나온 부품 네모(x 0~16)에만 걸친다
+    assert kinds(report([el("component_icon", "C", 0, 0), el("class", "A", -88, 0)])) == ["box_overlap"]
+    # 세로선 T→U(x −30)의 가운데가 위쪽 부품 네모(0, 3, 16×6) 높이에 온다. 이름 자리 둘 가운데 왼쪽은 상자 D가 막아 오른쪽(네모 위)에 놓인다
+    r = report([el("component_icon", "C", 0, 0), el("class", "T", -75, -246), el("class", "U", -75, 206),
+                el("class", "D", -135, -20)], [rel("association", "T", "U", name="uses")])
+    (f,) = r.failures
+    assert f.kind == "text_on_box" and f.elements == ("T->U", "C")
+
+
+def test_returned_place_of_a_component_icon_draws_the_same():
+    elements = [el("component_icon", "C", 0, 0, stereotype="subsystem"), el("class", "A", 300, 0)]
+    relations = [rel("dependency", "A", "C")]
+    d = draw(elements, relations)
+    p = placed(d, "C")
+    again = [{**elements[0], "width": p.width, "height": p.height}, elements[1]]
+    assert [repr(r) for r in draw(again, relations).canvas.records] == [repr(r) for r in d.canvas.records]
+
+
+def test_artifact_icon_is_a_folded_page_with_its_name_outside():
+    # 이름 "order.jar"(폭 49)가 문서(폭 30)보다 넓어 모양 자리가 반 픽셀(9.5)에 놓인다 — 문서는 가운데를 내린 자리(9)에 그린다
+    d = draw([el("artifact_icon", "order.jar", 0, 0)])
+    p = placed(d, "order.jar")
+    assert p.rect == (0, 0, 49, 38 + B.NAME_SEP + B.LABEL_LINE) and p.shape_rect == (9.5, 0, 39.5, 38)
+    (page,) = owned(d, "order.jar", Polygon)
+    (fold,) = owned(d, "order.jar", Line)
+    assert page.points == ((9, 0), (29, 0), (39, 10), (39, 38), (9, 38))
+    assert fold.points == ((29, 0), (29, 10), (39, 10))
+    assert p.anchor == (24, 19) and p.border == G.PolygonBorder(page.points)
+    (name,) = owned(d, "order.jar", Text)
+    assert name.text == "order.jar" and p.zones == (B.NameZone((0, 42, 49, 57), True),)
+
+
+@pytest.mark.parametrize("side, user", [("bottom", (-20, -150)), ("top", (-20, 150)), ("left", (200, -5)),
+                                        ("right", (-200, -5))])
+def test_artifact_icon_name_sides_pass_and_the_returned_place_draws_the_same(side, user):
+    elements = [el("artifact_icon", "order.jar", 0, 0, name_side=side), el("class", "A", *user)]
+    relations = [rel("dependency", "A", "order.jar")]
+    d = draw(elements, relations)
+    assert K.check(d).passed, K.check(d).summary()
+    p = placed(d, "order.jar")
+    again = [el("artifact_icon", "order.jar", p.rect[0], p.rect[1], name_side=side), elements[1]]
+    assert [repr(r) for r in draw(again, relations).canvas.records] == [repr(r) for r in d.canvas.records]
+
+
+@pytest.mark.parametrize("where", [(-200, -100), (200, -100), (200, 0), (-200, 0)])
+def test_slanted_lines_into_an_artifact_icon_end_on_the_page(where):
+    d = draw([el("artifact_icon", "app.jar", 0, 0), el("class", "A", *where)], [rel("dependency", "A", "app.jar")])
+    end = d.layout.relations[0].points[-1]
+    assert any(G.distance((end, end), e, 0) < 1e-9 for e in placed(d, "app.jar").border.edges())
+    assert K.check(d).passed, K.check(d).summary()
+
+
+def test_line_through_the_name_of_an_artifact_icon_fails():
+    r = report([el("artifact_icon", "order.jar", 0, 0), el("class", "A", -20, 150)], [rel("dependency", "A", "order.jar")])
+    (f,) = r.failures
+    assert f.kind == "line_through_name" and "이름 칸(0, 42, 49×15)" in f.problem
+
+
+@pytest.mark.parametrize("name", ["order.jar", "a.jar", "order-service.jar"])
+def test_vertical_line_from_a_centred_component_to_an_artifact_icon_is_straight(name):
+    # 기본 폭 90 컴포넌트(가운데 x 45) 아래에, 문서 가운데가 45가 되는 정수 left로 문서 아이콘 아티팩트를 둔다
+    w = placed(draw([el("artifact_icon", name, 0, 0)]), name).width
+    d = draw([el("component", "Order", 0, 0), el("artifact_icon", name, math.ceil(45 - w / 2), 120)],
+             [rel("dependency", name, "Order", stereotype="manifest")])
+    (line,) = d.layout.relations
+    assert line.points[0][0] == line.points[-1][0] == 45
+    assert K.check(d).passed, K.check(d).summary()
+
+
+def test_icon_kinds_sit_in_packages_and_nodes_and_the_outer_element_covers_them():
+    d = draw([el("package", "p", 0, 0), inside("p", "component_icon", "C", 20, 44),
+              inside("p", "artifact_icon", "c.jar", 230, 50), el("node", "n", 0, 200),
+              inside("n", "component_icon", "D", 20, 252), inside("n", "artifact_icon", "d.jar", 230, 257)],
+             [rel("dependency", "c.jar", "C", stereotype="manifest"), rel("dependency", "d.jar", "D", stereotype="manifest")])
+    assert K.check(d).passed, K.check(d).summary()
+    for outer, inner in (("p", "C"), ("p", "c.jar"), ("n", "D"), ("n", "d.jar")):
+        o, i = placed(d, outer), placed(d, inner)
+        assert o.inner[0] + B.NEST_PAD <= i.rect[0] and i.rect[2] + B.NEST_PAD <= o.inner[2]
+        assert i.rect[3] + B.NEST_PAD <= o.inner[3]
 
 
 # ---------------------------------------------------------------- 섞어 그리기·도구
