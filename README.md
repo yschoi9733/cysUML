@@ -15,10 +15,11 @@ the layout and draws again until the check passes.
 
 ## Install
 
-You need [uv](https://docs.astral.sh/uv/). This one line downloads and starts the server:
+You need [uv](https://docs.astral.sh/uv/). This one line downloads cysUML from [PyPI](https://pypi.org/project/cysuml/)
+and starts the server:
 
 ```
-uvx --from git+https://github.com/yschoi9733/cysUML cysuml
+uvx cysuml
 ```
 
 It talks MCP over stdin/stdout, so on its own it just waits for a client. Register it with your MCP client instead.
@@ -26,7 +27,7 @@ It talks MCP over stdin/stdout, so on its own it just waits for a client. Regist
 **Claude Code**
 
 ```
-claude mcp add cysuml -- uvx --from git+https://github.com/yschoi9733/cysUML cysuml
+claude mcp add cysuml -- uvx cysuml
 ```
 
 **Other clients** (Claude Desktop, Cursor, …) take the same command in their JSON config:
@@ -36,11 +37,16 @@ claude mcp add cysuml -- uvx --from git+https://github.com/yschoi9733/cysUML cys
   "mcpServers": {
     "cysuml": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/yschoi9733/cysUML", "cysuml"]
+      "args": ["cysuml"]
     }
   }
 }
 ```
+
+**Versions.** `uvx cysuml` runs the newest release: each time the client starts the server, uv asks PyPI and reuses
+the answer for up to ten minutes. If you installed it with `uv tool install cysuml`, uvx runs that copy instead;
+update it with `uv tool upgrade cysuml`. To stay on one version, put it after the name: `uvx cysuml@0.1.0` (in JSON,
+`"args": ["cysuml@0.1.0"]`). The releases are listed in the [release history](https://pypi.org/project/cysuml/#history).
 
 ## Use
 
@@ -301,11 +307,14 @@ To try your working copy in Claude Code, register it under another name:
 claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml
 ```
 
+To try the latest `main` before it is released, use `uvx --from git+https://github.com/yschoi9733/cysUML cysuml`.
+
 ## License
 
-cysUML is under the [MIT License](LICENSE). The bundled fonts are Liberation Sans and Noto Sans KR, both under the
-SIL Open Font License 1.1 (see [`LiberationSans-LICENSE.txt`](src/cysuml/fonts/LiberationSans-LICENSE.txt) and
-[`NotoSansKR-LICENSE.txt`](src/cysuml/fonts/NotoSansKR-LICENSE.txt)).
+cysUML is under the [MIT License](https://github.com/yschoi9733/cysUML/blob/main/LICENSE). The bundled fonts are
+Liberation Sans and Noto Sans KR, both under the SIL Open Font License 1.1 (see
+[`LiberationSans-LICENSE.txt`](https://github.com/yschoi9733/cysUML/blob/main/src/cysuml/fonts/LiberationSans-LICENSE.txt)
+and [`NotoSansKR-LICENSE.txt`](https://github.com/yschoi9733/cysUML/blob/main/src/cysuml/fonts/NotoSansKR-LICENSE.txt)).
 
 ---
 
@@ -322,16 +331,21 @@ AI가 배치하고 도구가 그리는, 문서용 UML 그림 MCP 서버다.
 
 ### 설치
 
-[uv](https://docs.astral.sh/uv/)가 있어야 한다. 아래 한 줄이 서버를 받아 띄운다:
+[uv](https://docs.astral.sh/uv/)가 있어야 한다. 아래 한 줄이 [PyPI](https://pypi.org/project/cysuml/)에서 cysUML을 받아
+서버를 띄운다:
 
 ```
-uvx --from git+https://github.com/yschoi9733/cysUML cysuml
+uvx cysuml
 ```
 
 표준 입출력으로 MCP를 주고받으므로 혼자 띄우면 클라이언트를 기다리기만 한다. 쓰려면 MCP 클라이언트에 등록한다.
 
-- **Claude Code:** `claude mcp add cysuml -- uvx --from git+https://github.com/yschoi9733/cysUML cysuml`
+- **Claude Code:** `claude mcp add cysuml -- uvx cysuml`
 - **다른 클라이언트:** 위 영어 안내의 JSON 설정에 같은 명령을 넣는다.
+- **버전:** `uvx cysuml`은 가장 새 버전을 띄운다. 클라이언트가 서버를 띄울 때마다 uv가 PyPI에 묻고, 받은 답은 10분까지 다시
+  쓴다. `uv tool install cysuml`로 설치해 두었으면 uvx는 그 설치본을 띄우니 `uv tool upgrade cysuml`로 올린다. 한 버전에
+  머물려면 이름 뒤에 버전을 붙인다 — `uvx cysuml@0.1.0`(JSON에서는 `"args": ["cysuml@0.1.0"]`). 나온 버전은
+  [PyPI 릴리스 기록](https://pypi.org/project/cysuml/#history)에 있다.
 
 ### 쓰기
 
@@ -379,9 +393,10 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
 ### 개발
 
 `uv sync`로 준비하고 `uv run pytest`로 시험한다. 작업 중인 코드를 Claude Code에서 써 보려면 다른 이름으로 등록한다:
-`claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml`.
+`claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml`. 아직 배포하지 않은 `main`의 최신 코드를 써 보려면
+`uvx --from git+https://github.com/yschoi9733/cysUML cysuml`로 띄운다.
 
 ### 라이선스
 
-cysUML은 [MIT 라이선스](LICENSE)를 따른다. 함께 넣은 글꼴 Liberation Sans와 Noto Sans KR은 SIL Open Font License 1.1을
-따른다([`src/cysuml/fonts`](src/cysuml/fonts)).
+cysUML은 [MIT 라이선스](https://github.com/yschoi9733/cysUML/blob/main/LICENSE)를 따른다. 함께 넣은 글꼴 Liberation Sans와
+Noto Sans KR은 SIL Open Font License 1.1을 따른다([`src/cysuml/fonts`](https://github.com/yschoi9733/cysUML/tree/main/src/cysuml/fonts)).
