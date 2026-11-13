@@ -119,6 +119,16 @@ def test_a_longer_cycle_names_every_class_on_it():
     assert p.startswith("relations[1]: 상속이 고리를 이룬다('A' → 'B' → 'C' → 'A')")
 
 
+def test_cycles_sharing_classes_are_each_reported_once_by_their_relations():
+    # 세 클래스가 서로 상속한다 — 상속마다 가장 짧은 고리(두 클래스끼리)를 찾고, 같은 상속들로 된 고리는 한 번만 알린다
+    found = class_problems(ROW, [rel("generalization", "A", "B"), rel("generalization", "B", "C"),
+                                 rel("generalization", "C", "A"), rel("generalization", "A", "C"),
+                                 rel("generalization", "C", "B"), rel("generalization", "B", "A")])
+    assert [p.split(" — ")[0] for p in found] == [
+        "relations[0]: 상속이 고리를 이룬다('A' → 'B' → 'A')", "relations[1]: 상속이 고리를 이룬다('B' → 'C' → 'B')",
+        "relations[2]: 상속이 고리를 이룬다('C' → 'A' → 'C')"]
+
+
 def test_each_separate_cycle_is_reported():
     classes = ROW + [box("D", 900)]
     found = class_problems(classes, [rel("generalization", "A", "B"), rel("generalization", "B", "A"),
@@ -165,11 +175,29 @@ def test_realization_to_a_class_draws_and_passes_with_a_notice():
                                 "hint": n.hint}]
 
 
-@pytest.mark.parametrize("target", ["abstract", "enum"])
-def test_realization_to_an_abstract_class_or_enum_asks_about_inheritance(target):
-    r = class_report([box("A", 0), box("B", 300, kind=target)], [rel("realization", "A", "B")])
+def test_realization_between_inheritable_kinds_asks_about_inheritance():
+    r = class_report([box("A", 0), box("B", 300, kind="abstract")], [rel("realization", "A", "B")])
     (n,) = r.notices
-    assert f"(kind {target!r})" in n.problem and "kind를 'generalization'으로" in n.hint
+    assert "(kind 'abstract')" in n.problem and n.hint.startswith("상속을 뜻했으면 kind를 'generalization'으로 바꾸고")
+
+
+def test_realization_hint_never_leads_to_an_input_error():
+    # class -> enum은 상속으로 바꾸면 종류가 다른 상속 오류라, 상속을 권하지 않고 실체화를 긋는 자리를 알린다
+    r = class_report([box("A", 0), box("B", 300, kind="enum")], [rel("realization", "A", "B")])
+    (n,) = r.notices
+    assert n.hint == "실체화는 인터페이스를 구현하는 쪽에서 인터페이스로 긋는다 — 다른 뜻이면 dependency를 쓴다."
+    assert "generalization" not in n.hint
+
+
+def test_realization_made_by_an_interface_has_a_notice_from_its_source():
+    same = class_report([box("I", 0, kind="interface"), box("J", 300, kind="interface")], [rel("realization", "I", "J")])
+    (n,) = same.notices
+    assert n.problem == "실체화를 하는 상자 'I'는 인터페이스다(kind 'interface')."
+    assert n.hint == "인터페이스끼리는 kind를 'generalization'으로 바꾼다."
+    turned = class_report([box("Shape", 0, kind="interface"), box("Circle", 300)], [rel("realization", "Shape", "Circle")])
+    (n,) = turned.notices
+    assert n.problem.startswith("실체화를 하는 상자 'Shape'는 인터페이스다")
+    assert n.hint.endswith("— 방향이 거꾸로면 from과 to를 바꾼다.")
 
 
 def test_realization_to_an_interface_has_no_notice():
@@ -206,6 +234,28 @@ def test_inheritance_across_element_kinds_is_an_input_error(source, target):
     assert p.startswith(f"relations[0]: 상속의 두 끝 종류가 다르다('a'는 {source!r}, 'b'는 {target!r})")
 
 
+def test_inheritance_into_a_component_points_to_realization():
+    (p,) = problems(CD, [el("class", "Impl", 0, 200), el("component", "Api", 0)], [rel("generalization", "Impl", "Api")])
+    assert p.endswith(". 클래스가 컴포넌트를 실현하는 것이면 kind를 'realization'으로 바꾼다")
+
+
+@pytest.mark.parametrize("source, target, problem", [
+    ("lollipop", "class", "실체화를 하는 요소 'a'는 인터페이스다(kind 'lollipop')."),
+    ("package", "interface", "패키지('a')는 실체화하지 않는다."),
+])
+def test_realization_made_by_a_ball_or_a_package_has_a_notice(source, target, problem):
+    r = report(CD, [el(source, "a", 0), el(target, "b", 300)], [rel("realization", "a", "b")])
+    (n,) = r.notices
+    assert n.problem == problem
+
+
+def test_realization_hint_in_tools_with_components_names_component_realization():
+    r = report(D, [el("class", "Impl", 0, 250), el("node", "x", 0)], [rel("realization", "Impl", "x")])
+    (n,) = r.notices
+    assert n.hint == ("실체화는 인터페이스를 구현하는 쪽에서 인터페이스로, 클래스에서 그 클래스가 실현하는 컴포넌트로 긋는다 — "
+                      "다른 뜻이면 dependency를 쓴다.")
+
+
 @pytest.mark.parametrize("module", [P, CD, D])
 @pytest.mark.parametrize("source, target, end", [("package", "package", "a"), ("class", "package", "b"),
                                                  ("package", "class", "a")])
@@ -234,7 +284,7 @@ def test_realization_to_a_package_artifact_or_node_draws_with_a_notice(module, t
     r = report(module, [el("class", "Impl", 0, 250), el(target, "x", 0)], [rel("realization", "Impl", "x")])
     (n,) = r.notices
     assert n.problem == f"실체화가 가는 요소 'x'는 인터페이스가 아니다(kind {target!r})."
-    assert n.hint == "실체화는 인터페이스를 구현하거나 클래스가 컴포넌트를 실현할 때 긋는다 — 다른 뜻이면 dependency를 쓴다."
+    assert n.hint.endswith("— 다른 뜻이면 dependency를 쓴다.") and "generalization" not in n.hint
     assert NOTICE_HEAD.format(1) in r.summary()
 
 
@@ -255,12 +305,13 @@ def test_self_inheritance_names_the_element_word_of_the_tool():
 def test_tool_descriptions_state_the_rules_of_the_kinds_the_tool_takes():
     assert ('  - 규칙: 상속은 같은 종류끼리 긋는다("class"·"abstract"끼리, "interface"끼리, "enum"끼리). 클래스가 '
             "인터페이스를 구현하는 것은 realization이다.") in server.CLASS_TOOL
-    assert '  - 알림: 실체화가 "interface"가 아닌 상자로 가면 그리되 검사 결과에 알림을 준다' in server.CLASS_TOOL
+    assert ('  - 알림: 실체화가 "interface"가 아닌 상자로 가거나 "interface"가 실체화하면 그리되 검사 결과에 알림을 준다'
+            in server.CLASS_TOOL)
     assert ('"interface"끼리, "enum"끼리, "component"끼리, "artifact"끼리, "node"끼리). "package"는 상속의 끝이 될 수 없다.'
             in P.TOOL)
     assert '"package"·"lollipop"는 상속의 끝이 될 수 없다.' in CD.TOOL
-    assert '실체화가 "interface"·"lollipop"·"component"가 아닌 요소로 가면' in CD.TOOL
-    assert '실체화가 "interface"·"component"가 아닌 요소로 가면' in D.TOOL
+    assert '실체화가 "interface"·"lollipop"·"component"가 아닌 요소로 가거나 "interface"·"lollipop"·"package"가 실체화하면' in CD.TOOL
+    assert '실체화가 "interface"·"component"가 아닌 요소로 가거나 "interface"·"package"가 실체화하면' in D.TOOL
     # 유즈케이스도의 일반화는 클래스도 관계가 아니라 이 규칙을 적지 않는다
     assert "  - 규칙:" not in usecasediagram.TOOL
 

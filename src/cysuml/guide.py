@@ -155,6 +155,6 @@ def relation_fields(spec: Spec) -> str:
                      else (f"{noun} 가운데(요소 종류에 따로 적은 모양은 그 점)", f"상대 {noun}의 그 점"))
     lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "
                  f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다.")
-    if spec.rules is not None and (rules := spec.rules.guide(spec)):
+    if rules := spec.rules.guide(spec):
         lines.append(rules)
     return "\n".join(lines)

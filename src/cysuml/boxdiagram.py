@@ -206,15 +206,19 @@ class Rules:
         return []
 
     def guide(self, spec: Spec) -> str:
-        """도구 설명의 관계 항목(guide.relation_fields)에 붙이는 규칙 글. 줄마다 들여 쓴 "  - " 항목이다."""
+        """도구 설명의 관계 항목(guide.relation_fields)에 붙이는 규칙 글. 줄마다 들여 쓴 "  - " 항목이다. 없으면 빈 글."""
         return ""
+
+
+NO_RULES = Rules()  # 짜임을 보지 않는 그림의 규칙(Spec.rules 기본값)
 
 
 @dataclass(frozen=True, eq=False)
 class Spec:
     """도구 하나가 받는 것. shapes는 요소 종류 → 모양, relations는 관계 종류 → 정의다. navigable은 방향을 받는 관계(연관·집합·
     합성)의 기본 방향이다. extended면 새 도구 입력(id·in·여러 줄 이름·관계 stereotype·name_side)을 받는다 — 클래스도 도구는
-    받지 않는다. 관계 종류가 하나뿐이면 관계의 kind를 빼도 그 종류로 읽는다. rules는 요소·관계의 짜임 규칙이다(없으면 보지 않는다)."""
+    받지 않는다. 관계 종류가 하나뿐이면 관계의 kind를 빼도 그 종류로 읽는다. rules는 요소·관계의 짜임 규칙이다(기본은 보지 않는
+    NO_RULES)."""
 
     shapes: Mapping[str, Shape]
     relations: Mapping[str, RelationType]
@@ -223,7 +227,7 @@ class Spec:
     default_kind: Optional[str] = None
     navigable: str = "to"
     extended: bool = True
-    rules: Optional[Rules] = None
+    rules: Rules = NO_RULES
 
     def __post_init__(self):
         if self.navigable not in ("to", "none"):
@@ -575,7 +579,7 @@ class _Reader(Reader):
                 self.fail(_at(_at(path, "via"), i), f"앞 꺾는 점과 같다 {q}")
             via.append(q)
         if source is not None and source == target:
-            why = spec.rules.self_loop(spec, kind) if spec.rules is not None and kind is not None else None
+            why = spec.rules.self_loop(spec, kind) if kind is not None else None
             if why:
                 self.fail(path, why)
             elif len(via) < 2:
@@ -668,7 +672,7 @@ class _Reader(Reader):
                                 f"{w.noun}는 선으로 잇지 않는다")
                 continue
             relations.append((path, r))
-        notices = spec.rules.check(self, spec, read, relations) if spec.rules is not None else []
+        notices = spec.rules.check(self, spec, read, relations)
         return Diagram(spec, tuple(e for _, e in read), tuple(r for _, r in relations), tuple(notices))
 
 
