@@ -350,7 +350,12 @@ class ClassRules(Rules):
                 return False
         if _same_kind(s, t):
             return True
-        tail = f". {to_realization}" if why else ". from·to나 요소의 kind를 고친다"
+        if why:
+            tail = f". {to_realization}"
+        elif _realizable(t, s):  # 인터페이스 -> 클래스처럼 실체화를 거꾸로 적었을 수 있다
+            tail = ". 방향이 거꾸로인 실체화를 뜻했으면 from과 to를 바꾸고 kind를 'realization'으로 바꾼다"
+        else:
+            tail = ". from·to나 요소의 kind를 고친다"
         r.fail(path, f"상속의 두 끝 종류가 다르다({_end('from', rel.source, s)}, {_end('to', rel.target, t)}) — 상속은 같은 "
                      f"종류끼리 긋는다(class와 abstract는 같은 종류로 친다){tail}")
         return False

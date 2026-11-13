@@ -68,12 +68,18 @@ def test_class_inheriting_an_interface_is_an_input_error_that_points_to_realizat
                  "종류끼리 긋는다(class와 abstract는 같은 종류로 친다). 인터페이스를 구현하는 것이면 kind를 'realization'으로 바꾼다")
 
 
-@pytest.mark.parametrize("source, target", [("interface", "class"), ("class", "enum"), ("enum", "abstract"),
-                                            ("interface", "enum")])
-def test_inheritance_between_different_kinds_is_an_input_error(source, target):
+@pytest.mark.parametrize("source, target, tail", [
+    ("class", "enum", "from·to나 요소의 kind를 고친다"), ("enum", "abstract", "from·to나 요소의 kind를 고친다"),
+    # 인터페이스 -> 클래스·열거형은 실체화를 거꾸로 적었을 수 있다(바꾸면 알림 없이 받아진다)
+    ("interface", "class", "방향이 거꾸로인 실체화를 뜻했으면 from과 to를 바꾸고 kind를 'realization'으로 바꾼다"),
+    ("interface", "enum", "방향이 거꾸로인 실체화를 뜻했으면 from과 to를 바꾸고 kind를 'realization'으로 바꾼다"),
+])
+def test_inheritance_between_different_kinds_is_an_input_error(source, target, tail):
     (p,) = class_problems([box("A", 0, kind=source), box("B", 300, kind=target)], [rel("generalization", "A", "B")])
     assert p.startswith(f"relations[0]: 상속의 두 끝 종류가 다르다(from 'A': {source!r}, to 'B': {target!r})")
-    assert p.endswith("상속은 같은 종류끼리 긋는다(class와 abstract는 같은 종류로 친다). from·to나 요소의 kind를 고친다")
+    assert p.endswith(f"상속은 같은 종류끼리 긋는다(class와 abstract는 같은 종류로 친다). {tail}")
+    swapped = class_report([box("A", 0, kind=source), box("B", 300, kind=target)], [rel("realization", "B", "A")])
+    assert (swapped.notices == ()) == tail.startswith("방향이 거꾸로")
 
 
 def test_names_never_take_a_particle_whose_form_depends_on_their_last_sound():
