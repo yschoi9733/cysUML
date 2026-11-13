@@ -509,7 +509,8 @@ def _lines_along_containers(relations: list[_Relation], boxes: list[_Box], w: Wo
 def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box], w: Words) -> Iterator[Finding]:
     """선 끝 모양이 제 끝 요소 안으로 HEAD_HIDE 넘게 들어간다. 선 뒤에 그린 요소는 그 모양을 가리고, 선 앞에 그린 요소(바깥 요소)는
     안의 것과 겹쳐 보인다. 선이 넓은 테두리를 아주 비스듬히 나가면 마름모·삼각형 꼭짓점이나 화살촉 갈래가 요소 안으로 들어간다.
-    같은 모양(공유 줄기의 삼각형)은 한 항목으로 묶는다."""
+    모양의 점을 모두 본다 — 선 끝에 닿은 점(화살촉 끝)은 테두리 위라 HEAD_HIDE 안쪽에 들지 않고, 점이 여럿인 열린 모양(소켓
+    반원 등)은 가운데 점이 들어갈 수 있다. 같은 모양(공유 줄기의 삼각형)은 한 항목으로 묶는다."""
     found = _Places()
     for b in boxes:
         inner = b.border.grown(-HEAD_HIDE)
@@ -517,8 +518,7 @@ def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box], w: Words
             continue
         for r in relations:
             for h in r.heads_at(b.name):
-                corners = h.points if h.closed else (h.points[0], h.points[-1])
-                if any(inner.holds(c) for c in corners):
+                if any(inner.holds(c) for c in h.points):
                     _add(found.get((b.name, h.points), lambda: (b, h, []))[2], r)
     for b, h, rels in found.values():
         whose = "·".join(f"관계 {r.name}" for r in sorted(rels, key=_index))

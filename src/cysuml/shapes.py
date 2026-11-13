@@ -124,14 +124,22 @@ class ComponentShape(_IconBox):
             c.rect(x - 3, y + dy, 6, 3, owner=owner)
 
 
+def _page_corners(l: float, t: float, w: float, h: float, fold: float) -> tuple[Point, ...]:
+    """왼쪽 위가 (l, t)이고 오른쪽 위 귀가 fold만큼 접힌 문서의 꼭짓점(볼록 오각형)."""
+    return (l, t), (l + w - fold, t), (l + w, t + fold), (l + w, t + h), (l, t + h)
+
+
+def _draw_page(c: Canvas, l: float, t: float, w: float, h: float, fold: float, owner: str) -> None:
+    """귀가 접힌 문서: 오각형과 접힌 귀 선. 아티팩트 상자의 아이콘과 문서 아이콘 표기 아티팩트가 함께 쓴다."""
+    c.poly(_page_corners(l, t, w, h, fold), owner=owner)
+    c.line([(l + w - fold, t), (l + w - fold, t + fold), (l + w, t + fold)], owner=owner)
+
+
 class ArtifactShape(_IconBox):
     """아티팩트: 오른쪽 위 귀가 접힌 문서 아이콘을 단 상자. 이름은 흔히 파일 이름이다."""
 
     def icon(self, c: Canvas, x: float, y: float, owner: str) -> None:
-        w, h = self.ICON
-        fold = 4
-        c.poly([(x, y), (x + w - fold, y), (x + w, y + fold), (x + w, y + h), (x, y + h)], owner=owner)
-        c.line([(x + w - fold, y), (x + w - fold, y + fold), (x + w, y + fold)], owner=owner)
+        _draw_page(c, x, y, *self.ICON, 4, owner)
 
 
 class ComponentIconShape(_HeadShape):
@@ -154,6 +162,10 @@ class ComponentIconShape(_HeadShape):
 
     def border(self, e: Element, rect: Box) -> Border:
         return RectBorder(self._body(rect))
+
+    def anchor(self, e: Element, rect: Box) -> Point:
+        """선이 향하는 점: 상자 가운데를 정수로 내린 점(boxdiagram.floored) — 상자 폭은 글자에 맞춰 홀수가 되기 쉽다."""
+        return floored(self._body(rect))
 
     def name_zones(self, e: Element, rect: Box) -> tuple[NameZone, ...]:
         return tuple(NameZone(part, True, "부품 네모") for part in self._parts(rect))
@@ -184,28 +196,19 @@ class ArtifactIconShape(Shape):
     def size(self, e: Element) -> tuple[float, float]:
         return PAGE
 
-    def _page(self, rect: Box) -> Box:
-        """가운데를 정수로 내린(boxdiagram.floored) 문서 사각형."""
+    def _top_left(self, rect: Box) -> Point:
+        """가운데를 정수로 내린(boxdiagram.floored) 문서의 왼쪽 위."""
         cx, cy = floored(rect)
-        w, h = PAGE
-        return cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2
-
-    def _corners(self, rect: Box) -> tuple[Point, ...]:
-        l, t, r, b = self._page(rect)
-        return (l, t), (r - FOLD, t), (r, t + FOLD), (r, b), (l, b)
+        return cx - PAGE[0] / 2, cy - PAGE[1] / 2
 
     def anchor(self, e: Element, rect: Box) -> Point:
-        l, t, r, b = self._page(rect)
-        return (l + r) / 2, (t + b) / 2
+        return floored(rect)
 
     def border(self, e: Element, rect: Box) -> Border:
-        return PolygonBorder(self._corners(rect))
+        return PolygonBorder(_page_corners(*self._top_left(rect), *PAGE, FOLD))
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
-        page = self._corners(p.shape_rect)
-        c.poly(page, owner=p.key)
-        (fx, top), (right, fy) = page[1], page[2]
-        c.line([(fx, top), (fx, fy), (right, fy)], owner=p.key)
+        _draw_page(c, *self._top_left(p.shape_rect), *PAGE, FOLD, p.key)
 
 
 class NodeShape(_HeadShape):

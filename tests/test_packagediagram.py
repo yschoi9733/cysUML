@@ -367,7 +367,8 @@ def test_component_icon_is_a_box_with_two_parts_straddling_its_left_edge():
     assert (box.left, box.top, box.width, box.height) == (8, 0, w - 8, h)
     cy = h / 2
     assert [(r.left, r.top, r.width, r.height) for r in parts] == [(0, cy - 21, 16, 6), (0, cy + 15, 16, 6)]
-    assert p.border == G.RectBorder((8, 0, w, h)) and p.anchor == ((8 + w) / 2, cy)
+    assert p.border == G.RectBorder((8, 0, w, h))
+    assert w % 2 == 1 and p.anchor == (math.floor((8 + w) / 2), cy)  # 폭이 홀수(123)라 상자 가운데 65.5를 정수로 내린다
     assert p.zones == tuple(B.NameZone((0, top, 16, top + 6), True, "부품 네모") for top in (cy - 21, cy + 15))
     texts = owned(d, "C", Text)
     assert [t.text for t in texts] == ["«component»", "C"] and texts[0].x == texts[1].x == (8 + w) / 2
@@ -382,11 +383,13 @@ def test_lines_into_a_component_icon_pass_from_above_below_right_and_straight_fr
     assert K.check(d).passed, K.check(d).summary()
 
 
-def test_line_to_a_component_icon_is_straight_when_aligned_to_the_box_without_its_parts():
-    # 도구 설명대로 선이 향하는 점(부품 네모를 뺀 상자 가운데 — 자리 가운데 49보다 4px 오른쪽 53)에 A의 가운데를 맞춘다
-    d = draw([el("component_icon", "C", 0, 0), el("class", "A", 53 - 45, -150)], [rel("dependency", "A", "C")])
+@pytest.mark.parametrize("more, x", [({}, 53), ({"stereotype": "component"}, 65)])
+def test_line_to_a_component_icon_is_straight_when_aligned_to_the_box_without_its_parts(more, x):
+    # 도구 설명대로 선이 향하는 점(부품 네모를 뺀 상자 가운데 — 자리 가운데보다 4px 오른쪽, 반 픽셀이면 내림)에 A의 가운데를 맞춘다.
+    # 상자 폭: 90(가운데 53), «component»가 붙으면 115(자리 가운데 61.5 + 4 = 65.5 → 65)
+    d = draw([el("component_icon", "C", 0, 0, **more), el("class", "A", x - 45, -150)], [rel("dependency", "A", "C")])
     (line,) = d.layout.relations
-    assert line.points[0][0] == line.points[-1][0] == 53
+    assert line.points[0][0] == line.points[-1][0] == x
     assert K.check(d).passed, K.check(d).summary()
 
 

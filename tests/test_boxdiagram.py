@@ -633,6 +633,21 @@ def test_check_names_an_end_shape_by_its_definition_not_by_its_points():
     assert "반원" in f.problem and "화살촉" not in f.problem
 
 
+def _hook(c, tip, frm, at, o):
+    """시험용 열린 끝 모양: 양 끝은 선 쪽 밖에 있고 가운데 점이 끝 요소 안으로 5px 들어간다."""
+    d = math.dist(tip, frm)
+    ux, uy = (tip[0] - frm[0]) / d, (tip[1] - frm[1]) / d
+    return c.line([(tip[0] - 6 * ux - 5 * uy, tip[1] - 6 * uy + 5 * ux), (tip[0] + 5 * ux, tip[1] + 5 * uy),
+                   (tip[0] - 6 * ux + 5 * uy, tip[1] - 6 * uy - 5 * ux)], owner=o)
+
+
+def test_open_end_shape_whose_middle_point_goes_into_its_element_fails():
+    hooked = B.Spec(SHAPES, {**RELATIONS, "hooks": B.RelationType("갈고리", end=B.EndShape("갈고리", 6, _hook))})
+    r = report([el("class", "A", 0, 0), el("class", "B", 300, 0)], [rel("hooks", "A", "B")], spec=hooked)
+    (f,) = r.failures
+    assert f.kind == "head_under_own_box" and "갈고리" in f.problem
+
+
 def test_end_segment_shorter_than_the_gap_is_an_input_error():
     with pytest.raises(InputError, match=r"to 쪽 끝 구간 길이 3가 끝 모양 길이와 띄운 거리\(6\)보다 짧다"):
         socket_drawing(via=[[-3, 12]])
