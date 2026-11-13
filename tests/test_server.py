@@ -152,7 +152,7 @@ def test_relation_fields_say_where_lines_start_for_each_tool():
 
 
 def test_component_description_carries_the_lollipop_its_name_side_and_its_circle_place():
-    # 컴포넌트도는 모양 밖 이름이 있는 막대사탕을 받으므로 이름 쪽(바)과 모양 자리 결과 문장을 넣고, 연관 기본 방향은 '없음'이다
+    # 컴포넌트도는 모양 밖 이름이 있는 제공 인터페이스 원을 받으므로 이름 쪽(바)과 모양 자리 결과 문장을 넣고, 연관 기본 방향은 '없음'이다
     tool = componentdiagram.TOOL
     for part in (guide.PLACED_ELEMENTS, guide.NEW_INPUT, guide.NESTING, guide.NAME_SIDE, guide.PLACES_RESULT,
                  guide.OUTSIDE_PLACES):

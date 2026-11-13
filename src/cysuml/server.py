@@ -56,7 +56,7 @@ INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리
 - 클래스도는 draw_class_diagram으로 그린다. 배치는 부르는 AI가 하고, cysUML은 받은 좌표대로 그린다.
 - 패키지도는 draw_package_diagram으로 그린다. 배치는 부르는 AI가 한다. 패키지 안에 클래스·패키지를 넣고, 컴포넌트·아티팩트·노드도 \
 함께 그린다.
-- 컴포넌트도는 draw_component_diagram으로 그린다. 배치는 부르는 AI가 한다. 컴포넌트와 제공 인터페이스(막대사탕), 컴포넌트를 구현하는 \
+- 컴포넌트도는 draw_component_diagram으로 그린다. 배치는 부르는 AI가 한다. 컴포넌트와 제공 인터페이스 원, 컴포넌트를 구현하는 \
 아티팩트, 컴포넌트를 실현하는 클래스를 그린다.
 - 유즈케이스도는 draw_use_case_diagram으로 그린다. 배치는 부르는 AI가 한다. 시스템 경계 안에 유즈케이스를 넣고, 밖의 액터와 \
 연관·«include»·«extend»·일반화로 잇는다.

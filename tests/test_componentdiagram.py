@@ -1,4 +1,4 @@
-"""컴포넌트도: 막대사탕(제공 인터페이스 원)과 그 막대·쓰는 쪽 화살표, 아티팩트의 «manifest», 클래스 실현 그림, 연관 기본 방향."""
+"""컴포넌트도: 제공 인터페이스 원과 그 막대·쓰는 쪽 화살표, 아티팩트의 «manifest», 클래스 실현 그림, 연관 기본 방향."""
 import math
 
 import pytest
@@ -175,7 +175,7 @@ def test_arrow_into_a_circle_needs_room_from_the_bar(gap, passed):
     assert passed or kinds(r) == ["line_through_head"]
 
 
-# ---------------------------------------------------------------- 막대사탕 모양·자리
+# ---------------------------------------------------------------- 제공 인터페이스 원 모양·자리
 
 
 def test_lollipop_is_a_small_circle_with_its_name_below():
