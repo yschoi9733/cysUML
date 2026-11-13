@@ -1,7 +1,7 @@
 """컴포넌트도: 컴포넌트와 제공 인터페이스 원, 컴포넌트를 구현하는 아티팩트, 컴포넌트를 실현하는 클래스를 그린다.
 
 요소 종류는 shapes.SHAPES(클래스·패키지·컴포넌트·아티팩트·노드)에 제공 인터페이스 원(lollipop)을 더한 것이고, 관계는 클래스도 관계 여섯 가지
-(classdiagram.RELATIONS)다. 연관의 기본 방향은 '없음'이다 — 컴포넌트에서 제공 인터페이스 원으로 가는 막대가 화살촉 없는 실선이라서.
+(classdiagram.RELATIONS)와 그 표기 규칙(classdiagram.RULES)이다. 연관의 기본 방향은 '없음'이다 — 컴포넌트에서 제공 인터페이스 원으로 가는 막대가 화살촉 없는 실선이라서.
 읽기·자리 잡기·그리기는 공용 엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from . import boxdiagram as B
 from .boxcheck import KINDS
 from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Element, PlacedBox, Shape, Spec
 from .canvas import SCALE, Canvas, Point
-from .classdiagram import RELATIONS
+from .classdiagram import RELATIONS, RULES
 from .geom import Border, EllipseBorder
 from .guide import (COMMON_INPUT, IMAGE_RESULT, NAME_SIDE, NESTING, NEW_INPUT, OUTSIDE_PLACES, PLACED_ELEMENTS, PLACES_RESULT,
                     flow, relation_fields)
@@ -55,7 +55,8 @@ class LollipopShape(Shape):
 
 LOLLIPOP = LollipopShape()
 
-SPEC = Spec({**SHAPES, "lollipop": LOLLIPOP}, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none")
+SPEC = Spec({**SHAPES, "lollipop": LOLLIPOP}, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none",
+            rules=RULES)
 
 
 def parse(data: Any) -> Diagram:

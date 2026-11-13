@@ -2,7 +2,7 @@
 
 클래스도·패키지도처럼 요소(모양만 다른 상자)와 요소를 잇는 선, 선 위 글자로 이뤄진 그림이 함께 쓴다. 그림마다 다른 것은
 도구 정의(Spec)로 넘긴다 — 받는 요소 종류와 그 모양(Shape), 받는 관계 종류(RelationType), 연관의 기본 방향, 오류 글의 말
-(Words). 그림 모듈은 모양과 관계 종류를 정의해 Spec에 담기만 하고 이 모듈은 고치지 않는다.
+(Words), 요소·관계의 짜임 규칙(Rules). 그림 모듈은 모양과 관계 종류를 정의해 Spec에 담기만 하고 이 모듈은 고치지 않는다.
 
 배치는 입력이 정한다 — 요소의 왼쪽 위와 관계선의 꺾는 점은 받은 그대로 쓰고, 여기서는 요소를 글자와 안의 요소에 맞춰
 키우고(왼쪽·위는 그대로) 선 끝·선 글자 자리만 계산한다.
@@ -25,7 +25,7 @@ from .geom import Border, RectBorder, Segment, gap, grow, hits, meets, outline, 
 from .parsing import InputError, Reader
 from .parsing import at as _at
 from .parsing import show as _show
-from .report import fmt_num, fmt_rect
+from .report import Notice, fmt_num, fmt_rect
 
 NAVIGABLE = ("to", "from", "both", "none")
 SIDES = ("bottom", "top", "left", "right")
@@ -190,11 +190,31 @@ class RelationType:
             raise ValueError("방향을 받는 관계는 to 쪽 끝 모양을 따로 두지 않는다(화살촉이 겹친다)")
 
 
+class Rules:
+    """요소·관계의 짜임이 UML 표기에 맞는지 보는 규칙(Spec.rules). 선이 겹치는지와 달리 자리와 상관없어 읽기 끝에 본다. 틀린 짜임은
+    r.fail로 다른 입력 오류와 함께 모아 그리지 않고, 그리되 뜻을 확인해 볼 짜임은 알림(Notice)으로 돌려 검사 결과에 싣는다. 그림
+    모듈은 이것을 이어받아 제 규칙을 정한다."""
+
+    def self_loop(self, spec: Spec, kind: str) -> Optional[str]:
+        """자기 자신으로 갈 수 없는 관계 종류면 그 오류 글, 아니면 None. 끝이 같은 관계를 읽을 때 부른다."""
+        return None
+
+    def check(self, r: Reader, spec: Spec, elements: list[tuple[str, Element]],
+              relations: list[tuple[str, Relation]]) -> list[Notice]:
+        """읽힌 요소와 관계를 (입력 안의 자리, 값)으로 받아 짜임을 본다. 다른 곳이 틀려 읽히지 않은 요소는 elements에 없으니, 끝 요소를
+        찾지 못한 관계는 건너뛴다(그 문제는 이미 알렸다). 자기 자신으로 가는 관계도 relations에 든다."""
+        return []
+
+    def guide(self, spec: Spec) -> str:
+        """도구 설명의 관계 항목(guide.relation_fields)에 붙이는 규칙 글. 줄마다 들여 쓴 "  - " 항목이다."""
+        return ""
+
+
 @dataclass(frozen=True, eq=False)
 class Spec:
     """도구 하나가 받는 것. shapes는 요소 종류 → 모양, relations는 관계 종류 → 정의다. navigable은 방향을 받는 관계(연관·집합·
     합성)의 기본 방향이다. extended면 새 도구 입력(id·in·여러 줄 이름·관계 stereotype·name_side)을 받는다 — 클래스도 도구는
-    받지 않는다. 관계 종류가 하나뿐이면 관계의 kind를 빼도 그 종류로 읽는다."""
+    받지 않는다. 관계 종류가 하나뿐이면 관계의 kind를 빼도 그 종류로 읽는다. rules는 요소·관계의 짜임 규칙이다(없으면 보지 않는다)."""
 
     shapes: Mapping[str, Shape]
     relations: Mapping[str, RelationType]
@@ -203,6 +223,7 @@ class Spec:
     default_kind: Optional[str] = None
     navigable: str = "to"
     extended: bool = True
+    rules: Optional[Rules] = None
 
     def __post_init__(self):
         if self.navigable not in ("to", "none"):
@@ -256,9 +277,12 @@ class Relation:
 
 @dataclass(frozen=True)
 class Diagram:
+    """notices는 읽기에서 나온 표기 규칙 알림(Spec.rules)이다 — 그린 결과(Drawing)를 거쳐 검사 결과에 실린다."""
+
     spec: Spec
     boxes: tuple[Element, ...]
     relations: tuple[Relation, ...]
+    notices: tuple[Notice, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -370,11 +394,13 @@ class DrawnRelation:
 
 @dataclass(frozen=True)
 class Drawing:
-    """drawn은 관계마다(layout.relations 차례) 그린 기록이다 — 검사가 그림판 기록을 거꾸로 짚어 찾지 않게 넘긴다."""
+    """drawn은 관계마다(layout.relations 차례) 그린 기록이다 — 검사가 그림판 기록을 거꾸로 짚어 찾지 않게 넘긴다. notices는
+    읽기에서 나온 표기 규칙 알림(Diagram.notices)이다."""
 
     canvas: Canvas
     layout: Layout
     drawn: tuple[DrawnRelation, ...]
+    notices: tuple[Notice, ...] = ()
 
 
 # ---------------------------------------------------------------- 입력 읽기
@@ -548,8 +574,12 @@ class _Reader(Reader):
             if q is not None and via and q == via[-1]:
                 self.fail(_at(_at(path, "via"), i), f"앞 꺾는 점과 같다 {q}")
             via.append(q)
-        if source is not None and source == target and len(via) < 2:
-            self.fail(path, "자기 자신으로 가는 관계는 꺾는 점(via)이 둘 이상 있어야 고리로 그릴 수 있다")
+        if source is not None and source == target:
+            why = spec.rules.self_loop(spec, kind) if spec.rules is not None and kind is not None else None
+            if why:
+                self.fail(path, why)
+            elif len(via) < 2:
+                self.fail(path, "자기 자신으로 가는 관계는 꺾는 점(via)이 둘 이상 있어야 고리로 그릴 수 있다")
         if len(self.problems) > before:
             return source, target, None
         assert kind is not None and source is not None and target is not None and name is not None
@@ -622,7 +652,7 @@ class _Reader(Reader):
         parent_of = {e.key: e.parent for _, e in read}
         self._parents(read, seen, parent_of)
         lines_of = lineage(parent_of)  # in이 틀린 요소가 있어도 맞는 in만으로 잰다(ancestors는 고리·없는 열쇠에서 멈춘다)
-        relations = []
+        relations: list[tuple[str, Relation]] = []
         for i, v in enumerate(self.items(o["relations"], "relations") if "relations" in o else []):
             path = _at("relations", i)
             source, target, r = self.relation(v, path)
@@ -637,8 +667,9 @@ class _Reader(Reader):
                 self.fail(path, f"한 끝({_show(inner)})이 다른 끝({_show(outer)}) 안에 있다 — 품은 {w.noun}와 그 안의 "
                                 f"{w.noun}는 선으로 잇지 않는다")
                 continue
-            relations.append(r)
-        return Diagram(spec, tuple(e for _, e in read), tuple(relations))
+            relations.append((path, r))
+        notices = spec.rules.check(self, spec, read, relations) if spec.rules is not None else []
+        return Diagram(spec, tuple(e for _, e in read), tuple(r for _, r in relations), tuple(notices))
 
 
 def parse(spec: Spec, data: Any) -> Diagram:
@@ -950,7 +981,7 @@ def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
         texts = tuple(tuple(c.text(lab.x, y, s, anchor="mm", bg=True, owner=r.owner)
                             for s, y in zip(lab.lines, line_ys(lab.y, len(lab.lines)))) for lab in r.labels)
         drawn.append(DrawnRelation(line, heads, texts))
-    return Drawing(c, lay, tuple(drawn))
+    return Drawing(c, lay, tuple(drawn), diagram.notices)
 
 
 def render(spec: Spec, data: Any, scale: float = SCALE) -> Drawing:

@@ -1,7 +1,7 @@
 """클래스도: 클래스 모양(머리 칸과 속성·연산 구획)과 관계 여섯 가지를 정의하고, 공용 엔진(boxdiagram)으로 읽고 그린다.
 
-클래스 모양과 관계 여섯 가지(RELATIONS)는 패키지도처럼 클래스를 함께 그리는 그림도 가져다 쓴다. 상자 안 글자 자리, 선 끝,
-다중도 자리는 StarUML이 그리는 모양을 따른 기존 규칙이다.
+클래스 모양과 관계 여섯 가지(RELATIONS)와 그 표기 규칙(RULES — 상속은 같은 종류끼리 등)은 패키지도처럼 클래스를 함께 그리는
+그림도 가져다 쓴다. 상자 안 글자 자리, 선 끝, 다중도 자리는 StarUML이 그리는 모양을 따른 기존 규칙이다.
 """
 from __future__ import annotations
 
@@ -14,14 +14,15 @@ from . import boxdiagram as B
 from . import text as T
 from .boxdiagram import (ARROW, ARROW_HEAD, BOX_WORDS, DASH, DIAMOND, FILLED_DIAMOND, LABEL_CLEAR, MULT_DISTANCES,
                          MULT_ENOUGH, NAME_GAP, OPEN_DIAMOND, TRIANGLE, TRIANGLE_HEAD, Diagram, Drawing, Element, Label,
-                         Layout, PlacedBox, RelationType, Shape, Spec, draw, layout, name_spots)
+                         Layout, PlacedBox, RelationType, Rules, Shape, Spec, draw, layout, name_spots)
 from .canvas import SCALE, Canvas
 from .parsing import InputError, Reader
 from .parsing import at as _at
 from .parsing import show as _show
+from .report import Notice
 
 __all__ = ["ARROW", "CLASS_KINDS", "CLASS_SHAPE", "CLASS_SHAPES", "DIAMOND", "Diagram", "Drawing", "InputError", "LABEL_CLEAR",
-           "Label", "Layout", "MIN_WIDTH", "MULT_DISTANCES", "MULT_ENOUGH", "NAME_GAP", "RELATIONS", "SPEC", "TRIANGLE",
+           "Label", "Layout", "MIN_WIDTH", "MULT_DISTANCES", "MULT_ENOUGH", "NAME_GAP", "RELATIONS", "RULES", "SPEC", "TRIANGLE",
            "draw", "layout", "name_spots", "parse", "render"]
 
 CLASS_KINDS = ("class", "abstract", "interface", "enum")
@@ -227,7 +228,124 @@ RELATIONS = {
     "dependency": RelationType("의존", dash=DASH, end=ARROW_HEAD, role="의존하는 쪽"),
 }
 
-SPEC = Spec(CLASS_SHAPES, RELATIONS, BOX_WORDS, list_field="classes", default_kind="class", navigable="to", extended=False)
+# ---------------------------------------------------------------- 관계 규칙(이 관계를 받는 도구가 함께 쓴다)
+
+GENERALIZATION, REALIZATION = "generalization", "realization"
+SAME_KIND = {"abstract": "class"}  # 상속에서 같은 종류로 치는 요소 종류
+NOT_INHERITED = {  # 상속의 끝이 될 수 없는 요소 종류 → (부르는 말, 고치는 법)
+    "package": ("패키지", "패키지 사이는 dependency로 잇는다(«import» 등은 stereotype으로 단다)"),
+    "lollipop": ("제공 인터페이스 원", "인터페이스 사이 상속은 kind 'interface' 상자끼리 긋는다"),
+}
+REALIZED = ("interface", "lollipop", "component")  # 실체화가 가도 알리지 않는 요소 종류(클래스가 컴포넌트를 실현하는 것은 맞는 쓰임)
+INHERITABLE_TARGETS = ("class", "abstract", "enum")  # 실체화가 이 종류로 가면 상속을 뜻했는지 묻는다
+
+
+def _topic(key: str) -> str:
+    """오류·알림 글에서 요소 열쇠를 주제로 쓴 말: 'Circle'는, '주문'은."""
+    return f"{_show(key)}{B.josa(key, '은', '는')}"
+
+
+def _cycle(parents: dict[str, list[str]], start: str, goal: str) -> Optional[list[str]]:
+    """parents(자식 → 부모들)의 상속을 따라 start에서 goal로 가는 가장 짧은 길(양 끝 포함). 없으면 None."""
+    came: dict[str, Optional[str]] = {start: None}
+    queue = [start]
+    for key in queue:
+        if key == goal:
+            path = [key]
+            while (up := came[path[-1]]) is not None:
+                path.append(up)
+            return path[::-1]
+        for parent in parents.get(key, ()):
+            if parent not in came:
+                came[parent] = key
+                queue.append(parent)
+    return None
+
+
+class ClassRules(Rules):
+    """클래스도 관계 여섯 가지(RELATIONS)의 표기 규칙. 이 관계를 받는 패키지도·컴포넌트도·배치도(deployment diagram)도 함께
+    쓴다.
+
+    입력 오류(그리지 않는다): 두 끝 종류가 다른 상속(class와 abstract는 같은 종류), 패키지·제공 인터페이스 원이 끝인 상속, 고리를
+    이루는 상속(여러 단계도), 자기 자신으로 가는 상속·실체화. 알림(그린다): 인터페이스·제공 인터페이스 원·컴포넌트가 아닌 요소로 가는
+    실체화 — 클래스가 컴포넌트를 실현하는 그림처럼 인터페이스가 아닌 것으로 가는 맞는 쓰임이 있어 막지 않는다."""
+
+    def self_loop(self, spec: Spec, kind: str) -> Optional[str]:
+        if kind not in (GENERALIZATION, REALIZATION):
+            return None
+        label = spec.relations[kind].label
+        return f"{label}{B.josa(label, '은', '는')} 자기 자신으로 갈 수 없다 — from과 to를 다른 {spec.words.noun}로 고친다"
+
+    def check(self, r: Reader, spec: Spec, elements: list[tuple[str, Element]],
+              relations: list[tuple[str, B.Relation]]) -> list[Notice]:
+        kinds = {e.key: e.kind for _, e in elements}
+        parents: dict[str, list[str]] = {}  # 오류 없는 상속(자식 → 부모들)
+        inherits: list[tuple[str, B.Relation]] = []
+        notices = []
+        for path, rel in relations:
+            s, t = kinds.get(rel.source), kinds.get(rel.target)
+            if s is None or t is None or rel.source == rel.target:
+                continue
+            if rel.kind == GENERALIZATION:
+                if self._generalization(r, path, rel, s, t):
+                    parents.setdefault(rel.source, []).append(rel.target)
+                    inherits.append((path, rel))
+            elif rel.kind == REALIZATION and t not in REALIZED:
+                notices.append(self._realization(spec, path, rel, t))
+        loops: set[frozenset[str]] = set()
+        for path, rel in inherits:
+            back = _cycle(parents, rel.target, rel.source)
+            if back is None or frozenset(back) in loops:
+                continue
+            loops.add(frozenset(back))  # 고리마다 입력에서 먼저 나온 상속에서 한 번 알린다
+            r.fail(path, f"상속이 고리를 이룬다({' → '.join(_show(k) for k in [rel.source, *back])}) — 조상을 다시 상속할 수 "
+                         "없다. 고리 안의 상속 하나를 지우거나 from·to를 바꾼다")
+        return notices
+
+    @staticmethod
+    def _generalization(r: Reader, path: str, rel: B.Relation, s: str, t: str) -> bool:
+        """상속의 두 끝 종류를 본다. 맞으면 True, 틀렸으면 알리고 False."""
+        for key, kind in ((rel.source, s), (rel.target, t)):
+            if kind in NOT_INHERITED:
+                name, fix = NOT_INHERITED[kind]
+                r.fail(path, f"{name}({_show(key)}){B.josa(name, '은', '는')} 상속의 끝이 될 수 없다 — {fix}")
+                return False
+        if SAME_KIND.get(s, s) == SAME_KIND.get(t, t):
+            return True
+        tail = (". 인터페이스를 구현하는 것이면 kind를 'realization'으로 바꾼다" if t == "interface" else
+                ". from·to나 요소의 kind를 고친다")
+        r.fail(path, f"상속의 두 끝 종류가 다르다({_topic(rel.source)} {s!r}, {_topic(rel.target)} {t!r}) — 상속은 같은 "
+                     f"종류끼리 긋는다(class와 abstract는 같은 종류로 친다){tail}")
+        return False
+
+    @staticmethod
+    def _realization(spec: Spec, path: str, rel: B.Relation, t: str) -> Notice:
+        if t in INHERITABLE_TARGETS:
+            hint = "상속을 뜻했으면 kind를 'generalization'으로 바꾸고, 인터페이스를 구현하는 것이면 to를 인터페이스로 고친다."
+        else:
+            hint = "실체화는 인터페이스를 구현하거나 클래스가 컴포넌트를 실현할 때 긋는다 — 다른 뜻이면 dependency를 쓴다."
+        return Notice(path, (rel.source, rel.target),
+                      f"실체화가 가는 {spec.words.noun} {_topic(rel.target)} 인터페이스가 아니다(kind {t!r}).", hint)
+
+    def guide(self, spec: Spec) -> str:
+        kinds = [k for k in spec.shapes if k not in NOT_INHERITED and k not in SAME_KIND]
+        groups = ", ".join('"class"·"abstract"끼리' if k == "class" and "abstract" in spec.shapes else f'"{k}"끼리' for k in kinds)
+        never = "·".join(f'"{k}"' for k in NOT_INHERITED if k in spec.shapes)
+        quiet = "·".join(f'"{k}"' for k in REALIZED if k in spec.shapes)
+        noun = spec.words.noun
+        return "\n".join([
+            f"  - 규칙: 상속은 같은 종류끼리 긋는다({groups})."
+            + (f" {never}는 상속의 끝이 될 수 없다." if never else "")
+            + " 클래스가 인터페이스를 구현하는 것은 realization이다. 종류가 다른 상속, 고리를 이루는 상속(A가 B를, B가 다시 A를 "
+            "상속하는 것 — 여러 단계도), 자기 자신으로 가는 상속·실체화는 입력 오류다.",
+            f"  - 알림: 실체화가 {quiet}가 아닌 {noun}로 가면 그리되 검사 결과에 알림을 준다(불합격이 아니다) — 상속 등 다른 "
+            "관계를 뜻했는지 확인하고, 뜻한 대로면 그대로 둔다."])
+
+
+RULES = ClassRules()
+
+SPEC = Spec(CLASS_SHAPES, RELATIONS, BOX_WORDS, list_field="classes", default_kind="class", navigable="to", extended=False,
+            rules=RULES)
 
 
 def parse(data: Any) -> Diagram:

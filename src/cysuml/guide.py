@@ -3,7 +3,8 @@
 - flow(가): AI가 배치하는 그림을 그리는 흐름과, 그 도구에서 날 수 있는 불합격 목록.
 - NEW_INPUT(나): 새 그림 도구가 모두 받는 입력 규칙(열쇠·여러 줄 이름·관계 스테레오타입).
 - PLACED_ELEMENTS(다): 패키지도·컴포넌트도·배치도(deployment diagram)가 함께 받는 요소 종류.
-- relation_fields(라): 도구 정의가 받는 관계 종류(클래스도 관계 여섯 가지 가운데 고른 것 등)와 연관의 기본 방향으로 만드는 관계 필드.
+- relation_fields(라): 도구 정의가 받는 관계 종류(클래스도 관계 여섯 가지 가운데 고른 것 등)와 연관의 기본 방향, 표기 규칙으로 만드는
+  관계 필드.
 - NESTING(마): 요소 안에 요소 두기.
 - NAME_SIDE(바): 모양 밖 이름의 쪽.
 """
@@ -117,7 +118,8 @@ def _joined(words: Iterable[str]) -> str:
 
 def relation_fields(spec: Spec) -> str:
     """(라) 관계 필드. 도구 정의(spec)가 받는 관계 종류와 그 정의(이름·from 쪽 뜻·끝 모양·받는 필드), 연관의 기본 방향으로
-    만든다. 클래스도 도구(extended가 아니다)는 from·to를 상자 이름으로, 새 도구는 요소 열쇠로 적는다."""
+    만들고, 표기 규칙(spec.rules)이 있으면 그 글을 끝에 붙인다. 클래스도 도구(extended가 아니다)는 from·to를 상자 이름으로, 새
+    도구는 요소 열쇠로 적는다."""
     types = spec.relations
     box = not spec.extended
     quoted = "·".join(f'"{k}"' for k in types)
@@ -153,4 +155,6 @@ def relation_fields(spec: Spec) -> str:
                      else (f"{noun} 가운데(요소 종류에 따로 적은 모양은 그 점)", f"상대 {noun}의 그 점"))
     lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "
                  f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다.")
+    if spec.rules is not None and (rules := spec.rules.guide(spec)):
+        lines.append(rules)
     return "\n".join(lines)

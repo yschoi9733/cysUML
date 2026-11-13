@@ -1,7 +1,7 @@
 """패키지도: 패키지와 패키지 사이 의존을 그린다. 패키지 안에 클래스·패키지를 넣고, 컴포넌트·아티팩트·노드도 함께 그린다.
 
-요소 종류는 shapes.SHAPES, 관계는 클래스도 관계 여섯 가지(classdiagram.RELATIONS)이고, 읽기·자리 잡기·그리기는 공용 엔진
-(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
+요소 종류는 shapes.SHAPES, 관계는 클래스도 관계 여섯 가지(classdiagram.RELATIONS)와 그 표기 규칙(classdiagram.RULES)이고,
+읽기·자리 잡기·그리기는 공용 엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
 """
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from . import boxdiagram as B
 from .boxcheck import KINDS
 from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Spec
 from .canvas import SCALE
-from .classdiagram import RELATIONS
+from .classdiagram import RELATIONS, RULES
 from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, PLACES_RESULT, flow, relation_fields
 from .shapes import SHAPES
 
-SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="to")
+SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="to", rules=RULES)
 
 
 def parse(data: Any) -> Diagram:

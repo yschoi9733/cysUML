@@ -70,6 +70,12 @@ It gets back the check result, the size and place of every box as drawn, the sav
 The check **fails** when boxes overlap, a line runs through a box, a label or another line's arrowhead, or labels
 overlap. Crossing lines and the picture size are reported but don't fail.
 
+Relations must follow UML notation, and the tool rejects the input otherwise: a generalization joins two boxes of the
+same kind (a class and an abstract class count as one kind), never runs in a cycle, and neither a generalization nor a
+realization points back to its own box. A realization that ends on something other than an interface or a component
+is drawn and reported as a notice. The package, component and deployment tools follow the same rules, and there a
+package or a provided interface ball is never an end of a generalization.
+
 ### Package diagrams
 
 The tool is `draw_package_diagram`. It draws packages and the dependencies between them, with classes and packages
@@ -336,7 +342,11 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
 
 - **클래스도**는 `draw_class_diagram`으로 그린다. 어시스턴트가 상자의 왼쪽 위 자리와, 필요하면 관계선의 꺾는 점을 준다. 결과로
   검사 결과, 상자마다 그린 자리와 크기, 저장한 파일 경로, 그림을 돌려준다. 상자끼리 겹치거나, 선이 상자·글자·다른 선의 화살촉을
-  지나거나, 글자끼리 겹치면 불합격이다. 선끼리 엇갈린 곳과 그림 크기는 알려 주기만 하고 불합격이 아니다.
+  지나거나, 글자끼리 겹치면 불합격이다. 선끼리 엇갈린 곳과 그림 크기는 알려 주기만 하고 불합격이 아니다. 관계는 UML 표기를
+  따라야 하고, 어기면 그리지 않고 입력 오류로 돌려준다 — 상속은 같은 종류끼리(클래스와 추상 클래스는 같은 종류) 긋고, 고리를
+  이루거나 자기 자신으로 가는 상속·실체화는 받지 않는다. 인터페이스·컴포넌트가 아닌 것으로 가는 실체화는 그리되 알림을 준다.
+  패키지도·컴포넌트도·배치도(deployment diagram)도 같은 규칙을 쓰고, 거기서 패키지와 제공 인터페이스 원은 상속의 끝이 될 수
+  없다.
 - **패키지도**는 `draw_package_diagram`으로 그린다. 패키지와 패키지 사이 의존을 그리고, 패키지 안에 클래스·패키지를 넣는다.
   컴포넌트·아티팩트·노드도 한 그림에 함께 그린다. 요소마다 `kind`를 주고, 다른 요소 안에 둘 요소는 `in`으로 품은 요소를
   가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다.

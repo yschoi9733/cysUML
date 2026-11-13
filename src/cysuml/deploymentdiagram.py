@@ -12,11 +12,11 @@ from . import boxdiagram as B
 from .boxcheck import KINDS
 from .boxdiagram import ELEMENT_WORDS, LABEL_LINE, NEST_PAD, Diagram, Drawing, Spec
 from .canvas import SCALE
-from .classdiagram import HEAD, NAME_LINE, RELATIONS
+from .classdiagram import HEAD, NAME_LINE, RELATIONS, RULES
 from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, PLACES_RESULT, flow, relation_fields
 from .shapes import DEPTH, SHAPES
 
-SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none")
+SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none", rules=RULES)
 
 
 def parse(data: Any) -> Diagram:
