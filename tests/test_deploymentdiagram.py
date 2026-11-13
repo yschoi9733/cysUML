@@ -83,6 +83,16 @@ def test_deploy_from_a_component_or_artifact_outside_onto_a_node_passes():
         assert [t.text for t in drawn.labels[0]] == ["«deploy»"]
 
 
+@pytest.mark.parametrize("target", ["Docker", "Server"])
+def test_deploy_from_an_element_inside_a_node_to_that_node_is_an_input_error(target):
+    # 노드 안에 두는 표기와 «deploy»를 한 그림에 섞어 쓸 수는 있어도, 안에 둔 요소에서 제 노드나 그 바깥 노드로 긋지는 않는다
+    elements = [device("Server", 0, 0), el("node", "Docker", 20, 66, stereotype="executionEnvironment", **{"in": "Server"}),
+                inside("Docker", "artifact", "app.jar", 40, 132)]
+    with pytest.raises(InputError, match="품은 요소와 그 안의 요소는 선으로 잇지 않는다"):
+        draw(elements, [deploy("app.jar", target)])
+    assert "노드 안에 둔 요소에서 그 노드(나 그 노드를 품은 노드)로는 긋지 않는다" in D.TOOL
+
+
 def test_node_inside_a_node_passes():
     r = report([device("Server", 0, 0), el("node", "Docker", 20, 66, stereotype="executionEnvironment", **{"in": "Server"}),
                 el("node", "Tomcat", 40, 132, stereotype="executionEnvironment", **{"in": "Docker"}),
