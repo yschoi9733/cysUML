@@ -97,6 +97,38 @@ It gets back the same things as the class diagram tool, with the place of every 
 checks, the check fails when an element inside another sits too close to its edge or name tab, or a line runs along
 the edge of a package it starts or ends in, or through a package's name tab.
 
+### Deployment diagrams
+
+The tool is `draw_deployment_diagram`. It shows which computers (nodes) the software runs on: components and
+artifacts sit inside nodes with `in`, and a node can sit inside another node. It takes the same elements as the package
+diagram tool. A communication path between nodes is an `association`, which this tool draws without an arrowhead
+unless `navigable` says otherwise, with the protocol as its `name`. A «deploy» arrow from an element outside a node is
+a `dependency` with `"stereotype": "deploy"`:
+
+```json
+{
+  "file_name": "deployment",
+  "elements": [
+    {"kind": "node", "name": "PC", "stereotype": "device", "left": 0, "top": 0, "height": 220},
+    {"kind": "component", "name": "Browser", "in": "PC", "left": 20, "top": 66},
+    {"kind": "node", "name": "App Server", "stereotype": "device", "left": 240, "top": 0, "height": 220},
+    {"kind": "node", "name": "Tomcat", "stereotype": "executionEnvironment", "in": "App Server", "left": 260, "top": 66},
+    {"kind": "component", "name": "OrderService", "in": "Tomcat", "left": 280, "top": 132},
+    {"kind": "node", "name": "DB Server", "stereotype": "device", "left": 620, "top": 0, "height": 220},
+    {"kind": "artifact", "name": "orders.db", "in": "DB Server", "left": 640, "top": 66},
+    {"kind": "artifact", "name": "order.war", "left": 310, "top": 280}
+  ],
+  "relations": [
+    {"kind": "association", "from": "PC", "to": "App Server", "name": "HTTPS"},
+    {"kind": "association", "from": "App Server", "to": "DB Server", "name": "JDBC"},
+    {"kind": "dependency", "from": "order.war", "to": "Tomcat", "stereotype": "deploy"}
+  ]
+}
+```
+
+It gets back the same things as the package diagram tool, and the check fails in the same cases, such as a
+communication path running through a node it does not connect or through an element inside one.
+
 ### Sequence diagrams
 
 The tool is `draw_sequence_diagram`. The assistant sends no coordinates: only the participants, the messages in
@@ -188,6 +220,10 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다.
   클래스도 검사에 더해, 안의 요소가 바깥 요소의 테두리·이름 탭에 붙거나, 선이 그 끝을 품은 패키지의 테두리를 따라가거나 패키지
   탭을 지나면 불합격이다.
+- **배치도**(deployment diagram)는 `draw_deployment_diagram`으로 그린다. 소프트웨어(컴포넌트·아티팩트)가 어느 컴퓨터(노드)에서
+  도는지 보인다. 노드 안에 컴포넌트·아티팩트·노드를 `in`으로 넣고, 노드끼리는 통신 경로(`association` — 이 도구에서는 화살촉 없는
+  실선, `name`에 HTTPS 같은 프로토콜)로 잇고, 노드 밖 요소에서 노드로 «deploy»(`stereotype`이 `deploy`인 `dependency`)를 긋는다.
+  받는 요소·결과·검사는 패키지도와 같다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
   프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
   파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면

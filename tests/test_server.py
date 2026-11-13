@@ -11,7 +11,8 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
-from cysuml import boxcheck, boxdiagram, classcheck, guide, packagediagram, sequencecheck, sequencediagram, server
+from cysuml import (boxcheck, boxdiagram, classcheck, deploymentdiagram, guide, packagediagram, sequencecheck,
+                    sequencediagram, server)
 from cysuml.canvas import SCALE
 from cysuml.report import Finding
 
@@ -59,16 +60,19 @@ def image(result):
 TOOLS = [  # 도구 → 필수 입력, 객체 목록 입력, 문자열 목록 입력. 도구를 더하면 줄을 더한다
     ("draw_class_diagram", ["file_name", "classes"], ("classes", "relations"), ()),
     ("draw_package_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_deployment_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_sequence_diagram", ["file_name", "participants"], ("participants", "messages", "frames"), ("notes",)),
 ]
 EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 더한다
     "order": "draw_class_diagram",
     "packages": "draw_package_diagram",
+    "deployment": "draw_deployment_diagram",
     "checkout": "draw_sequence_diagram",
 }
 PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 그 도구의 말
     "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, boxdiagram.BOX_WORDS),
     "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
+    "draw_deployment_diagram": (deploymentdiagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
 }
 
 
@@ -142,6 +146,15 @@ def test_relation_fields_say_where_lines_start_for_each_tool():
     assert "탭 오른쪽 몸통의 가운데를 향한다" in packagediagram.TOOL
     # 패키지도에는 모양 밖 이름이 있는 요소가 없어 그 결과 문장을 넣지 않는다
     assert guide.PLACES_RESULT in packagediagram.TOOL and guide.OUTSIDE_PLACES not in packagediagram.TOOL
+
+
+def test_deployment_diagram_always_carries_its_english_name():
+    # 이 레포는 "배치"를 자리 잡기 뜻으로도 쓰므로, 도구 설명·안내문·README 한국어 부분은 그림 이름에 늘 영어 이름을 붙인다
+    korean = README.read_text(encoding="utf-8").split("\n## 한국어\n", 1)[1]
+    for text in (deploymentdiagram.TOOL, server.INSTRUCTIONS, korean):
+        assert "배치도" in text
+        assert not re.search(r"배치도(?!(\*\*)?\(deployment diagram\))", text)
+    assert deploymentdiagram.TIPS.startswith("배치도(deployment diagram) 자리 잡기 요령:")
 
 
 def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):

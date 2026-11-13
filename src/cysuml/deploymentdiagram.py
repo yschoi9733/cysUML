@@ -1,0 +1,75 @@
+"""배치도(deployment diagram): 소프트웨어(컴포넌트·아티팩트)가 어느 컴퓨터(노드)에 놓여 도는지 그린다. 노드 안에 컴포넌트·아티팩트·
+노드를 넣고, 노드끼리는 통신 경로(연관)로, 노드 밖 요소에서 노드로는 «deploy»(스테레오타입을 단 의존)로 잇는다.
+
+요소 종류·관계 종류·읽기·자리 잡기·그리기·검사는 패키지도와 같은 공용 엔진(boxdiagram)·공용 검사(boxcheck)를 쓰고, 연관의 기본
+방향만 '없음'으로 둔다(통신 경로는 화살촉 없는 실선). 도구 설명(TOOL)과 자리 잡기 요령(TIPS)도 여기 둔다.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from . import boxdiagram as B
+from .boxcheck import KINDS
+from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Spec
+from .canvas import SCALE
+from .classdiagram import RELATIONS
+from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, PLACES_RESULT, flow, relation_fields
+from .shapes import SHAPES
+
+SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none")
+
+
+def parse(data: Any) -> Diagram:
+    return B.parse(SPEC, data)
+
+
+def render(data: Any, scale: float = SCALE) -> Drawing:
+    return B.render(SPEC, data, scale)
+
+
+NOTATION = """배치도(deployment diagram) 표기:
+- 노드 안에 두기: 노드에서 도는 컴포넌트·아티팩트, 노드 안의 노드(서버 안의 실행 환경 등)는 in으로 그 노드 안에 둔다.
+- 통신 경로: 노드끼리 kind "association"으로 잇는다. 이 도구의 연관은 navigable 기본이 "none"이라 화살촉 없는 실선이다. 선 위에 \
+프로토콜 같은 이름(name — "HTTPS"·"JDBC" 등)이나 stereotype을 쓴다.
+- «deploy»: 노드 밖에 둔 컴포넌트·아티팩트에서 노드로 kind "dependency", stereotype "deploy"를 긋는다(점선 화살표). 노드 안에 \
+두는 표기와 함께 써도 된다.
+- «manifest»: 아티팩트에서 그 아티팩트가 담은 컴포넌트로 kind "dependency", stereotype "manifest"를 긋는다.
+- 노드 종류: 노드의 stereotype에 "device"·"executionEnvironment" 등을 주면 이름 위 줄에 쓴다. 모양은 같은 입체 상자다."""
+
+TIPS = """배치도(deployment diagram) 자리 잡기 요령:
+- 사용자 쪽 노드(PC·휴대폰 등)를 한쪽 끝에, 서버·데이터베이스 노드를 다른 쪽으로 차례로 놓아 통신 경로가 엇갈리지 않게 한다.
+- 통신 경로는 두 노드의 가운데를 잇는다. 한 줄에 놓은 노드는 top과 height를 같게 주면 경로가 곧다. 노드는 안의 요소에 맞춰 \
+늘어나니, 결과의 "요소 자리"에서 그 줄의 가장 높은 노드 높이를 다른 노드의 height로 준다.
+- «device» 같은 스테레오타입을 단 노드는 이름 줄이 하나 늘어, 안의 요소를 노드 top + 66부터 둔다.
+- 노드 안의 노드나 그 안의 요소로 가는 선이 바깥 노드의 이름(앞면 위 가운데)을 지나면 불합격이다. 선을 보내는 요소는 바깥 노드의 \
+옆이나 아래에 두고, 선 가운데가 바깥 노드 테두리에 오지 않게 떼어 놓는다(선 글자가 선 가운데쯤에 놓인다). 위에 둬야 하면 이름 칸 \
+바로 위는 피하고, 이름 칸에서 보내는 요소 쪽으로 40px쯤 바깥, 이름 칸 아랫변에서 10px 아래에 꺾는 점(via)을 하나 준다. 이름 칸 \
+옆 앞면이 60px보다 좁으면 바깥 노드에 width를 더 준다(이름 칸 자리는 불합격 항목의 "이름 칸"에 나온다).
+- 요소 사이는 관계 이름·스테레오타입 글자가 들어갈 만큼 띄운다. 가로 80px·세로 60px쯤에서 시작하고, 글자가 길면 더 띄운다.
+- 요소 크기는 도구가 글자와 안의 요소에 맞춰 늘린다. 그린 크기는 결과의 "요소 자리"에서 보고 다음 입력에 쓴다."""
+
+TOOL = f"""배치도(deployment diagram)를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 소프트웨어(컴포넌트·아티팩트)가 \
+어느 컴퓨터(노드)에 놓여 도는지 보인다. 노드 안에 컴포넌트·아티팩트·노드를 넣고, 노드끼리 통신 경로를, 노드 밖 요소에서 노드로 \
+«deploy»를 긋는다. 클래스·패키지도 한 그림에 섞어 그릴 수 있다. 요소는 준 왼쪽 위(left·top) 그대로, 관계선은 준 꺾는 점(via)을 \
+따라 그리고, 요소 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다.
+
+입력
+{PLACED_ELEMENTS}
+{relation_fields(SPEC)}
+{COMMON_INPUT}
+
+{NEW_INPUT}
+
+{NESTING}
+
+{NOTATION}
+
+결과
+{PLACES_RESULT}
+{IMAGE_RESULT}
+- elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
+그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.
+
+{flow(KINDS, SPEC.words)}
+
+{TIPS}"""

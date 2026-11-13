@@ -1,0 +1,204 @@
+"""배치도(deployment diagram): 노드 안에 두기, 통신 경로(화살촉 없는 연관), «deploy», 노드 안의 노드, 자리 잡기 요령의 수치."""
+import pytest
+
+from cysuml import boxcheck as K
+from cysuml import deploymentdiagram as D
+from cysuml import guide
+from cysuml.canvas import Line, Text
+from cysuml.parsing import InputError
+from cysuml.shapes import NODE
+
+
+def el(kind, name, left, top, **more):
+    return {"kind": kind, "name": name, "left": left, "top": top, **more}
+
+
+def inside(parent, kind, name, left, top, **more):
+    return el(kind, name, left, top, **{"in": parent}, **more)
+
+
+def rel(kind, source, target, **more):
+    return {"kind": kind, "from": source, "to": target, **more}
+
+
+def path(source, target, **more):
+    return rel("association", source, target, **more)
+
+
+def deploy(source, target, **more):
+    return rel("dependency", source, target, stereotype="deploy", **more)
+
+
+def https(source, target, **more):
+    return path(source, target, name="HTTPS", **more)
+
+
+def draw(elements, relations=()):
+    return D.render({"elements": list(elements), "relations": list(relations)})
+
+
+def report(elements, relations=()):
+    return K.check(draw(elements, relations))
+
+
+def placed(drawing, key):
+    return drawing.layout.by_key[key]
+
+
+def device(name, left, top, **more):
+    return el("node", name, left, top, stereotype="device", **more)
+
+
+# 노드 넷: PC·Web·App(안에 실행 환경 노드)·DB. 스테레오타입을 단 노드라 안의 요소는 top + 66부터 둔다
+FOUR = [device("PC", 0, 0), inside("PC", "component", "Browser", 20, 66),
+        device("Web Server", 240, 0), inside("Web Server", "artifact", "index.html", 260, 66),
+        device("App Server", 480, 0), el("node", "JVM", 500, 66, stereotype="executionEnvironment", **{"in": "App Server"}),
+        inside("JVM", "component", "OrderService", 520, 132), inside("JVM", "artifact", "order.jar", 520, 240),
+        device("DB Server", 800, 0), inside("DB Server", "artifact", "orders.db", 820, 66)]
+PATHS = [path("PC", "Web Server", name="HTTPS"), path("Web Server", "App Server", name="HTTP"),
+         path("App Server", "DB Server", name="JDBC"),
+         rel("dependency", "order.jar", "OrderService", stereotype="manifest")]
+
+
+# ---------------------------------------------------------------- 이슈의 확인 넷
+
+
+def test_four_nodes_with_components_and_artifacts_inside_and_paths_between_pass():
+    r = report(FOUR, PATHS)
+    assert r.passed, r.summary()
+
+
+def test_deploy_from_a_component_or_artifact_outside_onto_a_node_passes():
+    d = draw([el("artifact", "shop.war", 20, 0), el("component", "Batch", 300, 0),
+              device("Server", 0, 140, width=400), inside("Server", "component", "Api", 20, 206)],
+             [deploy("shop.war", "Server"), deploy("Batch", "Server")])
+    assert K.check(d).passed, K.check(d).summary()
+    for drawn in d.drawn:  # 점선 화살표, 이름 자리에 «deploy»
+        assert drawn.line.dash is not None and [h for h in drawn.heads if isinstance(h, Line)]
+        assert [t.text for t in drawn.labels[0]] == ["«deploy»"]
+
+
+def test_node_inside_a_node_passes():
+    r = report([device("Server", 0, 0), el("node", "Docker", 20, 66, stereotype="executionEnvironment", **{"in": "Server"}),
+                el("node", "Tomcat", 40, 132, stereotype="executionEnvironment", **{"in": "Docker"}),
+                inside("Tomcat", "component", "Api", 60, 198), inside("Docker", "artifact", "app.jar", 340, 198)],
+               [deploy("app.jar", "Tomcat")])
+    assert r.passed, r.summary()
+
+
+def test_path_through_a_node_it_does_not_connect_and_the_element_inside_fails():
+    # PC에서 DB Server로 곧게 가는 경로가 사이의 Web Server와 그 안의 index.html을 지난다
+    elements = [device("PC", 0, 0, height=180), device("Web Server", 240, 0, height=180),
+                inside("Web Server", "artifact", "index.html", 260, 66), device("DB Server", 480, 0, height=180)]
+    r = report(elements, [path("PC", "DB Server")])
+    through = [f.elements[1] for f in r.failures if f.kind == "line_through_box"]
+    assert through == ["Web Server", "index.html"] and not r.passed
+
+
+def test_path_into_a_nested_node_through_a_sibling_element_fails():
+    # App 안 JVM으로 가는 경로는 끝을 품은 App은 지나도 되지만, 그 안의 다른 요소 Cache를 지나면 불합격이다
+    r = report([el("node", "PC", 0, 60), el("node", "App", 200, 0), inside("App", "component", "Cache", 220, 52),
+                inside("App", "node", "JVM", 380, 52), inside("JVM", "component", "Svc", 400, 104)],
+               [path("PC", "JVM", name="RMI")])
+    assert [(f.kind, f.elements) for f in r.failures] == [("line_through_box", ("PC->JVM", "Cache"))]
+
+
+# ---------------------------------------------------------------- 통신 경로와 표기
+
+
+def test_communication_path_has_no_arrowhead_unless_navigable_says_so():
+    nodes = [el("node", "A", 0, 0), el("node", "B", 300, 0)]
+    plain, = draw(nodes, [path("A", "B", name="HTTPS")]).drawn
+    assert plain.heads == () and plain.line.dash is None
+    one_way, = draw(nodes, [path("A", "B", navigable="to")]).drawn
+    assert [h for h in one_way.heads if isinstance(h, Line)]
+    assert '"to"·"from"·"both"·"none"(기본)' in D.TOOL and guide.relation_fields(D.SPEC) in D.TOOL
+
+
+def test_path_takes_a_name_and_a_stereotype_on_the_line():
+    d = draw([el("node", "A", 0, 0), el("node", "B", 300, 0)], [path("A", "B", name="HTTPS", stereotype="internet")])
+    assert [t.text for t in d.drawn[0].labels[0]] == ["«internet»", "HTTPS"]
+    assert K.check(d).passed
+
+
+def test_node_kinds_are_stereotypes_above_the_name_on_the_same_shape():
+    d = draw([device("PC", 0, 0), el("node", "JVM", 200, 0, stereotype="executionEnvironment")])
+    texts = [(t.text, t.bold) for t in d.canvas.records if isinstance(t, Text)]
+    assert texts == [("«device»", False), ("PC", True), ("«executionEnvironment»", False), ("JVM", True)]
+    assert placed(d, "PC").shape is placed(d, "JVM").shape is NODE
+
+
+def test_takes_the_elements_of_the_package_tool_and_nothing_else():
+    assert set(D.SPEC.shapes) == {"class", "abstract", "interface", "enum", "package", "component", "artifact", "node"}
+    with pytest.raises(InputError) as e:
+        draw([el("usecase", "U", 0, 0)])
+    assert [p.split(":")[0] for p in e.value.problems] == ["elements[0].kind"]
+
+
+# ---------------------------------------------------------------- 자리 잡기 요령의 수치
+
+
+def test_nodes_in_a_row_with_the_same_top_and_height_get_straight_paths():
+    # App Server는 안의 JVM에 맞춰 늘어나 다른 노드보다 높다 — 결과의 높이를 다른 노드의 height로 주면 경로가 곧다
+    slanted = draw(FOUR, PATHS)
+    assert any(len({y for _, y in r.points}) > 1 for r in slanted.layout.relations[:3])
+    tallest = placed(slanted, "App Server").height
+    same = [{**e, "height": tallest} if e["kind"] == "node" and "in" not in e else e for e in FOUR]
+    straight = draw(same, PATHS)
+    assert all(len({y for _, y in r.points}) == 1 for r in straight.layout.relations[:3])
+    assert K.check(straight).passed
+    assert "top과 height를 같게 주면 경로가 곧다" in D.TIPS
+
+
+def test_element_inside_a_stereotyped_node_starts_at_top_plus_66():
+    assert report([device("N", 0, 0), inside("N", "component", "C", 20, 66)]).passed
+    (f,) = report([device("N", 0, 0), inside("N", "component", "C", 20, 52)]).failures
+    assert f.kind == "inner_off_area" and "top + 66" in D.TIPS
+
+
+OUTER = [device("App Server", 0, 0),
+         el("node", "Tomcat", 20, 66, stereotype="executionEnvironment", **{"in": "App Server"}),
+         inside("Tomcat", "component", "Svc", 40, 132)]
+
+
+@pytest.mark.parametrize("make", [deploy, https])
+def test_line_into_a_nested_node_from_above_crosses_the_outer_name_but_not_from_the_side_or_below(make):
+    sender = el("artifact", "order.war", 60, -140)
+    (f,) = report([sender, *OUTER], [make("order.war", "Tomcat")]).failures
+    assert f.kind == "line_through_name" and f.elements == ("order.war->Tomcat", "App Server")
+    outer = placed(draw(OUTER), "App Server").rect
+    for left, top in ((outer[2] + 120, 60), (outer[0] - 350, 60), (60, outer[3] + 100)):
+        r = report([{**sender, "left": left, "top": top}, *OUTER], [make("order.war", "Tomcat")])
+        assert r.passed, (left, top, r.summary())
+
+
+def test_side_sender_too_close_puts_the_label_on_the_outer_border():
+    # 안쪽 노드가 바깥 노드 왼쪽 테두리에서 멀면, 가까이 둔 보내는 요소에서 오는 선의 가운데가 바깥 노드 테두리에 온다
+    outer = [device("App", 0, 0), el("node", "Tomcat", 140, 66, stereotype="executionEnvironment", **{"in": "App"}),
+             inside("Tomcat", "component", "Svc", 160, 132)]
+    (f,) = report([el("artifact", "a.war", -250, 60), *outer], [deploy("a.war", "Tomcat")]).failures
+    assert f.kind == "text_on_box" and f.elements == ("a.war->Tomcat", "App")
+    assert report([el("artifact", "a.war", -350, 60), *outer], [deploy("a.war", "Tomcat")]).passed
+    assert "선 가운데가 바깥 노드 테두리에 오지 않게 떼어 놓는다" in D.TIPS
+
+
+@pytest.mark.parametrize("left", [-50, 190])
+@pytest.mark.parametrize("make", [deploy, https])
+def test_sender_above_beside_the_name_follows_the_tip_with_one_bend(left, make):
+    # 이름 칸(81~171) 바로 위는 아니지만 곧은 선이 이름 칸을 지나는 자리에서, 이름 칸에서 보내는 요소 쪽으로 40px 바깥·이름 칸
+    # 아랫변 10px 아래에 꺾는 점을 하나 주면 합격한다
+    sender = el("artifact", "order.war", left, -140)
+    (f,) = report([sender, *OUTER], [make("order.war", "Tomcat")]).failures
+    assert f.kind == "line_through_name"
+    zone = placed(draw(OUTER), "App Server").zones[0].rect
+    x = zone[0] - 40 if left + 56 < (zone[0] + zone[2]) / 2 else zone[2] + 40
+    r = report([sender, *OUTER], [make("order.war", "Tomcat", via=[[x, zone[3] + 10]])])
+    assert r.passed, r.summary()
+    assert "40px쯤 바깥, 이름 칸 아랫변에서 10px 아래에 꺾는 점(via)을 하나 준다" in D.TIPS
+
+
+def test_returned_places_draw_the_same_picture():
+    d = draw(FOUR, PATHS)
+    again = [{**e, "left": p.rect[0], "top": p.rect[1], "width": p.width, "height": p.height}
+             for e, p in zip(FOUR, d.layout.boxes)]
+    assert [repr(r) for r in draw(again, PATHS).canvas.records] == [repr(r) for r in d.canvas.records]
