@@ -14,7 +14,7 @@ from . import boxdiagram as B
 from . import text as T
 from .boxcheck import KINDS
 from .boxdiagram import (ELEMENT_WORDS, LABEL_LINE, NEST_PAD, TRIANGLE_HEAD, Diagram, Drawing, Element, NameZone, PlacedBox,
-                         RelationType, Shape, Spec, line_ys)
+                         RelationType, Shape, Spec, floored, line_ys)
 from .canvas import SCALE, Canvas, Point
 from .classdiagram import RELATIONS as CLASS_RELATIONS
 from .geom import Border, EllipseBorder
@@ -33,16 +33,10 @@ def _lines_width(lines: tuple[str, ...], bold: bool = False) -> float:
     return math.ceil(max(T.text_width(s, bold) for s in lines))
 
 
-def _floored(rect: Box) -> Point:
-    """자리 가운데를 정수 좌표로 내린 점 — 액터와 유즈케이스의 선이 향하는 점. 가운데가 반 픽셀에 걸리면(사람 모양 높이가 홀수,
-    모양 밖 이름 때문에 반 픽셀에 놓인 모양 자리, 사람이 준 홀수 폭·소수 좌표) 가운데를 맞춰 놓은 두 요소 사이의 선도 반 픽셀
-    기울어 계단이 보인다. 두 끝이 모두 가운데를 내린 점을 향하면 가운데가 같은 두 요소의 선은 곧다."""
-    return math.floor((rect[0] + rect[2]) / 2), math.floor((rect[1] + rect[3]) / 2)
-
-
 class ActorShape(Shape):
     """액터: 교류도와 같은 사람 모양. 이름은 모양 밖(name_side, 기본 아래)에 쓰고, 선 끝은 사람 모양을 덮는 사각형 테두리에 닿는다.
-    선이 향하는 점은 가운데를 정수로 내린 점이고(_floored), 사람 모양도 그 x에 그려 곧게 내려오는 선이 몸 한가운데에 닿는다."""
+    선이 향하는 점은 가운데를 정수로 내린 점이고(boxdiagram.floored — 사람 모양 높이가 홀수거나 사람이 준 폭이 홀수·좌표가 소수여도
+    가운데를 맞춘 두 요소의 선이 곧다), 사람 모양도 그 x에 그려 곧게 내려오는 선이 몸 한가운데에 닿는다."""
 
     outside_name = True
     sized = False
@@ -52,10 +46,10 @@ class ActorShape(Shape):
         return ACTOR_FIGURE
 
     def anchor(self, e: Element, rect: Box) -> Point:
-        return _floored(rect)
+        return floored(rect)
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
-        draw_actor(c, _floored(p.shape_rect)[0], p.shape_rect[1], p.key)
+        draw_actor(c, floored(p.shape_rect)[0], p.shape_rect[1], p.key)
 
 
 def _even(v: float) -> int:
@@ -73,7 +67,7 @@ def _ellipse(rect: Box) -> EllipseBorder:
 class UseCaseShape(Shape):
     """유즈케이스: 이름을 안 가운데에 쓴 타원. 여백을 더한 이름 글자 상자를 가로·세로 √2배 하면 그 상자의 네 모서리가 타원 위에
     놓이므로, 타원은 그 크기(최소 USE_CASE_MIN)로 이름을 덮는다. 폭·높이는 짝수로 올려, 정수 좌표에 놓으면 선이 향하는 점
-    (_floored)이 타원 가운데와 같다. 선 끝과 겹침은 타원 테두리로 본다."""
+    (boxdiagram.floored)이 타원 가운데와 같다. 선 끝과 겹침은 타원 테두리로 본다."""
 
     stereotyped = False
 
@@ -86,7 +80,7 @@ class UseCaseShape(Shape):
         return _ellipse(rect)
 
     def anchor(self, e: Element, rect: Box) -> Point:
-        return _floored(rect)
+        return floored(rect)
 
     def parts(self, e: Element, rect: Box) -> tuple[Border, ...]:
         """타원 — 자리 사각형의 네 모서리 쪽은 유즈케이스가 아니다."""

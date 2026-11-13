@@ -1,6 +1,6 @@
 """AI가 배치하는 그림의 공용 검사: 그린 결과(boxdiagram.Drawing)를 읽어 합격·불합격과 알림을 낸다.
 
-불합격은 문서에 못 넣는 그림이다 — 선(화살촉·삼각형·마름모 포함)이 요소·글자·다른 선을 가로지르거나 그것들에 붙어 한데
+불합격은 문서에 못 넣는 그림이다 — 선(선 끝 모양 포함)이 요소·글자·다른 선을 가로지르거나 그것들에 붙어 한데
 보이는 것, 요소나 글자끼리 겹치는 것이다. 종류는 KINDS에 낸 차례대로 있다. 선끼리 엇갈린 곳과 그림 크기는 알림으로만 준다.
 상속·실체화처럼 공유 줄기를 받는 관계에서 자식 여럿의 선이 한 줄기로 부모의 한 삼각형에 모이는 것은 포개짐으로도, 선 끝
 모양에 닿는 것으로도 치지 않는다. 공유 줄기처럼 여러 선이 한 자리에 겹쳐 그려진 곳이 걸리면 한 항목으로 묶어 알린다.
@@ -17,7 +17,8 @@ import operator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
-from .boxdiagram import BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, Layout, NameZone, PlacedBox, PlacedRelation, Words, josa
+from .boxdiagram import (BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, Layout, NameZone, PlacedBox, PlacedRelation,
+                         Words, josa)
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
                    grow, hits, inside, meets, outline, overlap, span, touches)
@@ -127,8 +128,8 @@ class _Box:
 
 @dataclass(frozen=True)
 class _Head:
-    """선 끝 모양 — 삼각형·마름모(흰색이나 검은색으로 칠한 다각형)와 열린 화살촉(갈래 끝 → tip → 갈래 끝의 선). tip은 선 끝에
-    닿은 꼭짓점이다."""
+    """선 끝 모양 — 칠한 다각형(삼각형·마름모)이나 열린 선(화살촉, 소켓 반원 등). 이름(name)과 선 끝에 닿은 점(tip)은 그린 기록의
+    점 개수로 짐작하지 않고 그 모양의 정의에서 받는다(HeadMark)."""
 
     name: str
     points: tuple[Point, ...]
@@ -137,11 +138,8 @@ class _Head:
     edges: tuple[Segment, ...]
 
     @classmethod
-    def of(cls, record: Union[Line, Polygon]) -> _Head:
-        closed = isinstance(record, Polygon)
-        pts = record.points
-        name = ("삼각형" if len(pts) == 3 else "마름모") if closed else "화살촉"
-        return cls(name, pts, closed, pts[0] if closed else pts[1], tuple(outline([record])))
+    def of(cls, record: Union[Line, Polygon], mark: HeadMark) -> _Head:
+        return cls(mark.name, record.points, isinstance(record, Polygon), mark.tip, tuple(outline([record])))
 
     def holds(self, segments: Iterable[Segment]) -> bool:
         """선분 끝점이 이 모양(삼각형·마름모) 안에 있는지."""
@@ -264,7 +262,7 @@ def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:
     relations, labels = [], []
     for i, (p, d) in enumerate(zip(lay.relations, drawing.drawn, strict=True)):
         points = d.line.points
-        heads = tuple(_Head.of(h) for h in d.heads)
+        heads = tuple(_Head.of(h, m) for h, m in zip(d.heads, d.marks, strict=True))
         path = tuple(zip(points, points[1:]))
         segments = path + tuple(e for h in heads for e in h.edges)
         end = next((h for h in heads if h.closed and math.dist(h.tip, points[-1]) <= LINE_EPS), None)
@@ -451,7 +449,7 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box], w: Words
                    else f"꺾는 점(via)을 고치거나 두 {w.noun}를 더 떼어 놓는다")
             yield Finding("head_near_own_box", (*_owners(rels), b.name), hit.where,
                           f"선 끝 모양이 제 끝 {w.noun} {w.edge}에 {BOX_CLEARANCE}px 안으로 붙는다: {_titles(rels)}, {b.title}.",
-                          f"반대쪽 끝의 화살촉·삼각형·마름모가 이 {w.noun} {w.edge}에 닿아 보인다 — {fix}.")
+                          f"반대쪽 끝의 선 끝 모양이 이 {w.noun} {w.edge}에 닿아 보인다 — {fix}.")
         else:
             what = (f"선이 {w.noun}를 지난다" if hit.inside
                     else f"선이 {w.noun}에 {BOX_CLEARANCE}px 안으로 붙어 지나간다")
@@ -462,9 +460,10 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box], w: Words
 
 
 def _lines_through_names(relations: list[_Relation], boxes: list[_Box], w: Words) -> Iterator[Finding]:
-    """선이 끝 요소의 몸통 밖 이름 칸(패키지 탭·모양 밖 이름)이나, 끝을 품은 요소의 이름 칸을 지나거나 BOX_CLEARANCE 안으로
-    붙는다. 끝 요소의 몸통 안 이름 칸은 보지 않는다 — 선 끝과 끝 모양은 그 칸 쪽 테두리에 닿아도 되고, 칸 안으로 들어가는 선은
-    입력 오류(선이 끝 요소 안을 지난다)나 선 끝 모양이 그 요소 안으로 들어간 것으로 따로 걸린다."""
+    """선이 끝 요소의 몸통 밖 자리(패키지 탭·모양 밖 이름 같은 이름 칸, UML 1 표기 컴포넌트의 부품 네모)나, 끝을 품은 요소의
+    이름 칸을 지나거나 BOX_CLEARANCE 안으로 붙는다. 글은 그 자리를 NameZone.what으로 부른다. 끝 요소의 몸통 안 이름 칸은 보지
+    않는다 — 선 끝과 끝 모양은 그 칸 쪽 테두리에 닿아도 되고, 칸 안으로 들어가는 선은 입력 오류(선이 끝 요소 안을 지난다)나 선 끝
+    모양이 그 요소 안으로 들어간 것으로 따로 걸린다."""
     found = _Places()
     for b in boxes:
         for r in relations:
@@ -479,11 +478,18 @@ def _lines_through_names(relations: list[_Relation], boxes: list[_Box], w: Words
                     where = _cover(parts)
                     _add(found.get((b.name, z.rect, where), lambda: (b, z, where, []))[3], r)
     for b, z, where, rels in found.values():
+        what = z.what
+        if z.lettered:
+            hint = (f"{what}{josa(what, '은', '는')} 그 {w.noun}가 끝인 선(몸통 밖 이름 칸일 때)이나 그 {w.noun} 안의 {w.noun}를 잇는 "
+                    f"선도 지나가면 안 된다 — 꺾는 점(via)을 주거나 고쳐 {what}에서 {BOX_CLEARANCE}px 넘게 비켜 가게 한다.")
+        else:  # 글자 없이 몸통 밖에 붙은 자리(부품 네모) — 선이 향하는 점을 비켜 둘러 있으니 끝 구간을 곧게 들인다
+            hint = (f"{what}{josa(what, '은', '는')} 그 {w.noun}가 끝인 선도 지나가면 안 된다 — 그 {w.noun}에 닿는 끝 구간을 "
+                    f"{what}에서 떼어 놓는다. 왼쪽에서 들어오는 선은 {what} 사이로 곧게 들어가게, 꺾는 점(via)이 없으면 반대쪽 요소를, "
+                    f"있으면 그 {w.noun} 쪽 끝에 붙은 꺾는 점을 선이 향하는 점과 같은 높이에 둔다. 비스듬히 들어오는 선은 반대쪽 "
+                    f"요소나 꺾는 점을 옮겨 위·아래 변으로 들어가게 한다.")
         yield Finding("line_through_name", (*_owners(rels), b.name), where,
-                      f"선이 {w.noun}의 이름 칸을 지나거나 {BOX_CLEARANCE}px 안으로 붙는다: {_titles(rels)}, {b.title}의 이름 칸"
-                      f"({fmt_rect(z.rect)}).",
-                      f"이름 칸은 그 {w.noun}가 끝인 선(몸통 밖 이름 칸일 때)이나 그 {w.noun} 안의 {w.noun}를 잇는 선도 지나가면 "
-                      f"안 된다 — 꺾는 점(via)을 주거나 고쳐 이름 칸에서 {BOX_CLEARANCE}px 넘게 비켜 가게 한다.")
+                      f"선이 {w.noun}의 {what}{josa(what, '을', '를')} 지나거나 {BOX_CLEARANCE}px 안으로 붙는다: {_titles(rels)}, "
+                      f"{b.title}의 {what}({fmt_rect(z.rect)}).", hint)
 
 
 def _lines_along_containers(relations: list[_Relation], boxes: list[_Box], w: Words) -> Iterator[Finding]:
@@ -509,7 +515,8 @@ def _lines_along_containers(relations: list[_Relation], boxes: list[_Box], w: Wo
 def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box], w: Words) -> Iterator[Finding]:
     """선 끝 모양이 제 끝 요소 안으로 HEAD_HIDE 넘게 들어간다. 선 뒤에 그린 요소는 그 모양을 가리고, 선 앞에 그린 요소(바깥 요소)는
     안의 것과 겹쳐 보인다. 선이 넓은 테두리를 아주 비스듬히 나가면 마름모·삼각형 꼭짓점이나 화살촉 갈래가 요소 안으로 들어간다.
-    같은 모양(공유 줄기의 삼각형)은 한 항목으로 묶는다."""
+    모양의 점을 모두 본다 — 선 끝에 닿은 점(화살촉 끝)은 테두리 위라 HEAD_HIDE 안쪽에 들지 않고, 점이 여럿인 열린 모양(소켓
+    반원 등)은 가운데 점이 들어갈 수 있다. 같은 모양(공유 줄기의 삼각형)은 한 항목으로 묶는다."""
     found = _Places()
     for b in boxes:
         inner = b.border.grown(-HEAD_HIDE)
@@ -517,8 +524,7 @@ def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box], w: Words
             continue
         for r in relations:
             for h in r.heads_at(b.name):
-                corners = h.points if h.closed else (h.points[0], h.points[-1])
-                if any(inner.holds(c) for c in corners):
+                if any(inner.holds(c) for c in h.points):
                     _add(found.get((b.name, h.points), lambda: (b, h, []))[2], r)
     for b, h, rels in found.values():
         whose = "·".join(f"관계 {r.name}" for r in sorted(rels, key=_index))
