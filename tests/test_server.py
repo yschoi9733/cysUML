@@ -11,7 +11,8 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
-from cysuml import boxcheck, boxdiagram, classcheck, guide, packagediagram, sequencecheck, sequencediagram, server
+from cysuml import (boxcheck, boxdiagram, classcheck, componentdiagram, guide, packagediagram, sequencecheck, sequencediagram,
+                    server)
 from cysuml.canvas import SCALE
 from cysuml.report import Finding
 
@@ -59,16 +60,19 @@ def image(result):
 TOOLS = [  # 도구 → 필수 입력, 객체 목록 입력, 문자열 목록 입력. 도구를 더하면 줄을 더한다
     ("draw_class_diagram", ["file_name", "classes"], ("classes", "relations"), ()),
     ("draw_package_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_component_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_sequence_diagram", ["file_name", "participants"], ("participants", "messages", "frames"), ("notes",)),
 ]
 EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 더한다
     "order": "draw_class_diagram",
     "packages": "draw_package_diagram",
+    "components": "draw_component_diagram",
     "checkout": "draw_sequence_diagram",
 }
 PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 그 도구의 말
     "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, boxdiagram.BOX_WORDS),
     "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
+    "draw_component_diagram": (componentdiagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
 }
 
 
@@ -142,6 +146,25 @@ def test_relation_fields_say_where_lines_start_for_each_tool():
     assert "탭 오른쪽 몸통의 가운데를 향한다" in packagediagram.TOOL
     # 패키지도에는 모양 밖 이름이 있는 요소가 없어 그 결과 문장을 넣지 않는다
     assert guide.PLACES_RESULT in packagediagram.TOOL and guide.OUTSIDE_PLACES not in packagediagram.TOOL
+
+
+def test_component_description_carries_the_lollipop_its_name_side_and_its_circle_place():
+    # 컴포넌트도는 모양 밖 이름이 있는 막대사탕을 받으므로 이름 쪽(바)과 모양 자리 결과 문장을 넣고, 연관 기본 방향은 '없음'이다
+    tool = componentdiagram.TOOL
+    for part in (guide.PLACED_ELEMENTS, guide.NEW_INPUT, guide.NESTING, guide.NAME_SIDE, guide.PLACES_RESULT,
+                 guide.OUTSIDE_PLACES):
+        assert part in tool
+    assert 'kind "lollipop"' in tool and '"to"·"from"·"both"·"none"(기본)' in tool
+
+
+def test_component_tool_returns_the_circle_place_of_a_lollipop(tmp_path):
+    elements = [{"kind": "component", "name": "Order", "left": 0, "top": 0},
+                {"kind": "lollipop", "name": "OrderApi", "left": 160, "top": 14, "name_side": "right"}]
+    relations = [{"kind": "association", "from": "Order", "to": "OrderApi"}]
+    (r,) = run(server.mcp, ("draw_component_diagram", {"file_name": "c", "elements": elements, "relations": relations,
+                                                         "out_dir": str(tmp_path)}))[2]
+    assert not r.is_error and text(r).startswith("합격"), text(r)
+    assert "OrderApi(160, 14, " in text(r) and ", 모양 160, 14, 20×20)" in text(r)
 
 
 def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):
