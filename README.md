@@ -100,6 +100,70 @@ point its lines aim at, since that is not the middle of the package). Besides th
 checks, the check fails when an element inside another sits too close to its edge or name tab, or a line runs along
 the edge of a package it starts or ends in, or through a package's name tab.
 
+### Component diagrams
+
+The tool is `draw_component_diagram`. It draws components with the interfaces they provide, the artifacts that
+implement them, and the classes that realize them. It takes every element of the package diagram tool, plus
+`lollipop`: a provided interface drawn as a small circle with its name outside (`name_side` puts the name below,
+above, left or right of the circle). The providing component joins the circle with an `association`, drawn without
+an arrowhead in this tool unless `navigable` is given, and each user points at the circle with a `dependency`:
+
+```json
+{
+  "file_name": "components",
+  "elements": [
+    {"kind": "package", "name": "web", "left": 0, "top": 0},
+    {"kind": "component", "name": "OrderController", "in": "web", "left": 20, "top": 44},
+    {"kind": "component", "name": "AdminController", "in": "web", "left": 220, "top": 44},
+    {"kind": "package", "name": "service", "left": 0, "top": 220},
+    {"kind": "component", "name": "OrderService", "in": "service", "left": 110, "top": 324},
+    {"kind": "lollipop", "name": "OrderApi", "in": "service", "left": 70, "top": 264, "name_side": "left"},
+    {"kind": "artifact", "name": "order-service.jar", "left": 400, "top": 324}
+  ],
+  "relations": [
+    {"kind": "association", "from": "OrderService", "to": "OrderApi"},
+    {"kind": "dependency", "from": "OrderController", "to": "OrderApi"},
+    {"kind": "dependency", "from": "AdminController", "to": "OrderApi"},
+    {"kind": "dependency", "from": "order-service.jar", "to": "OrderService", "stereotype": "manifest"}
+  ]
+}
+```
+
+It gets back the same things as the package diagram tool, and for each circle the place of the circle alone next to
+the place of the circle with its name. The checks are the same: a line through a circle or its name fails.
+
+### Deployment diagrams
+
+The tool is `draw_deployment_diagram`. It shows which computers (nodes) the software runs on: components and
+artifacts sit inside nodes with `in`, and a node can sit inside another node. It takes the same elements as the package
+diagram tool. A communication path between nodes is an `association` with the protocol as its `name`. This tool draws
+every association without an arrowhead (between classes too) unless `navigable` says otherwise. A «deploy» arrow from
+an element outside a node is a `dependency` with `"stereotype": "deploy"`:
+
+```json
+{
+  "file_name": "deployment",
+  "elements": [
+    {"kind": "node", "name": "PC", "stereotype": "device", "left": 0, "top": 0, "height": 220},
+    {"kind": "component", "name": "Browser", "in": "PC", "left": 20, "top": 66},
+    {"kind": "node", "name": "App Server", "stereotype": "device", "left": 240, "top": 0, "height": 220},
+    {"kind": "node", "name": "Tomcat", "stereotype": "executionEnvironment", "in": "App Server", "left": 260, "top": 66},
+    {"kind": "component", "name": "OrderService", "in": "Tomcat", "left": 280, "top": 132},
+    {"kind": "node", "name": "DB Server", "stereotype": "device", "left": 620, "top": 0, "height": 220},
+    {"kind": "artifact", "name": "orders.db", "in": "DB Server", "left": 640, "top": 66},
+    {"kind": "artifact", "name": "order.war", "left": 310, "top": 280}
+  ],
+  "relations": [
+    {"kind": "association", "from": "PC", "to": "App Server", "name": "HTTPS"},
+    {"kind": "association", "from": "App Server", "to": "DB Server", "name": "JDBC"},
+    {"kind": "dependency", "from": "order.war", "to": "Tomcat", "stereotype": "deploy"}
+  ]
+}
+```
+
+It gets back the same things as the package diagram tool, and the check fails in the same cases, such as a
+communication path running through a node it does not connect or through an element inside one.
+
 ### Use case diagrams
 
 The tool is `draw_use_case_diagram`. It draws actors, use cases and the system boundary, joined by associations,
@@ -284,6 +348,15 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   선이 가운데가 아니라 탭 오른쪽 몸통의 가운데를 향하므로 그 점도 함께).
   클래스도 검사에 더해, 안의 요소가 바깥 요소의 테두리·이름 탭에 붙거나, 선이 그 끝을 품은 패키지의 테두리를 따라가거나 패키지
   탭을 지나면 불합격이다.
+- **컴포넌트도**는 `draw_component_diagram`으로 그린다. 컴포넌트와 제공 인터페이스, 컴포넌트를 구현하는 아티팩트, 컴포넌트를
+  실현하는 클래스를 그린다. 패키지도 도구가 받는 요소에 더해 `lollipop`(제공 인터페이스 원 — 작은 원과 그 밖에 쓰는
+  이름으로 그린다. 이름 쪽은 `name_side`)을 받는다. 제공하는 컴포넌트는 원과 `association`으로 잇고(이 도구에서는 `navigable`을
+  주지 않으면 화살촉이 없다), 쓰는 쪽은 원으로 `dependency`를 긋는다. 결과는 패키지도와 같고, 원마다 원만의 자리도 함께
+  돌려준다. 검사도 같고, 선이 원이나 그 이름을 지나면 불합격이다.
+- **배치도**(deployment diagram)는 `draw_deployment_diagram`으로 그린다. 소프트웨어(컴포넌트·아티팩트)가 어느 컴퓨터(노드)에서
+  도는지 보인다. 노드 안에 컴포넌트·아티팩트·노드를 `in`으로 넣고, 노드끼리는 통신 경로(`association` — `name`에 HTTPS 같은
+  프로토콜)로 잇고, 노드 밖 요소에서 노드로 «deploy»(`stereotype`이 `deploy`인 `dependency`)를 긋는다. 이 도구는 클래스끼리
+  이은 것까지 모든 연관을 화살촉 없는 실선으로 그린다(필요하면 `navigable`을 준다). 받는 요소·결과·검사는 패키지도와 같다.
 - **유즈케이스도**는 `draw_use_case_diagram`으로 그린다. 액터·유즈케이스·시스템 경계를 그리고, 연관·의존(«include»·«extend»)·
   일반화로 잇는다. 유즈케이스는 `in`으로 시스템 경계 안에 넣고, 액터는 경계 밖에 두어 이름을 사람 모양 옆(`name_side`가 정한
   쪽)에 쓴다. 결과는 패키지도와 같고, 액터는 이름까지 덮는 자리 뒤에 사람 모양 자리를 함께 돌려준다. 검사는 패키지도와 같고,

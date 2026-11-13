@@ -11,8 +11,9 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
-from cysuml import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, guide, packagediagram,
-                    sequencecheck, sequencediagram, server, statediagram, usecasediagram)
+from cysuml import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, componentdiagram,
+                    deploymentdiagram, guide, packagediagram, sequencecheck, sequencediagram, server, statediagram,
+                    usecasediagram)
 from cysuml.canvas import SCALE
 from cysuml.parsing import InputError
 from cysuml.report import Finding
@@ -61,6 +62,8 @@ def image(result):
 TOOLS = [  # 도구 → 필수 입력, 객체 목록 입력, 문자열 목록 입력. 도구를 더하면 줄을 더한다
     ("draw_class_diagram", ["file_name", "classes"], ("classes", "relations"), ()),
     ("draw_package_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_component_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_deployment_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_use_case_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_state_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_activity_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
@@ -69,6 +72,8 @@ TOOLS = [  # 도구 → 필수 입력, 객체 목록 입력, 문자열 목록 �
 EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 더한다
     "order": "draw_class_diagram",
     "packages": "draw_package_diagram",
+    "components": "draw_component_diagram",
+    "deployment": "draw_deployment_diagram",
     "use-cases": "draw_use_case_diagram",
     "order-states": "draw_state_diagram",
     "order-flow": "draw_activity_diagram",
@@ -77,6 +82,8 @@ EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 �
 PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 그 도구 정의(Spec)
     "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, classdiagram.SPEC),
     "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, packagediagram.SPEC),
+    "draw_component_diagram": (componentdiagram.TIPS, boxcheck.KINDS, componentdiagram.SPEC),
+    "draw_deployment_diagram": (deploymentdiagram.TIPS, boxcheck.KINDS, deploymentdiagram.SPEC),
     "draw_use_case_diagram": (usecasediagram.TIPS, boxcheck.KINDS, usecasediagram.SPEC),
     "draw_state_diagram": (statediagram.TIPS, boxcheck.KINDS, statediagram.SPEC),
     "draw_activity_diagram": (activitydiagram.TIPS, activitydiagram.KINDS, activitydiagram.SPEC),
@@ -156,7 +163,8 @@ def test_relation_fields_follow_the_relation_kinds_a_tool_takes():
 
 @pytest.mark.parametrize("name", TRUNK_TOOLS)
 def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
-    assert TRUNK_TOOLS == ["draw_class_diagram", "draw_package_diagram", "draw_use_case_diagram"]  # 상태도·액티비티도는 없다
+    assert TRUNK_TOOLS == ["draw_class_diagram", "draw_package_diagram", "draw_component_diagram", "draw_deployment_diagram",
+                           "draw_use_case_diagram"]  # 상태도·액티비티도는 전이·흐름뿐이라 없다
     # 도구 설명에 관계 필드가 그대로 들어가는 것은 test_each_tool_carries_its_flow_and_tips_…가 본다
     spec = PLACED_TOOLS[name][2]
     trunks = [t for t in spec.relations.values() if t.trunk]
@@ -187,11 +195,12 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
            f"{guide.TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다.")
     for phrase in two:  # 줄기 종류가 하나인 도구(유즈케이스도)에는 두 줄기를 나누는 법이 없다
         assert (phrase in text) == (len(trunks) > 1), phrase
-    # 가운데는 그 도구의 결과에 덧붙는 것으로 셈한다 — 패키지도는 향하는 점, 유즈케이스도는 액터의 모양 자리
+    # 가운데는 그 도구의 결과에 덧붙는 것으로 셈한다 — 패키지를 받는 도구는 향하는 점, 모양 밖 이름이 있는 도구(유즈케이스도의
+    # 액터·컴포넌트도의 막대사탕)는 모양 자리
     aims = any(boxdiagram.aims_off_center(s) for s in spec.shapes.values())
     outside = any(s.outside_name for s in spec.shapes.values())
-    assert ("향하는 점이 덧붙어 있으면 그 점을 쓴다" in text) == aims == (name == "draw_package_diagram")
-    assert ("모양 자리가 덧붙어 있으면 모양 자리로 셈한다" in text) == outside == (name == "draw_use_case_diagram")
+    assert ("향하는 점이 덧붙어 있으면 그 점을 쓴다" in text) == aims == ("package" in spec.shapes)
+    assert ("모양 자리가 덧붙어 있으면 모양 자리로 셈한다" in text) == outside
     assert ('모양 밖 이름은 name_side "left"·"right"로 옆에 쓴다 — 위·아래면 줄기가 이름을 지난다' in text) == outside
 
 
@@ -232,6 +241,8 @@ def middles(name, field, args):
     ("draw_package_diagram", "elements", {"kind": "package"}, "package", [], "generalization", 120, [2, 1, 2]),
     ("draw_package_diagram", "elements", {"kind": "package", "width": 500}, "package", [], "generalization", 120, [2, 2, 2]),
     ("draw_package_diagram", "elements", {"kind": "package"}, "package", [INNER], "generalization", 180, [2, 2, 2]),
+    ("draw_component_diagram", "elements", {"kind": "component"}, "component", [], "generalization", 120, [2, 1, 2]),
+    ("draw_deployment_diagram", "elements", {"kind": "node"}, "node", [], "generalization", 120, [2, 1, 2]),
 ])
 def test_shared_trunk_given_as_the_description_says_passes(tmp_path, name, field, parent, children, more, kind, child_top,
                                                           points):
@@ -401,6 +412,34 @@ def test_shapes_that_aim_aside_are_the_shapes_whose_lines_aim_away_from_the_midd
             l, t, r, b = p.shape_rect
             aside = abs(p.anchor[0] - (l + r) / 2) > 1 or abs(p.anchor[1] - (t + b) / 2) > 1
             assert boxdiagram.aims_off_center(shape) == aside, kind
+
+
+def test_component_description_carries_the_lollipop_its_name_side_and_its_circle_place():
+    # 컴포넌트도는 모양 밖 이름이 있는 제공 인터페이스 원을 받으므로 이름 쪽(바)과 모양 자리 결과 문장을 넣고, 연관 기본 방향은 '없음'이다
+    tool = componentdiagram.TOOL
+    for part in (guide.PLACED_ELEMENTS, guide.NEW_INPUT, guide.NESTING, guide.NAME_SIDE, guide.PLACES_RESULT,
+                 guide.OUTSIDE_PLACES):
+        assert part in tool
+    assert 'kind "lollipop"' in tool and '"to"·"from"·"both"·"none"(기본)' in tool
+
+
+def test_component_tool_returns_the_circle_place_of_a_lollipop(tmp_path):
+    elements = [{"kind": "component", "name": "Order", "left": 0, "top": 0},
+                {"kind": "lollipop", "name": "OrderApi", "left": 160, "top": 14, "name_side": "right"}]
+    relations = [{"kind": "association", "from": "Order", "to": "OrderApi"}]
+    (r,) = run(server.mcp, ("draw_component_diagram", {"file_name": "c", "elements": elements, "relations": relations,
+                                                         "out_dir": str(tmp_path)}))[2]
+    assert not r.is_error and text(r).startswith("합격"), text(r)
+    assert "OrderApi(160, 14, " in text(r) and ", 모양 160, 14, 20×20)" in text(r)
+
+
+def test_deployment_diagram_always_carries_its_english_name():
+    # 이 레포는 "배치"를 자리 잡기 뜻으로도 쓰므로, 도구 설명·안내문·README 한국어 부분은 그림 이름에 늘 영어 이름을 붙인다
+    korean = README.read_text(encoding="utf-8").split("\n## 한국어\n", 1)[1]
+    for text in (deploymentdiagram.TOOL, server.INSTRUCTIONS, korean):
+        assert "배치도" in text
+        assert not re.search(r"배치도(?!(\*\*)?\(deployment diagram\))", text)
+    assert deploymentdiagram.TIPS.startswith("배치도(deployment diagram) 자리 잡기 요령:")
 
 
 def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):
