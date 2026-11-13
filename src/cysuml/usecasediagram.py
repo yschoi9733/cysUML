@@ -44,25 +44,31 @@ class ActorShape(Shape):
         return ACTOR_FIGURE
 
     def anchor(self, e: Element, rect: Box) -> Point:
-        """사람 모양 가운데보다 반 픽셀 위. 높이가 홀수라 가운데는 반 픽셀에 걸리는데, 그러면 정수 좌표에 놓은 타원과 가로로
-        맞춰도 선이 반 픽셀 기울어 계단이 보인다."""
-        return (rect[0] + rect[2]) / 2, rect[1] + ACTOR_FIGURE[1] // 2
+        """사람 모양 가운데를 정수 좌표로 내린 점. 높이가 홀수이고 모양 밖 이름 때문에 모양 자리가 반 픽셀에 놓이기도 해서 가운데는
+        반 픽셀에 걸릴 수 있는데, 그러면 정수 좌표에 놓은 유즈케이스와 가로·세로로 맞춰도 선이 반 픽셀 기울어 계단이 보인다."""
+        return math.floor((rect[0] + rect[2]) / 2), math.floor((rect[1] + rect[3]) / 2)
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
         l, t, r, _ = p.shape_rect
         draw_actor(c, (l + r) / 2, t, p.key)
 
 
+def _even(v: float) -> int:
+    """v 이상인 가장 작은 짝수."""
+    return 2 * math.ceil(v / 2)
+
+
 class UseCaseShape(Shape):
     """유즈케이스: 이름을 안 가운데에 쓴 타원. 여백을 더한 이름 글자 상자를 가로·세로 √2배 하면 그 상자의 네 모서리가 타원 위에
-    놓이므로, 타원은 그 크기(최소 USE_CASE_MIN)로 이름을 덮는다. 선 끝과 겹침은 타원 테두리로 본다."""
+    놓이므로, 타원은 그 크기(최소 USE_CASE_MIN)로 이름을 덮는다. 폭·높이는 짝수로 올려 정수 좌표에 놓으면 가운데도 정수다(액터와
+    가로·세로로 맞춘 선이 곧게). 선 끝과 겹침은 타원 테두리로 본다."""
 
     stereotyped = False
 
     def size(self, e: Element) -> tuple[float, float]:
         w = _lines_width(e.name) + 2 * USE_CASE_PAD[0]
         h = LABEL_LINE * len(e.name) + 2 * USE_CASE_PAD[1]
-        return max(USE_CASE_MIN[0], math.ceil(math.sqrt(2) * w)), max(USE_CASE_MIN[1], math.ceil(math.sqrt(2) * h))
+        return max(USE_CASE_MIN[0], _even(math.sqrt(2) * w)), max(USE_CASE_MIN[1], _even(math.sqrt(2) * h))
 
     def border(self, e: Element, rect: Box) -> Border:
         l, t, r, b = rect

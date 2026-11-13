@@ -239,12 +239,24 @@ def test_line_through_the_actor_name_fails():
     assert kinds(r) == ["line_through_name"] and r.failures[0].elements == ("고객->주문한다", "고객")
 
 
-def test_actor_line_aims_at_a_whole_pixel_so_level_lines_stay_level():
-    # 사람 모양 높이(37)는 홀수 — 정수 top의 액터와 높이가 짝수인 타원을 가로로 맞추면 선이 수평이다
-    d = draw([el("actor", "고객", 0, 7, name_side="left"), el("use_case", "주문한다", 200, 0)],
-             [rel("association", "고객", "주문한다")])
-    (pts,) = (p.points for p in d.layout.relations)
-    assert pts[0][1] == pts[-1][1] == 25
+@pytest.mark.parametrize("actor_name, use_case_name, top", [
+    ("고객", "주문한다", 7),                                   # 사람 모양 높이 37은 홀수
+    ("고객", ["주문 내역을", "기간별로", "조회한다"], 23),         # 세 줄 이름 타원 높이 √2·57 → 81을 짝수로
+    (["가", "나", "다", "라"], "주문한다", -5),                   # 네 줄 이름(왼쪽)이라 모양 자리가 반 픽셀에 놓인다
+])
+def test_lines_between_actors_and_use_cases_at_whole_pixels_stay_straight(actor_name, use_case_name, top):
+    # 정수 좌표에 놓은 액터와 유즈케이스를 가로로 맞추면 선이 수평이고, 세로로 맞추면 수직이다
+    actor = el("actor", actor_name, 0, top, id="a", name_side="left")
+    level = draw([actor, el("use_case", use_case_name, 200, 0, id="u")], [rel("association", "a", "u")])
+    use_case = placed(level, "u")
+    (pts,) = (p.points for p in level.layout.relations)
+    assert pts[0][1] == pts[-1][1] == (use_case.rect[1] + use_case.rect[3]) / 2
+    figure = placed(level, "a").shape_rect
+    below = draw([actor, el("use_case", use_case_name, math.floor((figure[0] + figure[2]) / 2) - use_case.width / 2, 200,
+                            id="u")], [rel("association", "a", "u")])
+    (pts,) = (p.points for p in below.layout.relations)
+    assert pts[0][0] == pts[-1][0]
+    assert all(v == int(v) for v in use_case.rect)
 
 
 def test_places_list_the_actor_figure():
