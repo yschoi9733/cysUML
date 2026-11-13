@@ -12,7 +12,7 @@ from .boxcheck import KINDS
 from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Spec
 from .canvas import SCALE
 from .classdiagram import RELATIONS
-from .guide import (AIM_PLACES, COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, PLACES_RESULT, flow,
+from .guide import (COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, PLACES_RESULT, aim_places, flow,
                     relation_fields)
 from .shapes import SHAPES
 
@@ -52,7 +52,7 @@ TOOL = f"""패키지도를 그려 PNG 파일로 저장하고, 검사 결과와 �
 
 결과
 {PLACES_RESULT}
-{AIM_PLACES}
+{aim_places(SPEC)}
 {IMAGE_RESULT}
 - elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
 그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.

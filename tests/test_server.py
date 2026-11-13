@@ -133,8 +133,9 @@ def test_relation_fields_follow_the_relation_kinds_a_tool_takes():
     assert '  - kind(필수): "association"·"dependency"·"generalization".' in text
     assert "의존·상속은 from이 의존하는 쪽·자식이고 화살촉·삼각형이 to 쪽에 붙는다." in text and "마름모" not in text
     assert '연관만 쓴다. navigable은 화살촉을 둘 쪽 "to"·"from"·"both"·"none"(기본)이다.' in text
-    # 공유 줄기는 받는 관계 종류(상속)만 적고, 받는 관계가 없는 도구에는 넣지 않는다
+    # 공유 줄기는 받는 관계 종류(상속)만 적고(종류가 하나면 두 줄기를 나누는 법은 없다), 받는 관계가 없는 도구에는 넣지 않는다
     assert "  - 공유 줄기: 같은 부모(to)로 가는 상속끼리는 여러 선을" in text and "실체화" not in text
+    assert "함께 오면" not in text
     plain = boxdiagram.Spec(classdiagram.CLASS_SHAPES, {k: classdiagram.RELATIONS[k] for k in kinds[:2]}, navigable="none")
     assert "공유 줄기" not in guide.relation_fields(plain)
 
@@ -148,18 +149,35 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     noun, edge = spec.words.noun, spec.words.edge
     for phrase in ("  - 공유 줄기: 같은 부모(to)로 가는 상속끼리, 실체화끼리는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 쓰게 "
                    "그려도 된다. 삼각형이 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다",
-                   "자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다",
-                   f"(가운데 x는 결과의 {noun} 자리에서 왼 + 폭/2",
+                   "부모를 위에, 자식들을 그 아래에 두고 이렇게 준다:",
+                   f"    - 가운데 x·y: 결과의 {noun} 자리에서 왼 + 폭/2, 위 + 높이/2",
+                   f"    - 줄기 높이 y는 부모 {noun}의 아래 {edge}",
+                   f"가장 위 자식 {noun}의 위 {edge} 사이 가운데쯤에 정한다",
+                   f"부모 아래 {edge}에서 삼각형 길이 {boxdiagram.TRIANGLE[0]}px보다 가까우면 입력 오류다",
+                   "    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다",
                    "자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다",
-                   f"가장 위 자식 {noun}의 위 {edge} 사이 가운데쯤에 둔다",
-                   f"부모 아래 {edge}에서 삼각형 길이 {boxdiagram.TRIANGLE[0]}px보다 가까우면 입력 오류다"):
+                   "    - 같은 부모로 상속·실체화가 함께 오면 종류마다 줄기를 따로 둔다",
+                   f"y와 {guide.TRUNK_SPLIT}px 이상 떨어진 줄기 높이 y2를 정해",
+                   f"[자식 가운데 x, y2], [부모 오른쪽 {edge}의 x(왼 + 폭) + {guide.TRUNK_SIDE}, y2], "
+                   f"[부모 오른쪽 {edge}의 x(왼 + 폭) + {guide.TRUNK_SIDE}, 부모 가운데 y] 세 점"):
         assert phrase in text, phrase
     # 새 도구는 결과에 덧붙는 모양 자리(모양 밖 이름)와 향하는 점(패키지)을 함께 적는다
-    assert ("모양 자리가 덧붙어 있으면 모양 자리로 셈하고, 향하는 점이 덧붙어 있으면 그 x를 쓴다" in text) == spec.extended
+    assert ("모양 자리가 덧붙어 있으면 모양 자리로 셈하고, 향하는 점이 덧붙어 있으면 그 점을 쓴다" in text) == spec.extended
 
 
-PLACE = re.compile(r"(\w+)\((-?[\d.]+), (-?[\d.]+), ([\d.]+)×([\d.]+)(?:, 향하는 점 (-?[\d.]+), -?[\d.]+)?\)")
+PLACE = re.compile(r"(\w+)\((-?[\d.]+), (-?[\d.]+), ([\d.]+)×([\d.]+)(?:, 향하는 점 (-?[\d.]+), (-?[\d.]+))?\)")
 INNER = {"kind": "class", "name": "Inner", "in": "P", "left": 300, "top": 44}  # 부모 패키지를 오른쪽·아래로 넓힌다
+
+
+def middles(name, args):
+    """도구를 불러 결과 글의 자리에서 요소마다 (자리, 가운데 x, 가운데 y)를 읽는다 — 향하는 점이 덧붙어 있으면 그 점이 가운데다."""
+    (r,) = run(server.mcp, (name, args))[2]
+    out = {}
+    for key, *nums in PLACE.findall(text(r)):
+        left, top, width, height = map(float, nums[:4])
+        aim = tuple(map(float, nums[4:])) if nums[4] else (left + width / 2, top + height / 2)
+        out[key] = ((left, top, width, height), *aim, bool(nums[4]))
+    return out
 
 
 @pytest.mark.parametrize("name, field, parent, children, more, kind, child_top, points", [
@@ -179,19 +197,47 @@ def test_shared_trunk_given_as_the_description_says_passes(tmp_path, name, field
               for i, left in enumerate((0, 200, 400))]
     boxes[0].setdefault("width", 140)
     args = {"file_name": "trunk", field: boxes, "out_dir": str(tmp_path)}
-    (first,) = run(server.mcp, (name, args))[2]
-    places = {key: (float(left), float(top), float(width), float(height), aim)
-              for key, left, top, width, height, aim in PLACE.findall(text(first))}
-    assert bool(places["P"][4]) == (parent["kind"] == "package")
-    middle = {key: float(aim) if aim else left + width / 2 for key, (left, top, width, height, aim) in places.items()}
-    parent_bottom = places["P"][1] + places["P"][3]
+    m = middles(name, args)
+    assert m["P"][3] == (parent["kind"] == "package")
+    (_, parent_top, _, parent_height), px = m["P"][0], m["P"][1]
+    parent_bottom = parent_top + parent_height
     y = (parent_bottom + child_top) / 2
     assert y - parent_bottom > boxdiagram.TRIANGLE[0]
-    via = {k: [[middle["P"], y]] if middle[k] == middle["P"] else [[middle[k], y], [middle["P"], y]] for k in ("C0", "C1", "C2")}
+    via = {k: [[px, y]] if m[k][1] == px else [[m[k][1], y], [px, y]] for k in ("C0", "C1", "C2")}
     assert [len(v) for v in via.values()] == points
     relations = [{"kind": kind, "from": k, "to": "P", "via": v} for k, v in via.items()]
     (r,) = run(server.mcp, (name, {**args, "relations": relations}))[2]
     assert not r.is_error and text(r).startswith("합격"), text(r)
+
+
+@pytest.mark.parametrize("name, field", [("draw_class_diagram", "classes"), ("draw_package_diagram", "elements")])
+@pytest.mark.parametrize("kinds", [("realization", "realization", "generalization", "generalization"),
+                                   ("generalization", "realization", "generalization", "realization")])
+def test_two_kinds_to_one_parent_given_as_the_description_says_pass(tmp_path, name, field, kinds):
+    """인터페이스 P를 클래스가 실체화하고 인터페이스가 상속한다 — 첫 종류는 아래 변에, 다른 종류는 높이를 달리한 줄기로 오른쪽 변에."""
+    boxes = [{"kind": "interface", "name": "P", "left": 200, "top": 0, "width": 140}]
+    boxes += [{"kind": "class" if k == "realization" else "interface", "name": f"C{i}", "left": left, "top": 160,
+               "width": 140} for i, (k, left) in enumerate(zip(kinds, (0, 200, 400, 600)))]
+    args = {"file_name": "trunk", field: boxes, "out_dir": str(tmp_path)}
+    m = middles(name, args)
+    (left, top, width, height), px, py, _ = m["P"]
+    y = (top + height + 160) / 2
+    y2 = y + guide.TRUNK_SPLIT
+    side = left + width + guide.TRUNK_SIDE
+    relations = []
+    for i, k in enumerate(kinds):
+        cx = m[f"C{i}"][1]
+        if k == kinds[0]:
+            via = [[px, y]] if cx == px else [[cx, y], [px, y]]
+        else:
+            via = [[cx, y2], [side, y2], [side, py]]
+        relations.append({"kind": k, "from": f"C{i}", "to": "P", "via": via})
+    (r,) = run(server.mcp, (name, {**args, "relations": relations}))[2]
+    assert not r.is_error and text(r).startswith("합격"), text(r)
+    # 두 종류를 한 줄기로 모으면(오른쪽 변으로 나누지 않으면) 불합격이다
+    together = [{**rel, "via": [[m[rel["from"]][1], y], [px, y]] if m[rel["from"]][1] != px else [[px, y]]} for rel in relations]
+    (r,) = run(server.mcp, (name, {**args, "relations": together}))[2]
+    assert text(r).startswith("불합격")
 
 
 def test_relation_fields_say_where_lines_start_for_each_tool():
@@ -206,9 +252,13 @@ def test_relation_fields_say_where_lines_start_for_each_tool():
 def test_tools_whose_shapes_aim_off_center_tell_that_the_result_carries_the_aim_point():
     _, tools, _ = run(server.mcp)
     for name, (_, _, spec) in PLACED_TOOLS.items():
-        aims = any(type(s).anchor is not boxdiagram.Shape.anchor for s in spec.shapes.values())
-        assert (guide.AIM_PLACES in tools[name].description) == aims, name
-    assert guide.AIM_PLACES in packagediagram.TOOL
+        sentence = guide.aim_places(spec)
+        if sentence is None:
+            assert "향하는 점" not in tools[name].description, name
+        else:
+            assert sentence in tools[name].description, name
+    assert guide.aim_places(classdiagram.SPEC) is None
+    assert '선이 테두리 가운데가 아닌 점을 향하는 요소(kind "package")는' in guide.aim_places(packagediagram.SPEC)
 
 
 def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):

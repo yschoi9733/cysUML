@@ -188,6 +188,8 @@ class RelationType:
     def __post_init__(self):
         if self.navigable and self.end is not None:
             raise ValueError("방향을 받는 관계는 to 쪽 끝 모양을 따로 두지 않는다(화살촉이 겹친다)")
+        if self.trunk and self.end is None:
+            raise ValueError("공유 줄기를 받는 관계는 자식 선들이 함께 쓸 to 쪽 끝 모양이 있어야 한다")
 
 
 @dataclass(frozen=True, eq=False)

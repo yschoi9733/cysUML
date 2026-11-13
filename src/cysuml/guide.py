@@ -13,12 +13,14 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from .boxcheck import KINDS
-from .boxdiagram import ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec, Words, josa
+from .boxdiagram import ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Shape, Spec, Words, josa
 from .canvas import MIN_SCALE, SCALE
 from .report import fmt_num
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
 DEFAULT_DIR = "diagrams"
+TRUNK_SPLIT = 20  # 같은 부모로 오는 종류가 다른 두 줄기의 높이 차(px) — 가로 줄기가 포개지지 않게
+TRUNK_SIDE = 30  # 둘째 줄기를 부모 옆 변으로 들일 때 그 변에서 떼는 거리(px) — 끝 구간이 삼각형 길이(18)보다 길게
 
 KIND_NAMES = {  # 불합격 종류(boxcheck.KINDS)를 도구 설명에 쓰는 말. "요소"는 도구의 말(클래스도는 상자)로 바꿔 쓴다(kind_names)
     "box_overlap": "요소끼리 겹치거나 붙음",
@@ -73,8 +75,17 @@ PLACES_RESULT = ("- 글: 검사 결과, 요소마다 그린 자리(열쇠와 왼
                  "입력에 넣으면 요소가 움직이지 않는다.")
 OUTSIDE_PLACES = ("  모양 밖 이름이 있는 요소의 자리는 모양과 이름을 함께 덮고, 그 뒤에 모양 자리를 \"모양 왼, 위, 폭×높이\"로 "
                   "덧붙인다(꺾는 점을 모양 둘레에 줄 때 쓴다).")  # 모양 밖 이름이 있는 모양을 받는 도구만 PLACES_RESULT 뒤에 붙인다
-AIM_PLACES = ("  선이 테두리 가운데가 아닌 점을 향하는 요소(패키지)는 그 뒤에 그 점을 \"향하는 점 x, y\"로 덧붙인다(꺾는 점을 "
-              "그 점의 위아래나 옆에 줄 때 쓴다).")  # 그런 모양(Shape.anchor)을 받는 도구만 PLACES_RESULT 뒤에 붙인다
+
+
+def aim_places(spec: Spec) -> Optional[str]:
+    """선이 테두리 가운데가 아닌 점을 향하는 모양(Shape.anchor를 고친 모양)이 있으면 결과에 그 점을 덧붙인다는 문장(PLACES_RESULT 뒤에
+    붙인다). 그런 모양이 없는 도구는 None."""
+    kinds = [k for k, s in spec.shapes.items() if type(s).anchor is not Shape.anchor]
+    if not kinds:
+        return None
+    named = "·".join(f'"{k}"' for k in kinds)
+    return (f"  선이 테두리 가운데가 아닌 점을 향하는 요소(kind {named})는 그 뒤에 그 점을 \"향하는 점 x, y\"로 덧붙인다(꺾는 점을 "
+            "그 점의 위아래나 옆에 줄 때 쓴다).")
 
 MEMBERS = """속성·연산은 한 줄 문자열(그대로 쓴다)이나 객체다. 속성 객체는 name(필수)·type·default·visibility(기본 "-")·static, \
 연산 객체는 name(필수)·params(문자열 목록)·returns·visibility(기본 "+")·static. visibility는 "+"·"-"·"#"·"~"·""(안 씀)이고, \
@@ -170,13 +181,22 @@ def _trunk(types: list[RelationType], words: Words, box: bool) -> str:
     head = _joined(t.end.name for t in types if t.end is not None)
     length = fmt_num(max(t.end.length for t in types if t.end is not None))
     noun, edge = words.noun, words.edge
-    x = f"결과의 {noun} 자리에서 왼 + 폭/2"
-    if not box:
-        x += " — 모양 자리가 덧붙어 있으면 모양 자리로 셈하고, 향하는 점이 덧붙어 있으면 그 x를 쓴다"
     ga = josa(head, "이", "가")
-    return (f"  - 공유 줄기: 같은 부모(to)로 가는 {pairs}는 여러 선을 한 줄기로 모아 {head} 하나를 함께 쓰게 그려도 된다. "
-            f"{head}{ga} 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다(종류가 다른 선을 섞거나 {head}{ga} 조금이라도 "
-            f"어긋나면 불합격이다). 줄기 높이 y를 하나 정하고, 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 "
-            f"준다(가운데 x는 {x}). 마지막 점이 모두 같아 {head}{ga} 한 자리에 그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 "
-            f"같아지니 [부모 가운데 x, y] 하나만 준다. y는 부모 {noun}의 아래 {edge}{josa(edge, '과', '와')} 가장 위 자식 {noun}의 위 "
-            f"{edge} 사이 가운데쯤에 둔다 — 부모 아래 {edge}에서 {head} 길이 {length}px보다 가까우면 입력 오류다.")
+    middle = f"결과의 {noun} 자리에서 왼 + 폭/2, 위 + 높이/2"
+    if not box:
+        middle += " — 모양 자리가 덧붙어 있으면 모양 자리로 셈하고, 향하는 점이 덧붙어 있으면 그 점을 쓴다"
+    lines = [f"  - 공유 줄기: 같은 부모(to)로 가는 {pairs}는 여러 선을 한 줄기로 모아 {head} 하나를 함께 쓰게 그려도 된다. "
+             f"{head}{ga} 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다(종류가 다른 선을 섞거나 {head}{ga} 조금이라도 "
+             f"어긋나면 불합격이다). 부모를 위에, 자식들을 그 아래에 두고 이렇게 준다:",
+             f"    - 가운데 x·y: {middle}.",
+             f"    - 줄기 높이 y는 부모 {noun}의 아래 {edge}{josa(edge, '과', '와')} 가장 위 자식 {noun}의 위 {edge} 사이 가운데쯤에 "
+             f"정한다. 부모 아래 {edge}에서 {head} 길이 {length}px보다 가까우면 입력 오류다.",
+             f"    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다. 마지막 점이 모두 같아 {head}{ga} 한 자리에 "
+             f"그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다."]
+    if len(types) > 1:
+        labels = _joined(t.label for t in types)
+        side = f"부모 오른쪽 {edge}의 x(왼 + 폭) + {TRUNK_SIDE}"
+        lines.append(f"    - 같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오면 종류마다 줄기를 따로 둔다. 한 종류는 위대로 아래 "
+                     f"{edge}에 모으고, 다른 종류는 y와 {TRUNK_SPLIT}px 이상 떨어진 줄기 높이 y2를 정해 자식마다 via에 "
+                     f"[자식 가운데 x, y2], [{side}, y2], [{side}, 부모 가운데 y] 세 점을 주어 부모 오른쪽 {edge}에 모은다.")
+    return "\n".join(lines)
