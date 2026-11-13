@@ -265,8 +265,13 @@ def test_only_classes_realize_components_quietly(source):
     # 아티팩트는 «manifest» 의존으로 컴포넌트를 구현한다 — 클래스·추상 클래스 밖의 실체화는 알리고, 그 상속 오류도 실체화를 권하지 않는다
     elements = [el(source, "a", 0, 250), el("component", "c", 0)]
     (n,) = report(P, elements, [rel("realization", "a", "c")]).notices
-    assert n.problem == "실체화가 가는 쪽이 인터페이스가 아니다(to 'c': 'component')."
-    if source != "component":
+    if source == "component":  # 같은 종류끼리는 상속을 뜻했는지 묻는다
+        assert n.problem == "실체화가 가는 쪽이 인터페이스가 아니다(to 'c': 'component')."
+        assert n.hint.startswith("상속을 뜻했으면 kind를 'generalization'으로")
+    else:  # 컴포넌트는 실체화가 가는 종류다 — 걸린 것은 하는 쪽 종류다
+        assert n.problem == f"실체화를 하는 쪽이 to를 실현하지 않는 종류다(from 'a': {source!r}, to 'c': 'component')."
+        assert n.hint.startswith("컴포넌트를 실현하는 것은 클래스다 — 아티팩트가 컴포넌트를 구현하는 것이면 dependency에 "
+                                 "stereotype 'manifest'를 달고")
         (p,) = problems(P, elements, [rel("generalization", "a", "c")])
         assert p.endswith("from·to나 요소의 kind를 고친다")
     assert report(P, [el("abstract", "a", 0, 250), el("component", "c", 0)], [rel("realization", "a", "c")]).notices == ()
@@ -290,6 +295,24 @@ def test_inheritance_hint_is_left_out_when_the_same_inheritance_already_exists()
     assert n.hint.startswith("같은 from·to의 generalization이 이미 있다 — ") and n.hint.endswith("이 실체화를 지운다.")
 
 
+@pytest.mark.parametrize("realization, fix", [
+    (("A", "I"), "같은 from·to의 realization이 이미 있다 — 이 상속을 지운다"),
+    (("I", "A"), "인터페이스를 구현하는 것이면 kind를 'realization'으로 바꾼다"),  # 거꾸로 가는 실체화는 다른 선이라 바꿔도 된다
+])
+def test_realization_hint_of_an_inheritance_error_is_left_out_when_that_realization_exists(realization, fix):
+    # 클래스 A -> 인터페이스 I 상속을 실체화로 바꾸라고 하되, 같은 실체화가 이미 있으면 선이 겹치니 상속을 지우라고 한다
+    found = class_problems([box("A", 0), box("I", 300, kind="interface")],
+                           [rel("realization", *realization), rel("generalization", "A", "I")])
+    assert found[-1].endswith(fix), found
+
+
+def test_reversed_realization_hint_is_left_out_when_the_reversed_realization_exists():
+    # 인터페이스 I -> 클래스 A 상속은 거꾸로 적은 실체화일 수 있는데, A -> I 실체화가 이미 있으면 상속을 지우라고 한다
+    (p,) = class_problems([box("A", 0), box("I", 300, kind="interface")],
+                          [rel("realization", "A", "I"), rel("generalization", "I", "A")])
+    assert p.endswith("거꾸로 가는 realization이 이미 있다 — 이 상속을 지운다")
+
+
 def test_realization_hint_in_tools_with_components_names_component_realization():
     r = report(D, [el("class", "Impl", 0, 250), el("node", "x", 0)], [rel("realization", "Impl", "x")])
     (n,) = r.notices
@@ -306,12 +329,15 @@ def test_packages_are_never_an_end_of_inheritance(module, source, target, end):
         "«import» 등은 stereotype으로 단다)",)
 
 
-@pytest.mark.parametrize("source, target, end", [("lollipop", "lollipop", "a"), ("interface", "lollipop", "b"),
-                                                 ("lollipop", "class", "a")])
-def test_provided_interface_balls_are_never_an_end_of_inheritance(source, target, end):
+@pytest.mark.parametrize("source, target, end, fix", [
+    ("lollipop", "lollipop", "a", "인터페이스 사이 상속은 kind 'interface' 상자끼리 긋는다"),
+    ("interface", "lollipop", "b", "인터페이스 사이 상속은 kind 'interface' 상자끼리 긋는다"),
+    # 원 -> 클래스 상속은 클래스가 원을 구현하는 실체화를 거꾸로 적었을 수 있다
+    ("lollipop", "class", "a", "방향이 거꾸로인 실체화를 뜻했으면 from과 to를 바꾸고 kind를 'realization'으로 바꾼다"),
+])
+def test_provided_interface_balls_are_never_an_end_of_inheritance(source, target, end, fix):
     assert problems(CD, [el(source, "a", 0), el(target, "b", 300)], [rel("generalization", "a", "b")]) == (
-        f"relations[0]: 제공 인터페이스 원({end!r})은 상속의 끝이 될 수 없다 — 인터페이스 사이 상속은 kind 'interface' 상자끼리 "
-        "긋는다",)
+        f"relations[0]: 제공 인터페이스 원({end!r})은 상속의 끝이 될 수 없다 — {fix}",)
 
 
 @pytest.mark.parametrize("source", ["class", "component"])

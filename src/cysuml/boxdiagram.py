@@ -589,7 +589,7 @@ class _Reader(Reader):
         if source is not None and source == target:
             if t is not None and not t.reflexive:
                 self.fail(path, f"{t.label}{josa(t.label, '은', '는')} 자기 자신으로 갈 수 없다 — from과 to를 다른 "
-                                f"{spec.words.noun}로 고친다")
+                                f"{spec.words.noun}{josa(spec.words.noun, '으로', '로')} 고친다")
             elif len(via) < 2:
                 self.fail(path, "자기 자신으로 가는 관계는 꺾는 점(via)이 둘 이상 있어야 고리로 그릴 수 있다")
         if len(self.problems) > before:

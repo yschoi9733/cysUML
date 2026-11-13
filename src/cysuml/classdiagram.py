@@ -241,16 +241,20 @@ INTERFACES = ("interface", "lollipop")  # 실체화의 from이 되면 알리는 
 
 class Realized(NamedTuple):
     """실체화가 가도 알리지 않는 요소 종류의 정의. doers는 그 실체화를 해도 되는 종류다 — None이면 INTERFACES와 NOT_INHERITED(이 둘이
-    하는 실체화는 늘 알린다) 밖의 모든 종류. meant는 이 종류로 가는 틀린 상속을 실체화로 고치라고 할 때의 앞말이다."""
+    하는 실체화는 늘 알린다) 밖의 모든 종류. meant는 이 종류로 가는 틀린 상속을 실체화로 고치라고 할 때의 앞말, others는 doers 밖의
+    종류가 이 종류를 실체화했을 때의 고치는 법이다."""
 
     doers: Optional[tuple[str, ...]]
     meant: str
+    others: str = ""
 
 
 REALIZED = {
     "interface": Realized(None, "인터페이스를 구현하는 것이면"),
     "lollipop": Realized(None, "인터페이스를 구현하는 것이면"),
-    "component": Realized(("class", "abstract"), "클래스가 컴포넌트를 실현하는 것이면"),  # 아티팩트는 «manifest» 의존으로 잇는다
+    "component": Realized(("class", "abstract"), "클래스가 컴포넌트를 실현하는 것이면",
+                          "컴포넌트를 실현하는 것은 클래스다 — 아티팩트가 컴포넌트를 구현하는 것이면 dependency에 stereotype "
+                          "'manifest'를 달고, 다른 뜻이면 dependency를 쓴다."),
 }
 
 
@@ -312,12 +316,13 @@ class ClassRules(Rules):
         parents: dict[str, list[str]] = {}  # 오류 없는 상속(자식 → 부모들)
         inherits: list[tuple[str, B.Relation]] = []
         realizations: list[tuple[str, B.Relation, str, str]] = []
+        realized = {(rel.source, rel.target) for _, rel in relations if rel.kind == REALIZATION}
         for path, rel in relations:
             s, t = kinds.get(rel.source), kinds.get(rel.target)
             if s is None or t is None or rel.source == rel.target:
                 continue
             if rel.kind == GENERALIZATION:
-                if self._generalization(r, path, rel, s, t):
+                if self._generalization(r, path, rel, s, t, realized):
                     parents.setdefault(rel.source, []).append(rel.target)
                     inherits.append((path, rel))
             elif rel.kind == REALIZATION:
@@ -338,26 +343,26 @@ class ClassRules(Rules):
         return [n for n in found if n is not None]
 
     @staticmethod
-    def _generalization(r: Reader, path: str, rel: B.Relation, s: str, t: str) -> bool:
-        """상속의 두 끝 종류를 본다. 맞으면 True, 틀렸으면 알리고 False."""
-        why = REALIZED[t].meant if _realizable(s, t) else None
-        to_realization = f"{why} kind를 'realization'으로 바꾼다"
+    def _generalization(r: Reader, path: str, rel: B.Relation, s: str, t: str, realized: set[tuple[str, str]]) -> bool:
+        """상속의 두 끝 종류를 본다. 맞으면 True, 틀렸으면 알리고 False. 실체화를 뜻했을 수 있으면(그 실체화가 알림 없이 받아지면)
+        실체화로 고치라고 하되, 그 실체화가 이미 있으면(realized — 실체화의 (from, to)) 선이 겹치니 이 상속을 지우라고 한다."""
+        if _realizable(s, t):
+            fix = ("같은 from·to의 realization이 이미 있다 — 이 상속을 지운다" if (rel.source, rel.target) in realized
+                   else f"{REALIZED[t].meant} kind를 'realization'으로 바꾼다")
+        elif _realizable(t, s):  # 인터페이스 -> 클래스처럼 실체화를 거꾸로 적었을 수 있다
+            fix = ("거꾸로 가는 realization이 이미 있다 — 이 상속을 지운다" if (rel.target, rel.source) in realized
+                   else "방향이 거꾸로인 실체화를 뜻했으면 from과 to를 바꾸고 kind를 'realization'으로 바꾼다")
+        else:
+            fix = None
         for key, kind in ((rel.source, s), (rel.target, t)):
             if kind in NOT_INHERITED:
-                name, fix = NOT_INHERITED[kind]
-                r.fail(path, f"{name}({_show(key)}){B.josa(name, '은', '는')} 상속의 끝이 될 수 없다 — "
-                             f"{to_realization if why else fix}")
+                name, default = NOT_INHERITED[kind]
+                r.fail(path, f"{name}({_show(key)}){B.josa(name, '은', '는')} 상속의 끝이 될 수 없다 — {fix or default}")
                 return False
         if _same_kind(s, t):
             return True
-        if why:
-            tail = f". {to_realization}"
-        elif _realizable(t, s):  # 인터페이스 -> 클래스처럼 실체화를 거꾸로 적었을 수 있다
-            tail = ". 방향이 거꾸로인 실체화를 뜻했으면 from과 to를 바꾸고 kind를 'realization'으로 바꾼다"
-        else:
-            tail = ". from·to나 요소의 kind를 고친다"
         r.fail(path, f"상속의 두 끝 종류가 다르다({_end('from', rel.source, s)}, {_end('to', rel.target, t)}) — 상속은 같은 "
-                     f"종류끼리 긋는다(class와 abstract는 같은 종류로 친다){tail}")
+                     f"종류끼리 긋는다(class와 abstract는 같은 종류로 친다). {fix or 'from·to나 요소의 kind를 고친다'}")
         return False
 
     @staticmethod
@@ -384,6 +389,9 @@ class ClassRules(Rules):
         elif s in NOT_INHERITED:
             name, fix = NOT_INHERITED[s]
             problem, hint = f"{name}({_show(rel.source)}){B.josa(name, '은', '는')} 실체화하지 않는다.", f"{fix}."
+        elif t in REALIZED and not _realizable(s, t) and not _same_kind(s, t):  # 하는 쪽 종류가 아니다(아티팩트 -> 컴포넌트)
+            problem = f"실체화를 하는 쪽이 to를 실현하지 않는 종류다({_end('from', rel.source, s)}, {_end('to', rel.target, t)})."
+            hint = REALIZED[t].others or _elsewhere(spec, s, t)
         elif not _realizable(s, t):
             problem = f"실체화가 가는 쪽이 인터페이스가 아니다({_end('to', rel.target, t)})."
             if not _same_kind(s, t):
@@ -397,7 +405,8 @@ class ClassRules(Rules):
         return Notice(path, (rel.source, rel.target), problem, hint)
 
     def guide(self, spec: Spec) -> str:
-        """따옴표 친 종류 이름 바로 뒤에는 받침에 따라 갈리는 조사를 붙이지 않는다(_end와 같은 까닭)."""
+        """따옴표 친 종류 이름 바로 뒤에는 받침에 따라 갈리는 조사(은·는·이·가·을·를·으로·로)를 붙이지 않는다(_end와 같은 까닭).
+        서술하는 '이고'·'인'은 어느 말 뒤에도 쓸 수 있어 괜찮다."""
         def quoted(kinds) -> str:
             return "·".join(f'"{k}"' for k in dict.fromkeys(kinds) if k in spec.shapes)
 
