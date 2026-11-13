@@ -11,9 +11,10 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
-from cysuml import (boxcheck, boxdiagram, classcheck, classdiagram, guide, packagediagram, sequencecheck, sequencediagram,
-                    server, usecasediagram)
+from cysuml import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, guide, packagediagram,
+                    sequencecheck, sequencediagram, server, statediagram, usecasediagram)
 from cysuml.canvas import SCALE
+from cysuml.parsing import InputError
 from cysuml.report import Finding
 
 ORDER = [{"name": "Order", "left": 0, "top": 0}, {"name": "Customer", "left": 200, "top": 0}]
@@ -61,19 +62,27 @@ TOOLS = [  # 도구 → 필수 입력, 객체 목록 입력, 문자열 목록 �
     ("draw_class_diagram", ["file_name", "classes"], ("classes", "relations"), ()),
     ("draw_package_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_use_case_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_state_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_activity_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_sequence_diagram", ["file_name", "participants"], ("participants", "messages", "frames"), ("notes",)),
 ]
 EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 더한다
     "order": "draw_class_diagram",
     "packages": "draw_package_diagram",
     "use-cases": "draw_use_case_diagram",
+    "order-states": "draw_state_diagram",
+    "order-flow": "draw_activity_diagram",
     "checkout": "draw_sequence_diagram",
 }
 PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 그 도구 정의(Spec)
     "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, classdiagram.SPEC),
     "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, packagediagram.SPEC),
     "draw_use_case_diagram": (usecasediagram.TIPS, boxcheck.KINDS, usecasediagram.SPEC),
+    "draw_state_diagram": (statediagram.TIPS, boxcheck.KINDS, statediagram.SPEC),
+    "draw_activity_diagram": (activitydiagram.TIPS, activitydiagram.KINDS, activitydiagram.SPEC),
 }
+
+TRUNK_TOOLS = [n for n, (_, _, spec) in PLACED_TOOLS.items() if any(t.trunk for t in spec.relations.values())]
 
 
 def test_lists_every_tool_with_its_inputs():
@@ -95,7 +104,8 @@ def test_each_tool_carries_its_flow_and_tips_and_the_instructions_carry_the_flow
     for name, (tips, kinds, spec) in PLACED_TOOLS.items():
         tool = tools[name].description
         assert guide.flow(kinds, spec.words) in tool and tips in tool
-        assert guide.relation_fields(spec) in tool
+        if name in TRUNK_TOOLS:  # 공유 줄기 안내가 든 관계 필드가 그 도구 설명에 그대로 들어간다
+            assert guide.relation_fields(spec) in tool
         assert server.SEQUENCE_FLOW not in tool and guide.PLACED_FLOW not in seq_tool
         assert tips not in instructions
         assert tips not in seq_tool
@@ -144,8 +154,9 @@ def test_relation_fields_follow_the_relation_kinds_a_tool_takes():
     assert "공유 줄기" not in guide.relation_fields(plain)
 
 
-@pytest.mark.parametrize("name", PLACED_TOOLS)
+@pytest.mark.parametrize("name", TRUNK_TOOLS)
 def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
+    assert TRUNK_TOOLS == ["draw_class_diagram", "draw_package_diagram", "draw_use_case_diagram"]  # 상태도·액티비티도는 없다
     # 도구 설명에 관계 필드가 그대로 들어가는 것은 test_each_tool_carries_its_flow_and_tips_…가 본다
     spec = PLACED_TOOLS[name][2]
     trunks = [t for t in spec.relations.values() if t.trunk]
@@ -188,7 +199,8 @@ def test_trunk_numbers_fit_together():
     # 둘째 줄기를 옆 변으로 들이는 끝 구간이 끝 모양보다 길고(짧으면 입력 오류), 가장 좁은 간격에서 y를 가운데에 두면 둘째 줄기가
     # 자식 위 변에서 TRUNK_CLEAR 떨어진다. 붙어 감 판정(BOX_CLEARANCE)보다 넉넉하다
     # 가장 좁은 간격에서 첫 줄기를 가운데에 두어도 첫 줄기 끝 구간이 끝 모양보다 길다
-    for _, _, spec in PLACED_TOOLS.values():
+    for name in TRUNK_TOOLS:
+        spec = PLACED_TOOLS[name][2]
         longest = max(t.end.length for t in spec.relations.values() if t.trunk and t.end is not None)
         assert guide.TRUNK_SIDE > longest and guide.TRUNK_ROOM / 2 > longest
     assert guide.TRUNK_ROOM / 2 - guide.TRUNK_SPLIT >= guide.TRUNK_CLEAR > boxcheck.BOX_CLEARANCE
@@ -380,7 +392,11 @@ def test_shapes_that_aim_aside_are_the_shapes_whose_lines_aim_away_from_the_midd
     # (액터·유즈케이스는 가운데를 정수로 내린 점이라 0.5px 안이다)
     for _, _, spec in PLACED_TOOLS.values():
         for kind, shape in spec.shapes.items():
-            d = boxdiagram.render(spec, {spec.list_field: [{"kind": kind, "name": "X", "left": 0.5, "top": 0.5}]})
+            element = {"kind": kind, "left": 0.5, "top": 0.5, **({"id": "X"} if spec.extended else {})}
+            try:
+                d = boxdiagram.render(spec, {spec.list_field: [{**element, "name": "X"}]})
+            except InputError:  # 이름을 받지 않는 모양
+                d = boxdiagram.render(spec, {spec.list_field: [element]})
             (p,) = d.layout.boxes
             l, t, r, b = p.shape_rect
             aside = abs(p.anchor[0] - (l + r) / 2) > 1 or abs(p.anchor[1] - (t + b) / 2) > 1
