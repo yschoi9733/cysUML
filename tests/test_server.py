@@ -140,6 +140,8 @@ def test_relation_fields_say_where_lines_start_for_each_tool():
     assert "선은 상자 가운데에서 첫 꺾는 점(없으면 상대 상자 가운데)으로 가는 선이 상자 변과" in server.CLASS_TOOL
     assert "선은 요소 가운데(요소 종류에 따로 적은 모양은 그 점)에서" in packagediagram.TOOL
     assert "탭 오른쪽 몸통의 가운데를 향한다" in packagediagram.TOOL
+    # 패키지도에는 모양 밖 이름이 있는 요소가 없어 그 결과 문장을 넣지 않는다
+    assert guide.PLACES_RESULT in packagediagram.TOOL and guide.OUTSIDE_PLACES not in packagediagram.TOOL
 
 
 def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):

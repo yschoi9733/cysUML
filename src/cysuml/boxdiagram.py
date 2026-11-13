@@ -332,8 +332,7 @@ class Layout:
 
     @cached_property
     def _lineage(self) -> dict[str, tuple[str, ...]]:
-        parent_of = {p.key: p.box.parent for p in self.boxes}
-        return {key: tuple(ancestors(parent_of, key)) for key in parent_of}
+        return lineage({p.key: p.box.parent for p in self.boxes})
 
     def ancestors(self, key: str) -> tuple[str, ...]:
         """key를 품은 요소들(바로 품은 것부터 바깥으로)."""
@@ -341,7 +340,7 @@ class Layout:
 
     def holders(self, r: Relation) -> frozenset[str]:
         """관계의 끝 요소를 품은 요소들."""
-        return frozenset(self.ancestors(r.source)) | frozenset(self.ancestors(r.target))
+        return holders(self._lineage, r)
 
     def kind_of(self, r: Relation) -> RelationType:
         return self.spec.relations[r.kind]
@@ -378,6 +377,16 @@ def ancestors(parent_of: Mapping[str, Optional[str]], key: str) -> list[str]:
         out.append(up)
         up = parent_of[up]
     return out
+
+
+def lineage(parent_of: Mapping[str, Optional[str]]) -> dict[str, tuple[str, ...]]:
+    """요소마다 그 요소를 품은 요소들(ancestors). 읽기·자리 잡기·검사가 모두 이것으로 품은 사이를 본다."""
+    return {key: tuple(ancestors(parent_of, key)) for key in parent_of}
+
+
+def holders(lines: Mapping[str, tuple[str, ...]], r: Relation) -> frozenset[str]:
+    """관계의 끝 요소를 품은 요소들(lines는 lineage의 값)."""
+    return frozenset(lines.get(r.source, ())) | frozenset(lines.get(r.target, ()))
 
 
 def josa(word: str, with_final: str, without_final: str) -> str:
@@ -549,6 +558,7 @@ class _Reader(Reader):
         before = len(self.problems)
         field_ = self.spec.list_field
         by_key = {e.key: e for _, e in read}
+        loops: set[frozenset[str]] = set()
         for path, e in read:
             if e.parent is None:
                 continue
@@ -560,12 +570,14 @@ class _Reader(Reader):
             elif e.parent not in by_key:
                 continue  # 그 요소가 다른 곳이 틀려 읽히지 않았다(그 문제는 이미 알렸다)
             elif not self.spec.shapes[by_key[e.parent].kind].holds:
-                holders = " · ".join(repr(k) for k, s in self.spec.shapes.items() if s.holds)
+                holding = " · ".join(repr(k) for k, s in self.spec.shapes.items() if s.holds)
                 self.fail(where, f"{field_}[{seen[e.parent]}]({by_key[e.parent].kind!r})는 안에 요소를 둘 수 없다 — 안에 "
-                                 f"요소를 두는 종류: {holders or '없음'}")
+                                 f"요소를 두는 종류: {holding or '없음'}")
             else:
                 chain = [e.key, *ancestors(parent_of, e.key)]
-                if parent_of.get(chain[-1]) == e.key:  # 이 요소로 돌아오는 고리만(바깥 요소끼리의 고리는 그 요소들이 알린다)
+                # 이 요소로 돌아오는 고리만, 고리마다 입력에서 처음 나온 요소에서 한 번 알린다
+                if parent_of.get(chain[-1]) == e.key and frozenset(chain) not in loops:
+                    loops.add(frozenset(chain))
                     self.fail(where, f"in이 고리를 이룬다({' → '.join(_show(k) for k in chain + [e.key])})")
         return len(self.problems) == before
 
@@ -597,7 +609,7 @@ class _Reader(Reader):
         read = [(path, e) for path, (_, _, e) in got if e is not None]
         parent_of = {e.key: e.parent for _, e in read}
         nested = self._parents(read, seen, parent_of)
-        lineage = {key: ancestors(parent_of, key) for key in parent_of} if nested else {}
+        lines_of = lineage(parent_of) if nested else {}
         relations = []
         for i, v in enumerate(self.items(o["relations"], "relations") if "relations" in o else []):
             path = _at("relations", i)
@@ -607,8 +619,8 @@ class _Reader(Reader):
                 self._missing(_at(path, key), n, seen)
             if r is None or missing:
                 continue
-            outer_first = r.source in lineage.get(r.target, ())
-            if outer_first or r.target in lineage.get(r.source, ()):
+            outer_first = r.source in lines_of.get(r.target, ())
+            if outer_first or r.target in lines_of.get(r.source, ()):
                 inner, outer = (r.target, r.source) if outer_first else (r.source, r.target)
                 self.fail(path, f"한 끝({_show(inner)})이 다른 끝({_show(outer)}) 안에 있다 — 품은 {w.noun}와 그 안의 "
                                 f"{w.noun}는 선으로 잇지 않는다")
@@ -859,8 +871,7 @@ def layout(diagram: Diagram) -> Layout:
             owner, n = f"{base}#{n}", n + 1
         used.add(owner)
         bare.append(PlacedRelation(r, owner, points, ()))
-    parent_of = {p.key: p.box.parent for p in placed}
-    lineage = {key: frozenset(ancestors(parent_of, key)) for key in parent_of}
+    lines_of = lineage({p.key: p.box.parent for p in placed})  # 검사도 같은 함수(Layout.holders)로 본다
     sketch = Canvas()  # 선 끝 모양을 그림판과 똑같이 얻으려고 선만 한 번 그려 본다
     for p in bare:
         _draw_relation(sketch, p, spec.relations[p.relation.kind])
@@ -869,10 +880,10 @@ def layout(diagram: Diagram) -> Layout:
     out = []
     for p in bare:
         r, points = p.relation, p.points
-        holders = lineage[r.source] | lineage[r.target]  # Layout.holders와 같다
-        if holders not in avoids:
-            avoids[holders] = obstacles(placed, holders)
-        avoid = avoids[holders]
+        held = holders(lines_of, r)
+        if held not in avoids:
+            avoids[held] = obstacles(placed, held)
+        avoid = avoids[held]
         labels = []
         if r.label_lines:
             lines = r.label_lines

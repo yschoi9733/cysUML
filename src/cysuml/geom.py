@@ -12,7 +12,8 @@ from typing import Iterable, Optional
 from .canvas import Box, Line, Point, Polygon, Record
 
 Segment = tuple[Point, Point]
-ELLIPSE_SIDES = 96  # 타원을 판정할 때 쓰는 다각형의 변 수. 반지름 100px에서 실제 타원과 0.06px 안으로 다르다
+ELLIPSE_SIDES = 96  # 타원을 판정할 때 쓰는 다각형의 가장 적은 변 수(반지름 100px에서 실제 타원과 0.06px 안으로 다르다)
+ELLIPSE_SAG = 0.1   # 큰 타원은 변을 늘려 다각형 변 가운데가 실제 타원에서 이만큼 안에 들게 한다(EDGE_SLACK 0.5보다 작게)
 
 
 def grow(rect: Box, m: float) -> Box:
@@ -563,14 +564,17 @@ class PolygonBorder(Border):
 
 
 class EllipseBorder(Border):
-    """타원. 선 끝은 실제 타원 위에 두고, 그 밖의 판정은 꼭짓점이 타원 위에 있는 ELLIPSE_SIDES각형으로 한다."""
+    """타원. 선 끝은 실제 타원 위에 두고, 그 밖의 판정은 꼭짓점이 타원 위에 있는 다각형(ELLIPSE_SIDES각형 이상, 변 가운데가 타원에서
+    ELLIPSE_SAG 안)으로 한다."""
 
     def __init__(self, cx: float, cy: float, rx: float, ry: float):
         if not (rx > 0 and ry > 0):
             raise ValueError(f"타원 반지름은 0보다 커야 한다: {rx}, {ry}")
         self.cx, self.cy, self.rx, self.ry = cx, cy, rx, ry
-        self.polygon = PolygonBorder((cx + rx * math.cos(2 * math.pi * k / ELLIPSE_SIDES),
-                                      cy + ry * math.sin(2 * math.pi * k / ELLIPSE_SIDES)) for k in range(ELLIPSE_SIDES))
+        r = max(rx, ry)
+        n = ELLIPSE_SIDES if r <= ELLIPSE_SAG else max(ELLIPSE_SIDES, math.ceil(math.pi / math.acos(1 - ELLIPSE_SAG / r)))
+        self.polygon = PolygonBorder((cx + rx * math.cos(2 * math.pi * k / n), cy + ry * math.sin(2 * math.pi * k / n))
+                                     for k in range(n))
 
     def __repr__(self) -> str:
         return f"EllipseBorder({self.cx}, {self.cy}, {self.rx}, {self.ry})"

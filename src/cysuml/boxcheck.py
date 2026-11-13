@@ -17,7 +17,7 @@ import operator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
-from .boxdiagram import LABEL_CLEAR, NEST_PAD, Drawing, Layout, NameZone, PlacedBox, PlacedRelation, Words, josa
+from .boxdiagram import BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, Layout, NameZone, PlacedBox, PlacedRelation, Words, josa
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, crossings, distance, enters, grow, hits,
                    inside, meets, outline, span, touches)
@@ -64,6 +64,14 @@ def crossing_hint(w: Words) -> str:
     return f"엇갈림을 줄이려면 {w.noun} 순서·자리를 바꾸거나, 꺾는 점(via)을 주어 돌아가게 한다."
 
 
+def _passed(w: Words) -> str:
+    return f"합격 — 선이 {w.noun}·글자를 지나거나 겹친 곳이 없다."
+
+
+def _shrink(w: Words) -> str:
+    return f"{w.noun}{josa(w.noun, '을', '를')} 가까이 모으거나 배율을 낮춘다"
+
+
 @dataclass(frozen=True)
 class Report(_Report):
     """report.Report에 선끼리 엇갈린 곳(crossings, 알림)을 더한다. Finding의 elements는 요소 열쇠나 관계 기록의 owner이고,
@@ -72,13 +80,13 @@ class Report(_Report):
     crossings: tuple[Finding, ...] = field(kw_only=True)
     words: Words = field(kw_only=True, repr=False)
 
-    @property  # type: ignore[override]
-    def PASSED(self) -> str:
-        return f"합격 — 선이 {self.words.noun}·글자를 지나거나 겹친 곳이 없다."
+    # 클래스에서 읽으면 클래스도 도구의 말(상자)로 쓴 문구이고, 결과마다 그 도구의 말로 바꿔 둔다
+    PASSED = _passed(BOX_WORDS)
+    SHRINK = _shrink(BOX_WORDS)
 
-    @property  # type: ignore[override]
-    def SHRINK(self) -> str:
-        return f"{self.words.noun}를 가까이 모으거나 배율을 낮춘다"
+    def __post_init__(self):
+        object.__setattr__(self, "PASSED", _passed(self.words))
+        object.__setattr__(self, "SHRINK", _shrink(self.words))
 
     def _extra(self) -> dict:
         return {"crossings": [f.to_dict() for f in self.crossings]}
