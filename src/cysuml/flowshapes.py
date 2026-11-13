@@ -7,13 +7,14 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from typing import Any, Optional
 
 from . import boxdiagram as B
 from . import text as T
 from .boxdiagram import LABEL_LINE, Diagram, Element, NameZone, PlacedBox, Shape, Spec, josa, line_ys
 from .canvas import Canvas, Point
-from .classdiagram import MIN_WIDTH, NAME_PAD, ROW, SECTION_PAD
+from .classdiagram import MIN_WIDTH, ROW, SECTION_PAD, head_lines, head_width
 from .geom import Border, EllipseBorder, PolygonBorder
 from .parsing import InputError, Reader
 from .parsing import at as _at
@@ -36,9 +37,11 @@ _QUARTER = ((1.0, 0.0), *((math.cos(math.pi / 2 * i / ARC_STEPS), math.sin(math.
                           for i in range(1, ARC_STEPS)), (0.0, 1.0))
 
 
+@lru_cache(maxsize=1024)
 def rounded(rect: Box, radius: float) -> tuple[Point, ...]:
     """둥근 모서리 상자의 꼭짓점(위 변 오른쪽 끝에서 시계 방향). 모서리마다 반지름 radius인 4분원을 ARC_STEPS개 선분으로 나눈다.
-    상자가 반지름의 두 배보다 작으면 반지름을 줄인다."""
+    상자가 반지름의 두 배보다 작으면 반지름을 줄인다. 자리 잡기(테두리·겹침 조각·테두리 선)와 그리기가 같은 자리로 여러 번 부르므로
+    한 번만 잰다."""
     l, t, r, b = rect
     k = min(radius, (r - l) / 2, (b - t) / 2)
     corners = (((r - k, t + k), lambda x, y: (y, -x)), ((r - k, b - k), lambda x, y: (x, y)),
@@ -51,6 +54,17 @@ def rounded(rect: Box, radius: float) -> tuple[Point, ...]:
             if not out or p != out[-1]:
                 out.append(p)
     return tuple(out) if out[0] != out[-1] else tuple(out[:-1])
+
+
+@lru_cache(maxsize=1024)
+def _rounded_border(rect: Box, radius: float) -> PolygonBorder:
+    return PolygonBorder(rounded(rect, radius))
+
+
+@lru_cache(maxsize=1024)
+def _circle(rect: Box) -> EllipseBorder:
+    l, t, r, b = rect
+    return EllipseBorder((l + r) / 2, (t + b) / 2, (r - l) / 2, (b - t) / 2)
 
 
 class _Solid(Shape):
@@ -71,11 +85,6 @@ class _Fixed(_Solid):
 
     def size(self, e: Element) -> tuple[float, float]:
         return self.SIZE
-
-
-def _circle(rect: Box) -> EllipseBorder:
-    l, t, r, b = rect
-    return EllipseBorder((l + r) / 2, (t + b) / 2, (r - l) / 2, (b - t) / 2)
 
 
 class StartShape(_Fixed):
@@ -129,7 +138,7 @@ class _RoundedShape(_Solid):
     RADIUS = 0.0
 
     def border(self, e: Element, rect: Box) -> Border:
-        return PolygonBorder(rounded(rect, self.RADIUS))
+        return _rounded_border(rect, self.RADIUS)
 
     def outline(self, c: Canvas, p: PlacedBox) -> None:
         c.poly(rounded(p.rect, self.RADIUS), owner=p.key)
@@ -172,9 +181,8 @@ class StateShape(_RoundedShape):
         return _band(e) + (SECTION_PAD + ROW * len(acts) if acts else 0)
 
     def size(self, e: Element) -> tuple[float, float]:
-        widths = [T.text_width(s, True) + NAME_PAD for s in e.name] + [
-            T.text_width(s) + 2 * STATE_ROW_LEFT for s in self._actions(e)]
-        return max(MIN_WIDTH, math.ceil(max(widths))), self.zone_height(e)
+        rows = [math.ceil(T.text_width(s) + 2 * STATE_ROW_LEFT) for s in self._actions(e)]
+        return max(MIN_WIDTH, head_width(head_lines(None, e.name)), *rows), self.zone_height(e)
 
     def insets(self, e: Element) -> Box:
         return 0.0, self.zone_height(e), 0.0, 0.0
@@ -220,7 +228,8 @@ ACTION = ActionShape()
 
 def parse_flow(spec: Spec, data: Any) -> Diagram:
     """공용 엔진으로 읽고, 시작 점으로 들어오는 선과 끝 점에서 나가는 선도 입력 오류로 알린다 — 시작 점은 나가기만, 끝 점은
-    들어오기만 한다(from·to를 바꿔 쓴 입력이 합격한 그림으로 문서에 들어가지 않게)."""
+    들어오기만 한다(from·to를 바꿔 쓴 입력이 합격한 그림으로 문서에 들어가지 않게). 이 규칙은 요소 종류를 알아야 볼 수 있어, 공용
+    엔진이 읽기 문제와 자리 잡기 문제를 단계마다 모아 알리듯 읽기가 통과한 뒤 한 단계로 모아 알린다."""
     diagram = B.parse(spec, data)
     shape_of = {e.key: spec.shapes[e.kind] for e in diagram.boxes}
     problems = []
