@@ -154,6 +154,11 @@ class Shape:
         raise NotImplementedError
 
 
+def aims_off_center(shape: Shape) -> bool:
+    """선이 테두리 가운데가 아닌 점을 향하는 모양인지(Shape.anchor를 고쳤는지). 도구 설명과 결과 글이 같은 판정을 쓴다."""
+    return type(shape).anchor is not Shape.anchor
+
+
 @dataclass(frozen=True)
 class EndShape:
     """선 끝 모양. draw(그림판, 끝 점, 선 위 그 앞 점, owner)는 그린 기록(삼각형·마름모는 Polygon, 화살촉은 Line)을 돌려준다."""
