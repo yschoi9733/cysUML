@@ -15,10 +15,11 @@ the layout and draws again until the check passes.
 
 ## Install
 
-You need [uv](https://docs.astral.sh/uv/). This one line downloads and starts the server:
+You need [uv](https://docs.astral.sh/uv/). This one line downloads cysUML from [PyPI](https://pypi.org/project/cysuml/)
+and starts the server:
 
 ```
-uvx --from git+https://github.com/yschoi9733/cysUML cysuml
+uvx cysuml
 ```
 
 It talks MCP over stdin/stdout, so on its own it just waits for a client. Register it with your MCP client instead.
@@ -26,7 +27,7 @@ It talks MCP over stdin/stdout, so on its own it just waits for a client. Regist
 **Claude Code**
 
 ```
-claude mcp add cysuml -- uvx --from git+https://github.com/yschoi9733/cysUML cysuml
+claude mcp add cysuml -- uvx cysuml
 ```
 
 **Other clients** (Claude Desktop, Cursor, …) take the same command in their JSON config:
@@ -36,11 +37,16 @@ claude mcp add cysuml -- uvx --from git+https://github.com/yschoi9733/cysUML cys
   "mcpServers": {
     "cysuml": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/yschoi9733/cysUML", "cysuml"]
+      "args": ["cysuml"]
     }
   }
 }
 ```
+
+**Versions.** `uvx cysuml` runs the newest release: each time the client starts the server, uv asks PyPI and reuses
+the answer for up to ten minutes. If you installed it with `uv tool install cysuml`, uvx runs that copy instead;
+update it with `uv tool upgrade cysuml`. To stay on one version, put it after the name: `uvx cysuml@0.1.0` (in JSON,
+`"args": ["cysuml@0.1.0"]`). The releases are listed in the [release history](https://pypi.org/project/cysuml/#history).
 
 ## Use
 
@@ -107,10 +113,14 @@ point its lines aim at, since that is not the middle of the package). Besides th
 checks, the check fails when an element inside another sits too close to its edge or name tab, or a line runs along
 the edge of a package it starts or ends in, or through a package's name tab.
 
+Components and artifacts can also be drawn in icon notation. `component_icon` is the UML 1 component: a box with two
+small rectangles across its left edge, which lines may not cross. `artifact_icon` is a folded-page icon with the name
+(often a file name) outside it, on the side `name_side` gives.
+
 ### Component diagrams
 
 The tool is `draw_component_diagram`. It draws components with the interfaces they provide, the artifacts that
-implement them, and the classes that realize them. It takes every element of the package diagram tool, plus
+implement them, and the classes that realize them. It takes every element of the package diagram tool (icon notations included), plus
 `lollipop`: a provided interface drawn as a small circle with its name outside (`name_side` puts the name below,
 above, left or right of the circle). The providing component joins the circle with an `association`, drawn without
 an arrowhead in this tool unless `navigable` is given, and each user points at the circle with a `dependency`:
@@ -143,7 +153,7 @@ the place of the circle with its name. The checks are the same: a line through a
 
 The tool is `draw_deployment_diagram`. It shows which computers (nodes) the software runs on: components and
 artifacts sit inside nodes with `in`, and a node can sit inside another node. It takes the same elements as the package
-diagram tool. A communication path between nodes is an `association` with the protocol as its `name`. This tool draws
+diagram tool, icon notations included. A communication path between nodes is an `association` with the protocol as its `name`. This tool draws
 every association without an arrowhead (between classes too) unless `navigable` says otherwise. A «deploy» arrow from
 an element outside a node is a `dependency` with `"stereotype": "deploy"`:
 
@@ -308,11 +318,14 @@ To try your working copy in Claude Code, register it under another name:
 claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml
 ```
 
+To try the latest `main` before it is released, use `uvx --from git+https://github.com/yschoi9733/cysUML cysuml`.
+
 ## License
 
-cysUML is under the [MIT License](LICENSE). The bundled fonts are Liberation Sans and Noto Sans KR, both under the
-SIL Open Font License 1.1 (see [`LiberationSans-LICENSE.txt`](src/cysuml/fonts/LiberationSans-LICENSE.txt) and
-[`NotoSansKR-LICENSE.txt`](src/cysuml/fonts/NotoSansKR-LICENSE.txt)).
+cysUML is under the [MIT License](https://github.com/yschoi9733/cysUML/blob/main/LICENSE). The bundled fonts are
+Liberation Sans and Noto Sans KR, both under the SIL Open Font License 1.1 (see
+[`LiberationSans-LICENSE.txt`](https://github.com/yschoi9733/cysUML/blob/main/src/cysuml/fonts/LiberationSans-LICENSE.txt)
+and [`NotoSansKR-LICENSE.txt`](https://github.com/yschoi9733/cysUML/blob/main/src/cysuml/fonts/NotoSansKR-LICENSE.txt)).
 
 ---
 
@@ -329,16 +342,21 @@ AI가 배치하고 도구가 그리는, 문서용 UML 그림 MCP 서버다.
 
 ### 설치
 
-[uv](https://docs.astral.sh/uv/)가 있어야 한다. 아래 한 줄이 서버를 받아 띄운다:
+[uv](https://docs.astral.sh/uv/)가 있어야 한다. 아래 한 줄이 [PyPI](https://pypi.org/project/cysuml/)에서 cysUML을 받아
+서버를 띄운다:
 
 ```
-uvx --from git+https://github.com/yschoi9733/cysUML cysuml
+uvx cysuml
 ```
 
 표준 입출력으로 MCP를 주고받으므로 혼자 띄우면 클라이언트를 기다리기만 한다. 쓰려면 MCP 클라이언트에 등록한다.
 
-- **Claude Code:** `claude mcp add cysuml -- uvx --from git+https://github.com/yschoi9733/cysUML cysuml`
+- **Claude Code:** `claude mcp add cysuml -- uvx cysuml`
 - **다른 클라이언트:** 위 영어 안내의 JSON 설정에 같은 명령을 넣는다.
+- **버전:** `uvx cysuml`은 가장 새 버전을 띄운다. 클라이언트가 서버를 띄울 때마다 uv가 PyPI에 묻고, 받은 답은 10분까지 다시
+  쓴다. `uv tool install cysuml`로 설치해 두었으면 uvx는 그 설치본을 띄우니 `uv tool upgrade cysuml`로 올린다. 한 버전에
+  머물려면 이름 뒤에 버전을 붙인다 — `uvx cysuml@0.1.0`(JSON에서는 `"args": ["cysuml@0.1.0"]`). 나온 버전은
+  [PyPI 릴리스 기록](https://pypi.org/project/cysuml/#history)에 있다.
 
 ### 쓰기
 
@@ -359,16 +377,17 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
   가리킨다 — 바깥 요소는 안의 요소를 덮도록 오른쪽·아래로 늘어난다. 결과는 클래스도와 같고 요소마다 그린 자리를 돌려준다(패키지는
   선이 가운데가 아니라 탭 오른쪽 몸통의 가운데를 향하므로 그 점도 함께).
   클래스도 검사에 더해, 안의 요소가 바깥 요소의 테두리·이름 탭에 붙거나, 선이 그 끝을 품은 패키지의 테두리를 따라가거나 패키지
-  탭을 지나면 불합격이다.
+  탭을 지나면 불합격이다. 컴포넌트·아티팩트는 아이콘 표기로도 그린다 — `component_icon`은 왼쪽 변에 작은 네모 둘이 걸친 UML 1
+  표기 컴포넌트(선이 네모를 지나면 불합격), `artifact_icon`은 귀 접힌 문서 아이콘과 그 밖(`name_side`)에 쓰는 이름이다.
 - **컴포넌트도**는 `draw_component_diagram`으로 그린다. 컴포넌트와 제공 인터페이스, 컴포넌트를 구현하는 아티팩트, 컴포넌트를
-  실현하는 클래스를 그린다. 패키지도 도구가 받는 요소에 더해 `lollipop`(제공 인터페이스 원 — 작은 원과 그 밖에 쓰는
+  실현하는 클래스를 그린다. 패키지도 도구가 받는 요소(아이콘 표기 포함)에 더해 `lollipop`(제공 인터페이스 원 — 작은 원과 그 밖에 쓰는
   이름으로 그린다. 이름 쪽은 `name_side`)을 받는다. 제공하는 컴포넌트는 원과 `association`으로 잇고(이 도구에서는 `navigable`을
   주지 않으면 화살촉이 없다), 쓰는 쪽은 원으로 `dependency`를 긋는다. 결과는 패키지도와 같고, 원마다 원만의 자리도 함께
   돌려준다. 검사도 같고, 선이 원이나 그 이름을 지나면 불합격이다.
 - **배치도**(deployment diagram)는 `draw_deployment_diagram`으로 그린다. 소프트웨어(컴포넌트·아티팩트)가 어느 컴퓨터(노드)에서
   도는지 보인다. 노드 안에 컴포넌트·아티팩트·노드를 `in`으로 넣고, 노드끼리는 통신 경로(`association` — `name`에 HTTPS 같은
   프로토콜)로 잇고, 노드 밖 요소에서 노드로 «deploy»(`stereotype`이 `deploy`인 `dependency`)를 긋는다. 이 도구는 클래스끼리
-  이은 것까지 모든 연관을 화살촉 없는 실선으로 그린다(필요하면 `navigable`을 준다). 받는 요소·결과·검사는 패키지도와 같다.
+  이은 것까지 모든 연관을 화살촉 없는 실선으로 그린다(필요하면 `navigable`을 준다). 받는 요소(아이콘 표기 포함)·결과·검사는 패키지도와 같다.
 - **유즈케이스도**는 `draw_use_case_diagram`으로 그린다. 액터·유즈케이스·시스템 경계를 그리고, 연관·의존(«include»·«extend»)·
   일반화로 잇는다. 유즈케이스는 `in`으로 시스템 경계 안에 넣고, 액터는 경계 밖에 두어 이름을 사람 모양 옆(`name_side`가 정한
   쪽)에 쓴다. 결과는 패키지도와 같고, 액터는 이름까지 덮는 자리 뒤에 사람 모양 자리를 함께 돌려준다. 검사는 패키지도와 같고,
@@ -391,9 +410,10 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
 ### 개발
 
 `uv sync`로 준비하고 `uv run pytest`로 시험한다. 작업 중인 코드를 Claude Code에서 써 보려면 다른 이름으로 등록한다:
-`claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml`.
+`claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml`. 아직 배포하지 않은 `main`의 최신 코드를 써 보려면
+`uvx --from git+https://github.com/yschoi9733/cysUML cysuml`로 띄운다.
 
 ### 라이선스
 
-cysUML은 [MIT 라이선스](LICENSE)를 따른다. 함께 넣은 글꼴 Liberation Sans와 Noto Sans KR은 SIL Open Font License 1.1을
-따른다([`src/cysuml/fonts`](src/cysuml/fonts)).
+cysUML은 [MIT 라이선스](https://github.com/yschoi9733/cysUML/blob/main/LICENSE)를 따른다. 함께 넣은 글꼴 Liberation Sans와
+Noto Sans KR은 SIL Open Font License 1.1을 따른다([`src/cysuml/fonts`](https://github.com/yschoi9733/cysUML/tree/main/src/cysuml/fonts)).

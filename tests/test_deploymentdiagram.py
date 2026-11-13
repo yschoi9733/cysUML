@@ -149,7 +149,9 @@ def test_node_kinds_are_stereotypes_above_the_name_on_the_same_shape():
 
 
 def test_takes_the_elements_of_the_package_tool_and_nothing_else():
-    assert set(D.SPEC.shapes) == {"class", "abstract", "interface", "enum", "package", "component", "artifact", "node"}
+    # 패키지도·컴포넌트도와 함께 받는 공용 요소 종류(아이콘 표기 두 종류 포함) 그대로다 — 다른 도구의 종류가 섞이면 걸린다
+    assert set(D.SPEC.shapes) == {"class", "abstract", "interface", "enum", "package", "component", "artifact", "component_icon",
+                                  "artifact_icon", "node"}
     with pytest.raises(InputError) as e:
         draw([el("usecase", "U", 0, 0)])
     assert [p.split(":")[0] for p in e.value.problems] == ["elements[0].kind"]

@@ -1,21 +1,20 @@
 """컴포넌트도: 컴포넌트와 제공 인터페이스 원, 컴포넌트를 구현하는 아티팩트, 컴포넌트를 실현하는 클래스를 그린다.
 
-요소 종류는 shapes.SHAPES(클래스·패키지·컴포넌트·아티팩트·노드)에 제공 인터페이스 원(lollipop)을 더한 것이고, 관계는 클래스도 관계 여섯 가지
+요소 종류는 shapes.SHAPES(클래스·패키지·컴포넌트·아티팩트·노드와 아이콘 표기 둘)에 제공 인터페이스 원(lollipop)을 더한 것이고, 관계는 클래스도 관계 여섯 가지
 (classdiagram.RELATIONS)와 그 표기 규칙(classdiagram.RULES)이다. 연관의 기본 방향은 '없음'이다 — 컴포넌트에서 제공 인터페이스 원으로 가는 막대가 화살촉 없는 실선이라서.
 읽기·자리 잡기·그리기는 공용 엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
 """
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from . import boxdiagram as B
 from .boxcheck import KINDS
-from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Element, PlacedBox, Shape, Spec
+from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Element, PlacedBox, Shape, Spec, floored
 from .canvas import SCALE, Canvas, Point
 from .classdiagram import RELATIONS, RULES
 from .geom import Border, EllipseBorder
-from .guide import (COMMON_INPUT, IMAGE_RESULT, NAME_SIDE, NESTING, NEW_INPUT, PLACED_ELEMENTS, flow, places_result,
+from .guide import (COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, flow, places_result,
                     relation_fields)
 from .shapes import SHAPES
 from .text import Box
@@ -23,17 +22,11 @@ from .text import Box
 BALL = 20  # 제공 인터페이스 원의 지름
 
 
-def _centre(rect: Box) -> Point:
-    """원 가운데 — 모양 자리 가운데를 정수로 내린 점. 모양 밖 이름의 폭(위·아래)이나 줄 수(왼쪽·오른쪽)가 홀수면 모양 자리가 반
-    픽셀에 놓여, 정수 좌표에 가운데가 놓인 컴포넌트(폭이 짝수 — 기본 폭 90)와 잇는 막대가 반 픽셀 기울어 계단이 보인다(유즈케이스도의
-    _floored와 같은 까닭)."""
-    return math.floor((rect[0] + rect[2]) / 2), math.floor((rect[1] + rect[3]) / 2)
-
-
 class LollipopShape(Shape):
     """제공 인터페이스 원(lollipop): 작은 원과 모양 밖에 쓰는 이름. 클래스 모양 인터페이스(«interface» 상자)와 다른 종류다. 제공하는
     컴포넌트에서 원으로 연관(막대)을 긋고, 그 인터페이스를 쓰는 쪽은 원으로 점선 의존 화살표를 긋는다. 원은 모양 자리 가운데를
-    정수로 내린 점(_centre)에 그리고, 선도 그 점을 향한다."""
+    정수로 내린 점(boxdiagram.floored)에 그리고, 선도 그 점을 향한다 — 정수 좌표에 가운데가 놓인 컴포넌트(기본 폭 90)와 잇는 막대가
+    곧다."""
 
     outside_name = True
     sized = False
@@ -43,13 +36,13 @@ class LollipopShape(Shape):
         return BALL, BALL
 
     def anchor(self, e: Element, rect: Box) -> Point:
-        return _centre(rect)
+        return floored(rect)
 
     def border(self, e: Element, rect: Box) -> Border:
-        return EllipseBorder(*_centre(rect), BALL / 2, BALL / 2)
+        return EllipseBorder(*floored(rect), BALL / 2, BALL / 2)
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
-        cx, cy = _centre(p.shape_rect)
+        cx, cy = floored(p.shape_rect)
         c.ellipse(cx - BALL / 2, cy - BALL / 2, BALL, BALL, owner=p.key)
 
 
@@ -69,8 +62,7 @@ def render(data: Any, scale: float = SCALE) -> Drawing:
 
 LOLLIPOP_INPUT = f"""  - 이 도구는 kind "lollipop"(제공 인터페이스 원)도 받는다. 지름 {BALL}px 원과 그 밖에 쓰는 이름이다. \
 클래스 모양 인터페이스(kind "interface"의 «interface» 상자)와 다른 종류이고, 둘 다 쓸 수 있다. name·id·left·top·in·name_side를 \
-받고, stereotype·width·height는 받지 않는다. 선은 원 가운데를 향하고 원 둘레에 닿는다.
-  {NAME_SIDE}"""
+받고, stereotype·width·height는 받지 않는다. 선은 원 가운데를 향하고 원 둘레에 닿는다."""
 
 TIPS = """컴포넌트도 배치 요령:
 - 제공 인터페이스는 원(lollipop)으로 그린다 — 제공하는 컴포넌트에서 원으로 association을 긋고(이 도구의 연관 기본 방향은 "none"이라 \
@@ -91,7 +83,7 @@ TIPS = """컴포넌트도 배치 요령:
 
 TOOL = f"""컴포넌트도를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 컴포넌트와 제공 인터페이스 원, \
 컴포넌트를 구현하는 아티팩트, 컴포넌트를 실현하는 클래스를 그린다. 클래스·패키지·컴포넌트·아티팩트·노드와 제공 인터페이스 원을 한 그림에 섞어 \
-그릴 수 있다. 요소는 준 왼쪽 위(left·top) 그대로, 관계선은 준 꺾는 점(via)을 따라 그리고, 요소 크기·선 끝·선 글자 자리만 도구가 \
+그릴 수 있고, 컴포넌트·아티팩트는 아이콘 표기로도 그린다. 요소는 준 왼쪽 위(left·top) 그대로, 관계선은 준 꺾는 점(via)을 따라 그리고, 요소 크기·선 끝·선 글자 자리만 도구가 \
 정한다. 좌표는 px이고 y는 아래로 커진다.
 
 입력

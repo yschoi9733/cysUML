@@ -71,13 +71,26 @@ BOX_WORDS = Words("상자", "변", "이름")
 ELEMENT_WORDS = Words("요소", "테두리", "열쇠")
 
 
+NAME_AREA = "이름 칸"  # NameZone.what의 기본값 — 요소가 제 글자를 쓰는 자리
+
+
+def floored(rect: T.Box) -> Point:
+    """자리 가운데를 정수로 내린 점. 모양 밖 이름이 모양 자리를 반 픽셀에 놓거나(이름 폭·줄 수가 홀수) 모양 높이·폭이 홀수면 가운데가
+    반 픽셀에 걸려, 가운데를 맞춰 놓은 두 요소 사이의 선도 반 픽셀 기울어 계단이 보인다. 선이 향하는 점(Shape.anchor)과 모양을 이
+    점에 맞추면, 가운데가 정수인 요소와 잇는 선이 곧다."""
+    return math.floor((rect[0] + rect[2]) / 2), math.floor((rect[1] + rect[3]) / 2)
+
+
 @dataclass(frozen=True)
 class NameZone:
     """요소가 제 글자(이름·스테레오타입 등)를 쓰는 자리. outside면 몸통(선이 닿는 테두리) 밖에 붙은 칸이다(패키지 탭, 모양 밖
-    이름) — 그 요소가 끝인 선도 지나가면 안 된다. 몸통 안의 칸은 그 요소를 품은 선만 피하면 된다."""
+    이름) — 그 요소가 끝인 선도 지나가면 안 된다. 몸통 안의 칸은 그 요소를 품은 선만 피하면 된다. 글자를 쓰지 않아도 몸통 밖에
+    붙어 선이 지나가면 안 되는 자리(UML 1 표기 컴포넌트의 부품 네모)도 이것으로 넘기고, 검사 글이 그 자리를 부르는 말은 what이다."""
 
     rect: T.Box
     outside: bool
+    what: str = NAME_AREA
+    lettered: bool = True  # 글자를 쓰는 칸인지(부품 네모처럼 글자 없이 선만 피하는 자리면 False)
 
 
 @dataclass(frozen=True)
@@ -109,6 +122,7 @@ class Shape:
     stereotyped: bool = True      # stereotype을 받는지
     holds: bool = False           # 안에 요소를 둘 수 있는지
     outside_name: bool = False    # 이름을 모양 밖에 쓰는지(쪽은 name_side)
+    name_gap: float = NAME_SEP    # 모양 밖 이름을 모양에서 떼는 거리
     aims_aside: bool = False      # 선이 모양 가운데에서 비켜난 점(anchor)을 향하는지 — 결과 글이 그 점을 덧붙인다
     default_width: float = 0      # width를 주지 않았을 때의 최소 폭
 
@@ -139,7 +153,7 @@ class Shape:
         return None
 
     def name_zones(self, e: Element, rect: T.Box) -> tuple[NameZone, ...]:
-        """이름 칸. 안에 요소를 두는 모양만 쓴다(선이 지나가면 안 되는 자리)."""
+        """선이 지나가면 안 되는 이름 칸 — 안에 요소를 두는 모양의 이름 칸과, 몸통 밖에 붙은 자리(UML 1 표기 컴포넌트의 부품 네모)."""
         return ()
 
     def frame(self, e: Element, rect: T.Box) -> tuple[Segment, ...]:
@@ -164,18 +178,23 @@ def aims_off_center(shape: Shape) -> bool:
 
 @dataclass(frozen=True)
 class EndShape:
-    """선 끝 모양. draw(그림판, 끝 점, 선 위 그 앞 점, owner)는 그린 기록(삼각형·마름모는 Polygon, 화살촉은 Line)을 돌려준다."""
+    """선 끝 모양. draw(그림판, 끝 점, 선 위 그 앞 점, 끝 요소가 향하게 한 점(anchor), owner)는 그린 기록(칠한 모양은 Polygon,
+    열린 모양은 Line)을 돌려준다. gap이면 선 끝을 끝 요소 테두리에서 그만큼 띄운다 — 띄운 틈에는 이 모양만 놓인다(원을 틈을 두고
+    감싸는 소켓 반원). 검사는 이 모양의 이름(name)과 선 끝 점을 그린 기록에서 짐작하지 않고 여기서 받는다."""
 
     name: str
     length: float
-    draw: Callable[[Canvas, Point, Point, str], Union[Line, Polygon]]
+    draw: Callable[[Canvas, Point, Point, Point, str], Union[Line, Polygon]]
+    gap: float = 0.0
 
 
-ARROW_HEAD = EndShape("화살촉", ARROW, lambda c, tip, frm, o: c.open_arrow(tip, frm, size=ARROW, owner=o))
-TRIANGLE_HEAD = EndShape("삼각형", TRIANGLE[0], lambda c, tip, frm, o: c.closed_arrow(
+ARROW_HEAD = EndShape("화살촉", ARROW, lambda c, tip, frm, at, o: c.open_arrow(tip, frm, size=ARROW, owner=o))
+TRIANGLE_HEAD = EndShape("삼각형", TRIANGLE[0], lambda c, tip, frm, at, o: c.closed_arrow(
     tip, frm, filled=False, size=TRIANGLE[0], half=TRIANGLE[1], owner=o))
-OPEN_DIAMOND = EndShape("마름모", DIAMOND, lambda c, tip, frm, o: c.diamond(tip, frm, filled=False, size=DIAMOND, owner=o))
-FILLED_DIAMOND = EndShape("마름모", DIAMOND, lambda c, tip, frm, o: c.diamond(tip, frm, filled=True, size=DIAMOND, owner=o))
+OPEN_DIAMOND = EndShape("마름모", DIAMOND, lambda c, tip, frm, at, o: c.diamond(tip, frm, filled=False, size=DIAMOND,
+                                                                                 owner=o))
+FILLED_DIAMOND = EndShape("마름모", DIAMOND, lambda c, tip, frm, at, o: c.diamond(tip, frm, filled=True, size=DIAMOND,
+                                                                                  owner=o))
 
 
 @dataclass(frozen=True)
@@ -395,13 +414,22 @@ class Layout:
 
 
 @dataclass(frozen=True)
+class HeadMark:
+    """그린 선 끝 모양 하나의 이름(EndShape.name)과 그 모양이 얹힌 선 끝 점."""
+
+    name: str
+    tip: Point
+
+
+@dataclass(frozen=True)
 class DrawnRelation:
-    """관계 하나를 그린 기록: 선(line), 선 끝 모양(heads — 삼각형·마름모는 Polygon, 화살촉은 Line), 선 글자(labels —
-    PlacedRelation.labels 차례로, 글자마다 줄마다의 기록)."""
+    """관계 하나를 그린 기록: 선(line), 선 끝 모양(heads — 칠한 모양은 Polygon, 열린 모양은 Line)과 그 이름·끝 점(marks — heads
+    차례로), 선 글자(labels — PlacedRelation.labels 차례로, 글자마다 줄마다의 기록)."""
 
     line: Line
     heads: tuple[Union[Line, Polygon], ...]
     labels: tuple[tuple[Text, ...], ...]
+    marks: tuple[HeadMark, ...]
 
 
 @dataclass(frozen=True)
@@ -827,32 +855,59 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
                             f"{w.noun} 밖으로 돌린다")
     lengths = [math.dist(p, q) for p, q in zip(points, points[1:])]
     head, tail = shape_lengths(r, t)
-    if len(lengths) == 1 and lengths[0] < head + tail:
-        problems.append(f"{path}: 선 길이 {fmt_num(lengths[0])}가 양 끝 모양 길이({fmt_num(head)}+{fmt_num(tail)})보다 짧다 — "
-                        f"{w.noun}를 더 떼어 놓는다")
-    elif len(lengths) > 1:
-        for length, need, key, which in ((lengths[0], head, "from", "첫"), (lengths[-1], tail, "to", "마지막")):
-            if length < need:
-                problems.append(f"{path}: {key} 쪽 끝 구간 길이 {fmt_num(length)}가 끝 모양 길이({fmt_num(need)})보다 짧다 — "
-                                f"{which} 꺾는 점을 {w.noun}에서 더 떼어 놓는다")
+    gaps = (t.start.gap if t.start else 0.0, t.end.gap if t.end else 0.0)
+    head, tail = head + gaps[0], tail + gaps[1]
+
+    def short(length: float, needs: tuple[float, ...], gap: bool) -> Optional[str]:
+        """구간이 모자라면 그 글. needs는 그 구간이 품어야 할 끝마다의 길이(끝 모양 길이와 띄운 거리)다. 선 끝을 띄우는 끝이 있으면
+        그 길이를 다 쓰고도 길이가 남아야 한다 — 같으면 당긴 선 끝이 앞 점에 겹쳐 길이 0인 선이 된다."""
+        need, shown = sum(needs), "+".join(fmt_num(n) for n in needs)
+        if gap:
+            if len(needs) == 2:  # 끝마다 더한 수가 무엇인지 헷갈리지 않게 쪽을 붙인다
+                shown = f"from 쪽 {fmt_num(needs[0])}, to 쪽 {fmt_num(needs[1])}"
+            return f"끝 모양 길이와 띄운 거리를 더한 길이({shown})보다 길지 않다" if length <= need else None
+        return f"끝 모양 길이({shown})보다 짧다" if length < need else None
+
+    if len(lengths) == 1:
+        if (why := short(lengths[0], (head, tail), any(gaps))) is not None:
+            problems.append(f"{path}: 선 길이 {fmt_num(lengths[0])}가 양 {why} — {w.noun}를 더 떼어 놓는다")
+    else:
+        for length, need, gap, key, which in ((lengths[0], head, gaps[0], "from", "첫"),
+                                              (lengths[-1], tail, gaps[1], "to", "마지막")):
+            if (why := short(length, (need,), bool(gap))) is not None:
+                problems.append(f"{path}: {key} 쪽 끝 구간 길이 {fmt_num(length)}가 {why} — {which} 꺾는 점을 {w.noun}에서 더 "
+                                "떼어 놓는다")
     if sum(lengths) > MAX_LINE:
         problems.append(f"{path}: 선 길이 {fmt_num(sum(lengths))}가 {MAX_LINE}을 넘는다 — {w.noun}를 가까이 모은다")
-    return (None if problems else points), problems
+    return (None if problems else _shorten(points, *gaps)), problems
 
 
-def _outside_name(e: Element, w: float, h: float) -> tuple[float, float, Point, T.Box]:
-    """모양 밖 이름이 있는 요소의 (자리 폭, 자리 높이, 자리 왼쪽 위에서 모양 왼쪽 위까지, 자리 왼쪽 위 기준 이름 칸)."""
+def _shorten(points: tuple[Point, ...], start_gap: float, end_gap: float) -> tuple[Point, ...]:
+    """선 처음·끝을 다음(앞) 점 쪽으로 gap만큼 당긴다 — 선 끝을 끝 요소 테두리에서 띄우는 끝 모양(EndShape.gap). 끝 구간이 끝 모양
+    길이와 띄운 거리보다 긴지는 _route가 먼저 본다."""
+    pts = list(points)
+    for i, j, g in ((0, 1, start_gap), (-1, -2, end_gap)):
+        if g:
+            (x, y), (nx, ny) = pts[i], pts[j]
+            k = g / math.dist(pts[i], pts[j])
+            pts[i] = (x + (nx - x) * k, y + (ny - y) * k)
+    return tuple(pts)
+
+
+def _outside_name(e: Element, w: float, h: float, gap: float) -> tuple[float, float, Point, T.Box]:
+    """모양 밖 이름이 있는 요소의 (자리 폭, 자리 높이, 자리 왼쪽 위에서 모양 왼쪽 위까지, 자리 왼쪽 위 기준 이름 칸). gap은 모양과
+    이름 사이(Shape.name_gap)다."""
     lines = e.name
     tw = math.ceil(max(T.text_width(s) for s in lines))
     th = LABEL_LINE * len(lines)
     if e.name_side in ("bottom", "top"):
-        width, height = max(w, tw), h + NAME_SEP + th
+        width, height = max(w, tw), h + gap + th
         sx, nx = (width - w) / 2, (width - tw) / 2
-        sy, ny = (0, h + NAME_SEP) if e.name_side == "bottom" else (th + NAME_SEP, 0)
+        sy, ny = (0, h + gap) if e.name_side == "bottom" else (th + gap, 0)
     else:
-        width, height = w + NAME_SEP + tw, max(h, th)
+        width, height = w + gap + tw, max(h, th)
         sy, ny = (height - h) / 2, (height - th) / 2
-        sx, nx = (0, w + NAME_SEP) if e.name_side == "right" else (tw + NAME_SEP, 0)
+        sx, nx = (0, w + gap) if e.name_side == "right" else (tw + gap, 0)
     return width, height, (sx, sy), (nx, ny, nx + tw, ny + th)
 
 
@@ -871,7 +926,7 @@ def _place(spec: Spec, diagram: Diagram, lines_of: Mapping[str, tuple[str, ...]]
         zone = None
         if shape.outside_name and e.name:
             sw, sh = w, h
-            w, h, offset, zone = _outside_name(e, sw, sh)
+            w, h, offset, zone = _outside_name(e, sw, sh, shape.name_gap)
         insets = shape.insets(e) if shape.holds else (0.0, 0.0, 0.0, 0.0)
         for c in children.get(e.key, []):
             cr = done[c.key].rect
@@ -928,7 +983,7 @@ def layout(diagram: Diagram) -> Layout:
         bare.append(PlacedRelation(r, owner, points, ()))
     sketch = Canvas()  # 선 끝 모양을 그림판과 똑같이 얻으려고 선만 한 번 그려 본다
     for p in bare:
-        _draw_relation(sketch, p, spec.relations[p.relation.kind])
+        _draw_relation(sketch, p, spec.relations[p.relation.kind], by_key)
     spots = _Spots(outline(sketch.records))
     avoids: dict[frozenset[str], Obstacles] = {}  # 끝을 품은 요소들마다 한 번만 만든다
     out = []
@@ -953,20 +1008,24 @@ def layout(diagram: Diagram) -> Layout:
 # ---------------------------------------------------------------- 그리기
 
 
-def _draw_relation(c: Canvas, r: PlacedRelation, t: RelationType) -> tuple[Line, tuple[Union[Line, Polygon], ...]]:
-    """선과 선 끝 모양을 그리고 그 기록을 돌려준다."""
+def _draw_relation(c: Canvas, r: PlacedRelation, t: RelationType, by_key: Mapping[str, PlacedBox]
+                   ) -> tuple[Line, tuple[Union[Line, Polygon], ...], tuple[HeadMark, ...]]:
+    """선과 선 끝 모양을 그리고 그 기록과 끝 모양마다의 이름·끝 점을 돌려준다. 끝 모양은 끝 요소가 향하게 한 점(anchor)도 받는다."""
     pts, o = r.points, r.owner
+    first, last = by_key[r.relation.source].anchor, by_key[r.relation.target].anchor
+    assert first is not None and last is not None
     line = c.line(pts, dash=t.dash, owner=o)
-    heads: list[Union[Line, Polygon]] = []
+    ends: list[tuple[EndShape, Point, Point, Point]] = []  # (모양, 끝 점, 그 앞 점, 끝 요소의 점)
     if t.start is not None:
-        heads.append(t.start.draw(c, pts[0], pts[1], o))
+        ends.append((t.start, pts[0], pts[1], first))
     if t.end is not None:
-        heads.append(t.end.draw(c, pts[-1], pts[-2], o))
+        ends.append((t.end, pts[-1], pts[-2], last))
     if t.navigable and r.relation.navigable in ("to", "both"):
-        heads.append(ARROW_HEAD.draw(c, pts[-1], pts[-2], o))
+        ends.append((ARROW_HEAD, pts[-1], pts[-2], last))
     if t.navigable and r.relation.navigable in ("from", "both"):
-        heads.append(ARROW_HEAD.draw(c, pts[0], pts[1], o))
-    return line, tuple(heads)
+        ends.append((ARROW_HEAD, pts[0], pts[1], first))
+    heads = tuple(s.draw(c, tip, frm, at, o) for s, tip, frm, at in ends)
+    return line, heads, tuple(HeadMark(s.name, tip) for s, tip, _, _ in ends)
 
 
 def _draw_box(c: Canvas, p: PlacedBox) -> None:
@@ -984,15 +1043,15 @@ def draw(diagram: Diagram, scale: float = SCALE) -> Drawing:
     depth = {p.key: len(lay.ancestors(p.key)) for p in lay.boxes}
     for p in sorted((p for p in lay.boxes if p.key in lay.parents), key=lambda p: depth[p.key]):
         _draw_box(c, p)
-    shapes = [_draw_relation(c, r, lay.kind_of(r.relation)) for r in lay.relations]
+    shapes = [_draw_relation(c, r, lay.kind_of(r.relation), lay.by_key) for r in lay.relations]
     for p in lay.boxes:
         if p.key not in lay.parents:
             _draw_box(c, p)
     drawn = []
-    for r, (line, heads) in zip(lay.relations, shapes):
+    for r, (line, heads, marks) in zip(lay.relations, shapes):
         texts = tuple(tuple(c.text(lab.x, y, s, anchor="mm", bg=True, owner=r.owner)
                             for s, y in zip(lab.lines, line_ys(lab.y, len(lab.lines)))) for lab in r.labels)
-        drawn.append(DrawnRelation(line, heads, texts))
+        drawn.append(DrawnRelation(line, heads, texts, marks))
     return Drawing(c, lay, tuple(drawn), diagram.notices)
 
 

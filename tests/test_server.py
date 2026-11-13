@@ -12,7 +12,7 @@ from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
 from cysuml import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, componentdiagram,
-                    deploymentdiagram, guide, packagediagram, sequencecheck, sequencediagram, server, statediagram,
+                    deploymentdiagram, guide, packagediagram, sequencecheck, sequencediagram, server, shapes, statediagram,
                     usecasediagram)
 from cysuml.canvas import SCALE
 from cysuml.parsing import InputError
@@ -393,22 +393,29 @@ def test_relation_fields_say_where_lines_start_for_each_tool():
     assert "선은 상자 가운데에서 첫 꺾는 점(없으면 상대 상자 가운데)으로 가는 선이 상자 변과" in server.CLASS_TOOL
     assert "선은 요소 가운데(요소 종류에 따로 적은 모양은 그 점)에서" in packagediagram.TOOL
     assert "탭 오른쪽 몸통의 가운데를 향한다" in packagediagram.TOOL
-    # 패키지도에는 모양 밖 이름이 있는 요소가 없어 그 결과 문장을 넣지 않는다
-    assert guide.PLACES_RESULT in packagediagram.TOOL and guide.OUTSIDE_PLACES not in packagediagram.TOOL
+    # 아이콘 표기 두 종류도 "따로 적은 점"을 적는다
+    assert "UML 1 표기 컴포넌트는 부품 네모를 뺀 상자의 가운데(자리 가운데보다 튀어나온 폭의 반 4px 오른쪽)" in packagediagram.TOOL
+    assert shapes.PART[0] / 4 == 4  # 위 글의 4px — 부품 네모 폭을 바꾸면 안내 글도 고친다
+    assert "문서 아이콘 아티팩트는 문서의 가운데(결과의 모양 자리 가운데)이고, 둘 다 반 픽셀이면 정수로 내린다" in packagediagram.TOOL
+    # 패키지도도 모양 밖 이름이 있는 문서 아이콘 아티팩트를 받으므로 이름 쪽과 모양 자리 결과 문장을 넣는다(한 번씩)
+    for tool in (packagediagram.TOOL, componentdiagram.TOOL, deploymentdiagram.TOOL):
+        assert guide.PLACES_RESULT in tool and tool.count(guide.OUTSIDE_PLACES) == 1 and tool.count(guide.NAME_SIDE) == 1
 
 
 def test_new_tools_tell_what_the_result_adds_to_the_places_of_their_shapes():
-    aim = '  선이 모양 가운데에서 비켜난 점을 향하는 요소(kind "package")는 그 뒤에 그 점을 "향하는 점 x, y"로 덧붙인다'
+    # 패키지도: 문서 아이콘 아티팩트의 모양 자리, 패키지와 UML 1 표기 컴포넌트가 향하는 점이 붙는다
+    aim = '  선이 모양 가운데에서 비켜난 점을 향하는 요소(kind "package"·"component_icon")는 그 뒤에 그 점을 "향하는 점 x, y"로 덧붙인다'
     _, tools, _ = run(server.mcp)
     for name, (_, _, spec) in PLACED_TOOLS.items():
         if spec.extended:
             assert guide.places_result(spec) in tools[name].description, name
-    assert guide.places_result(packagediagram.SPEC).startswith(guide.PLACES_RESULT + "\n" + aim)
+    assert guide.places_result(packagediagram.SPEC).startswith(guide.PLACES_RESULT + "\n" + guide.OUTSIDE_PLACES + "\n" + aim)
     # 유즈케이스도: 액터의 모양 자리는 붙고, 액터·유즈케이스가 향하는 점은 가운데를 정수로 내린 점이라 붙이지 않는다
     assert guide.places_result(usecasediagram.SPEC) == guide.PLACES_RESULT + "\n" + guide.OUTSIDE_PLACES
     assert "향하는 점" not in server.CLASS_TOOL and "향하는 점" not in usecasediagram.TOOL
     # 비켜난 점을 향하는 모양도 모양 밖 이름도 없는 도구는 PLACES_RESULT만
-    plain = boxdiagram.Spec({k: s for k, s in packagediagram.SPEC.shapes.items() if not boxdiagram.aims_off_center(s)},
+    plain = boxdiagram.Spec({k: s for k, s in packagediagram.SPEC.shapes.items()
+                             if not boxdiagram.aims_off_center(s) and not s.outside_name},
                             classdiagram.RELATIONS, extended=True)
     assert guide.places_result(plain) == guide.PLACES_RESULT
 

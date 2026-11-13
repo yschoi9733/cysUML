@@ -589,3 +589,97 @@ def test_ellipse_is_drawn_by_its_shape():
     d = draw([el("oval", "O", 0, 0)])
     (e,) = owned(d, "O", Ellipse)
     assert (e.left, e.top, e.width, e.height) == (0, 0, 120, 60)
+
+
+# ---------------------------------------------------------------- 선 끝 띄우기·끝 모양 이름·모양 밖 이름 거리
+
+
+def _socket(c, tip, frm, at, o):
+    """시험용 끝 모양: 끝 요소가 향하게 한 점(at)을 가운데로, 선 끝(tip)을 지나는 반원(점 여러 개짜리 열린 선)."""
+    r = math.dist(at, tip)
+    th = math.atan2(tip[1] - at[1], tip[0] - at[0])
+    return c.line([(at[0] + r * math.cos(th + a), at[1] + r * math.sin(th + a))
+                   for a in (math.pi / 2 * (k / 4 - 1) for k in range(9))], owner=o)
+
+
+SOCKET = B.EndShape("반원", 0, _socket, gap=6)
+USES = B.RelationType("소켓", end=SOCKET)
+SOCKET_SPEC = B.Spec(SHAPES, {**RELATIONS, "uses": USES})
+
+
+def socket_drawing(*more_elements, relations=(), via=None):
+    # 원(지름 24, 가운데 12, 12)의 이름은 오른쪽, A(가운데 y 12)는 왼쪽에서 가로로 들어온다
+    uses = rel("uses", "A", "Api", **({"via": via} if via else {}))
+    return draw([dot("Api", 0, 0, name_side="right"), el("class", "A", -200, -12), *more_elements], [uses, *relations],
+                spec=SOCKET_SPEC)
+
+
+def test_end_shape_with_a_gap_ends_the_line_before_the_border_and_passes():
+    d = socket_drawing()
+    (r,) = d.layout.relations
+    assert r.points[-1] == pytest.approx((-6, 12))  # 원 왼쪽(0, 12)에서 6 앞
+    (drawn,) = d.drawn
+    (arc,) = drawn.heads
+    assert isinstance(arc, Line) and len(arc.points) == 9
+    assert all(math.dist(p, (12, 12)) == pytest.approx(18) for p in arc.points)  # 원 가운데를 둘러 원에서 6 떨어진다
+    assert drawn.marks == (B.HeadMark("반원", r.points[-1]),)
+    assert K.check(d).passed, K.check(d).summary()
+
+
+def test_check_names_an_end_shape_by_its_definition_not_by_its_points():
+    # 세로선 B→C(x −6)가 반원 꼭대기를 지나간다 — 점이 아홉 개인 열린 선이지만 "화살촉"이 아니라 제 이름으로 부른다
+    r = K.check(socket_drawing(el("class", "B", -51, -150), el("class", "C", -51, 150),
+                               relations=[rel("dependency", "B", "C")]))
+    assert "line_through_head" in kinds(r)
+    (f,) = [f for f in r.failures if f.kind == "line_through_head"]
+    assert "반원" in f.problem and "화살촉" not in f.problem
+
+
+def _hook(c, tip, frm, at, o):
+    """시험용 열린 끝 모양: 양 끝은 선 쪽 밖에 있고 가운데 점이 끝 요소 안으로 5px 들어간다."""
+    d = math.dist(tip, frm)
+    ux, uy = (tip[0] - frm[0]) / d, (tip[1] - frm[1]) / d
+    return c.line([(tip[0] - 6 * ux - 5 * uy, tip[1] - 6 * uy + 5 * ux), (tip[0] + 5 * ux, tip[1] + 5 * uy),
+                   (tip[0] - 6 * ux + 5 * uy, tip[1] - 6 * uy - 5 * ux)], owner=o)
+
+
+def test_open_end_shape_whose_middle_point_goes_into_its_element_fails():
+    hooked = B.Spec(SHAPES, {**RELATIONS, "hooks": B.RelationType("갈고리", end=B.EndShape("갈고리", 6, _hook))})
+    r = report([el("class", "A", 0, 0), el("class", "B", 300, 0)], [rel("hooks", "A", "B")], spec=hooked)
+    (f,) = r.failures
+    assert f.kind == "head_under_own_box" and "갈고리" in f.problem
+
+
+@pytest.mark.parametrize("via, problem", [
+    ([[-3, 12]], r"to 쪽 끝 구간 길이 3가 끝 모양 길이와 띄운 거리를 더한 길이\(6\)보다 길지 않다"),
+    # 띄운 거리와 꼭 같아도 — 당긴 선 끝이 앞 점에 겹쳐 길이 0인 선이 되므로 입력 오류다
+    ([[-6, 12]], r"to 쪽 끝 구간 길이 6가 끝 모양 길이와 띄운 거리를 더한 길이\(6\)보다 길지 않다"),
+])
+def test_end_segment_not_longer_than_the_gap_is_an_input_error(via, problem):
+    with pytest.raises(InputError, match=problem):
+        socket_drawing(via=via)
+
+
+def test_only_the_end_with_a_gap_speaks_of_the_gap():
+    # from 쪽은 마름모(길이 18, 띄우지 않음), to 쪽은 소켓(띄움 6). 첫 구간 10이 모자란 from 쪽 글에는 띄운 거리가 없다
+    both = B.Spec(SHAPES, {**RELATIONS, "has": B.RelationType("소켓 집합", start=B.OPEN_DIAMOND, end=SOCKET)})
+    with pytest.raises(InputError) as e:
+        draw([dot("Api", 0, 0, name_side="right"), el("class", "A", -200, -12)],
+             [rel("has", "A", "Api", via=[[-100, 12], [-50, 12]])], spec=both)
+    assert e.value.problems == ("relations[0]: from 쪽 끝 구간 길이 10가 끝 모양 길이(18)보다 짧다 — 첫 꺾는 점을 요소에서 더 "
+                                "떼어 놓는다",)
+
+
+def test_a_straight_line_exactly_as_long_as_the_gap_is_an_input_error_not_a_crash():
+    with pytest.raises(InputError, match=r"선 길이 6가 양 끝 모양 길이와 띄운 거리를 더한 길이\(from 쪽 0, to 쪽 6\)보다 길지 않다"):
+        draw([dot("Api", 0, 0, name_side="right"), el("class", "A", -96, -12)], [rel("uses", "A", "Api")], spec=SOCKET_SPEC)
+
+
+def test_shape_sets_the_gap_between_itself_and_its_outside_name():
+    class FarDot(Dot):
+        name_gap = 12
+
+    spec = B.Spec({"dot": Dot(), "far": FarDot()}, {"flow": FLOW})
+    near, far = (draw([el(k, "Api", 0, 0)], spec=spec).layout.boxes[0] for k in ("dot", "far"))
+    assert far.height == near.height + 12 - B.NAME_SEP
+    assert far.zones[0].rect[1] == 24 + 12 and near.zones[0].rect[1] == 24 + B.NAME_SEP
