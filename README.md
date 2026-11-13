@@ -117,7 +117,7 @@ state lists its `entry /`, `do /` and `exit /` lines in `actions`, written as gi
   "relations": [
     {"from": "start", "to": "Waiting"},
     {"from": "Waiting", "to": "Checking", "name": "order [in stock] / accept"},
-    {"from": "Waiting", "to": "Waiting", "name": "tick", "via": [[190, 60], [190, 100]]},
+    {"from": "Waiting", "to": "Waiting", "name": "tick", "via": [[190, 68], [190, 92]]},
     {"from": "Checking", "to": "end", "name": "paid"}
   ]
 }

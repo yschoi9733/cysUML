@@ -66,6 +66,7 @@ TOOL = f"""액티비티도를 그려 PNG 파일로 저장하고, 검사 결과�
 {PLACES_RESULT}
 {IMAGE_RESULT}
 - elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
+시작 점으로 들어오거나 끝 점에서 나가는 흐름은 그 밖의 입력이 맞을 때 따로 모아 알린다. \
 그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.
 
 {flow(KINDS, SPEC.words)}

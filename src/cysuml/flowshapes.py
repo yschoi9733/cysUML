@@ -67,6 +67,13 @@ def _circle(rect: Box) -> EllipseBorder:
     return EllipseBorder((l + r) / 2, (t + b) / 2, (r - l) / 2, (b - t) / 2)
 
 
+@lru_cache(maxsize=1024)
+def _diamond(rect: Box) -> PolygonBorder:
+    l, t, r, b = rect
+    cx, cy = (l + r) / 2, (t + b) / 2
+    return PolygonBorder(((cx, t), (r, cy), (cx, b), (l, cy)))
+
+
 class _Solid(Shape):
     """사각형이 아닌 모양. 요소끼리 겹치는지도 자리 사각형이 아니라 실제 테두리로 본다. 요소 스테레오타입은 받지 않는다."""
 
@@ -121,12 +128,10 @@ class DiamondShape(_Fixed):
     SIZE = (DIAMOND_SIZE, DIAMOND_SIZE)
 
     def corners(self, rect: Box) -> tuple[Point, ...]:
-        l, t, r, b = rect
-        cx, cy = (l + r) / 2, (t + b) / 2
-        return (cx, t), (r, cy), (cx, b), (l, cy)
+        return _diamond(rect).points
 
     def border(self, e: Element, rect: Box) -> Border:
-        return PolygonBorder(self.corners(rect))
+        return _diamond(rect)
 
     def draw(self, c: Canvas, p: PlacedBox) -> None:
         c.poly(self.corners(p.rect), owner=p.key)
@@ -236,10 +241,10 @@ def parse_flow(spec: Spec, data: Any) -> Diagram:
     for i, r in enumerate(diagram.relations):  # 읽기가 통과했으면 관계는 입력 차례 그대로 다 있다
         path, label = _at("relations", i), spec.relations[r.kind].label
         said = f"{label}{josa(label, '은', '는')}"
-        if shape_of[r.target] is START_POINT:
+        if isinstance(shape_of[r.target], StartShape):
             problems.append(f"{_at(path, 'to')}: 시작 점({_show(r.target)})으로 들어오는 {said} 그릴 수 없다 — 시작 점은 "
                             "from에만 쓴다")
-        if shape_of[r.source] is FINAL_POINT:
+        if isinstance(shape_of[r.source], FinalShape):
             problems.append(f"{_at(path, 'from')}: 끝 점({_show(r.source)})에서 나가는 {said} 그릴 수 없다 — 끝 점은 to에만 쓴다")
     if problems:
         raise InputError(problems)
