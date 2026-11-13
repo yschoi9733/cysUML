@@ -11,8 +11,8 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
-from cysuml import (activitydiagram, boxcheck, boxdiagram, classcheck, componentdiagram, guide, packagediagram,
-                    sequencecheck, sequencediagram, server, statediagram, usecasediagram)
+from cysuml import (activitydiagram, boxcheck, boxdiagram, classcheck, componentdiagram, deploymentdiagram,
+                    guide, packagediagram, sequencecheck, sequencediagram, server, statediagram, usecasediagram)
 from cysuml.canvas import SCALE
 from cysuml.report import Finding
 
@@ -61,6 +61,7 @@ TOOLS = [  # 도구 → 필수 입력, 객체 목록 입력, 문자열 목록 �
     ("draw_class_diagram", ["file_name", "classes"], ("classes", "relations"), ()),
     ("draw_package_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_component_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
+    ("draw_deployment_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_use_case_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_state_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
     ("draw_activity_diagram", ["file_name", "elements"], ("elements", "relations"), ()),
@@ -70,6 +71,7 @@ EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 �
     "order": "draw_class_diagram",
     "packages": "draw_package_diagram",
     "components": "draw_component_diagram",
+    "deployment": "draw_deployment_diagram",
     "use-cases": "draw_use_case_diagram",
     "order-states": "draw_state_diagram",
     "order-flow": "draw_activity_diagram",
@@ -79,6 +81,7 @@ PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야
     "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, boxdiagram.BOX_WORDS),
     "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
     "draw_component_diagram": (componentdiagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
+    "draw_deployment_diagram": (deploymentdiagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
     "draw_use_case_diagram": (usecasediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
     "draw_state_diagram": (statediagram.TIPS, boxcheck.KINDS, boxdiagram.ELEMENT_WORDS),
     "draw_activity_diagram": (activitydiagram.TIPS, activitydiagram.KINDS, boxdiagram.ELEMENT_WORDS),
@@ -175,6 +178,15 @@ def test_component_tool_returns_the_circle_place_of_a_lollipop(tmp_path):
                                                          "out_dir": str(tmp_path)}))[2]
     assert not r.is_error and text(r).startswith("합격"), text(r)
     assert "OrderApi(160, 14, " in text(r) and ", 모양 160, 14, 20×20)" in text(r)
+
+
+def test_deployment_diagram_always_carries_its_english_name():
+    # 이 레포는 "배치"를 자리 잡기 뜻으로도 쓰므로, 도구 설명·안내문·README 한국어 부분은 그림 이름에 늘 영어 이름을 붙인다
+    korean = README.read_text(encoding="utf-8").split("\n## 한국어\n", 1)[1]
+    for text in (deploymentdiagram.TOOL, server.INSTRUCTIONS, korean):
+        assert "배치도" in text
+        assert not re.search(r"배치도(?!(\*\*)?\(deployment diagram\))", text)
+    assert deploymentdiagram.TIPS.startswith("배치도(deployment diagram) 자리 잡기 요령:")
 
 
 def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):
