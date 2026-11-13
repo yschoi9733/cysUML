@@ -4,20 +4,28 @@
 - NEW_INPUT(나): 새 그림 도구가 모두 받는 입력 규칙(열쇠·여러 줄 이름·관계 스테레오타입).
 - PLACED_ELEMENTS(다): 패키지도·컴포넌트도·배치도(deployment diagram)가 함께 받는 요소 종류.
 - relation_fields(라): 도구 정의가 받는 관계 종류(클래스도 관계 여섯 가지 가운데 고른 것 등)와 연관의 기본 방향, 표기 규칙으로 만드는
-  관계 필드.
+  관계 필드. 공유 줄기를 받는 관계(상속·실체화)가 있으면 그 모양을 쓰는 법도 붙인다.
 - NESTING(마): 요소 안에 요소 두기.
 - NAME_SIDE(바): 모양 밖 이름의 쪽.
+- places_result(사): 새 도구의 결과 글 설명. 그 도구의 모양에 따라 자리 뒤에 덧붙는 것(모양 자리·선이 향하는 점)도 적는다.
 """
 from __future__ import annotations
 
 from typing import Iterable, Optional
 
 from .boxcheck import KINDS
-from .boxdiagram import ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, Spec, Words, josa
+from .boxdiagram import ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec, Words, aims_off_center, josa
 from .canvas import MIN_SCALE, SCALE
+from .report import fmt_num
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
 DEFAULT_DIR = "diagrams"
+# 같은 부모로 종류가 다른 두 줄기를 둘 때의 수(px). 맞물리는 조건은 test_server가 본다
+TRUNK_SPLIT = 20  # 둘째 줄기는 첫 줄기보다 이만큼 아래(자식 쪽)에 둔다
+TRUNK_SIDE = 30  # 둘째 줄기를 부모 옆 변으로 들일 때 그 변에서 떼는 거리. 끝 구간이 끝 모양 길이보다 길어야 한다
+TRUNK_CLEAR = 10  # 둘째 줄기가 자식 위 변에서 떨어져야 하는 거리(실측 5px까지 합격 — 붙어 감 판정은 4px)
+TRUNK_ROOM = 60  # 부모와 자식 사이 간격. 첫 줄기를 가운데에 두면 둘째 줄기가 자식 위 변에서 TRUNK_CLEAR 떨어진다
+TRUNK_NEAR = 4  # 첫 종류 자식의 세로 줄이 둘째 줄기의 세로 줄에서 이만큼 안이면 포개진다(boxcheck.OVERLAP_GAP 2 + 여유)
 
 KIND_NAMES = {  # 불합격 종류(boxcheck.KINDS)를 도구 설명에 쓰는 말. "요소"는 도구의 말(클래스도는 상자)로 바꿔 쓴다(kind_names)
     "box_overlap": "요소끼리 겹치거나 붙음",
@@ -72,7 +80,27 @@ IMAGE_RESULT = f"- 그림: 저장한 PNG. 긴 변이 {MAX_IMAGE_EDGE}px를 넘�
 PLACES_RESULT = ("- 글: 검사 결과, 요소마다 그린 자리(열쇠와 왼, 위, 폭×높이), 저장한 파일 경로와 픽셀 크기. 자리를 그대로 다음 "
                  "입력에 넣으면 요소가 움직이지 않는다.")
 OUTSIDE_PLACES = ("  모양 밖 이름이 있는 요소의 자리는 모양과 이름을 함께 덮고, 그 뒤에 모양 자리를 \"모양 왼, 위, 폭×높이\"로 "
-                  "덧붙인다(꺾는 점을 모양 둘레에 줄 때 쓴다).")  # 모양 밖 이름이 있는 모양을 받는 도구만 PLACES_RESULT 뒤에 붙인다
+                  "덧붙인다(꺾는 점을 모양 둘레에 줄 때 쓴다).")  # places_result가 모양 밖 이름이 있는 모양을 받는 도구에만 붙인다
+
+
+def _aiming(spec: Spec) -> list[str]:
+    """선이 모양 가운데에서 비켜난 점을 향하는 요소 종류(kind)."""
+    return [k for k, s in spec.shapes.items() if aims_off_center(s)]
+
+
+def _outside(spec: Spec) -> bool:
+    return any(s.outside_name for s in spec.shapes.values())
+
+
+def places_result(spec: Spec) -> str:
+    """새 도구의 결과 글 설명 — PLACES_RESULT 뒤에, 그 도구의 모양에 따라 자리 뒤에 덧붙는 것(모양 밖 이름의 모양 자리, 선이 향하는
+    점)을 적는다."""
+    lines = [PLACES_RESULT] + ([OUTSIDE_PLACES] if _outside(spec) else [])
+    if kinds := _aiming(spec):
+        named = "·".join(f'"{k}"' for k in kinds)
+        lines.append(f"  선이 모양 가운데에서 비켜난 점을 향하는 요소(kind {named})는 그 뒤에 그 점을 \"향하는 점 x, y\"로 "
+                     "덧붙인다(꺾는 점을 그 점의 위아래나 옆에 줄 때 쓴다).")
+    return "\n".join(lines)
 
 MEMBERS = """속성·연산은 한 줄 문자열(그대로 쓴다)이나 객체다. 속성 객체는 name(필수)·type·default·visibility(기본 "-")·static, \
 연산 객체는 name(필수)·params(문자열 목록)·returns·visibility(기본 "+")·static. visibility는 "+"·"-"·"#"·"~"·""(안 씀)이고, \
@@ -159,6 +187,49 @@ def relation_fields(spec: Spec) -> str:
     lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "
                  f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 "
                  f"한다{never_self}.")
+    trunks = [t for t in types.values() if t.trunk]
+    if trunks:
+        lines.append(_trunk(trunks, spec))
     if rules := spec.rules.guide(spec):
         lines.append(rules)
+    return "\n".join(lines)
+
+
+def _trunk(types: list[RelationType], spec: Spec) -> str:
+    """공유 줄기를 쓰는 법. 검사(boxcheck)는 같은 부모로 가는 같은 종류의 선들이 끝 모양을 정확히 같은 자리에 그릴 때만 그 포개짐을
+    봐주므로, 자식마다 마지막 꺾는 점을 같게 주는 법을 적는다. 가운데는 결과 글에 덧붙는 것(places_result)으로 셈한다."""
+    pairs = ", ".join(f"{t.label}끼리" for t in types)
+    head = _joined(t.end.name for t in types if t.end is not None)
+    longest = max(t.end.length for t in types if t.end is not None)
+    noun, edge = spec.words.noun, spec.words.edge
+    ga = josa(head, "이", "가")
+    outside = _outside(spec)
+    shape = " — 모양 자리가 덧붙어 있으면 모양 자리로 셈한다" if outside else ""
+    aim = ". 향하는 점이 덧붙어 있으면 그 점을 쓴다" if _aiming(spec) else ""
+    middle = f"결과의 {noun} 자리에서 왼 + 폭/2, 위 + 높이/2{shape}{aim}"
+    edges = "(모양 자리가 덧붙어 있으면 모양 자리의 변)" if outside else ""
+    sides = '(모양 밖 이름은 name_side "left"·"right"로 옆에 쓴다 — 위·아래면 줄기가 이름을 지난다)' if outside else ""
+    lines = [f"  - 공유 줄기: 같은 부모(to)로 가는 {pairs}는 여러 선을 한 줄기로 모아 {head} 하나를 함께 쓰게 그려도 된다. "
+             f"{head}{ga} 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다(종류가 다른 선을 섞거나 {head}{ga} 조금이라도 "
+             f"어긋나면 불합격이다). 부모를 위에, 자식들을 그 아래 한 줄에 두고{sides} 이렇게 준다:",
+             f"    - 가운데 x·y: {middle}.",
+             f"    - 줄기 높이 y는 부모 {noun}의 아래 {edge}{josa(edge, '과', '와')} 자식 {noun}들의 위 {edge}{edges} 사이 가운데쯤에 "
+             f"정한다. 부모 아래 {edge}에서 {head} 길이 {fmt_num(longest)}px보다 가까우면 입력 오류다.",
+             f"    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다. 마지막 점이 모두 같아 {head}{ga} 한 자리에 "
+             f"그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다."]
+    if len(types) > 1:
+        labels = _joined(t.label for t in types)
+        within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if outside else ""
+        named = ", 부모의 모양 밖 이름이 오른쪽에 있거나" if outside else ""
+        lines += [f"    - 같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오면 종류마다 줄기를 따로 둔다. 한 종류는 위대로 아래 "
+                  f"{edge}에 모은다. 다른 종류는 세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {TRUNK_SIDE}, 줄기 높이 "
+                  f"y2 = y + {TRUNK_SPLIT}(첫 줄기보다 아래, 자식 쪽)로 정하고 자식마다 via에 [자식 가운데 x, y2], [x2, y2], "
+                  f"[x2, 부모 가운데 y] 세 점을 주어 부모 오른쪽 {edge}에 모은다. 자식 가운데 x가 x2와 같으면 [x2, 부모 가운데 y] "
+                  f"하나만 준다.",
+                  f"    - x2 줄(y2에서 부모 가운데 y까지)에 다른 {noun}{josa(noun, '이', '가')} 걸리거나, 부모 오른쪽 {edge}에 다른 "
+                  f"선이 닿거나{named}, 첫 종류 자식의 가운데 x가 x2에서 {TRUNK_NEAR}px 안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 "
+                  f"{edge}의 x(왼{within}) − {TRUNK_SIDE}로 두어 왼쪽 {edge}에 모은다. 왼쪽도 그렇게 막히면 걸린 "
+                  f"{noun}{josa(noun, '을', '를')} 옮기거나 자식 차례를 바꾼다.",
+                  f"    - 두 줄기를 둘 때는 y2가 자식 {noun}들의 위 {edge}보다 {TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
+                  f"{TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다."]
     return "\n".join(lines)

@@ -13,7 +13,7 @@ from .boxcheck import NESTED_KINDS
 from .boxdiagram import ARROW_HEAD, ELEMENT_WORDS, Diagram, Drawing, RelationType, Spec
 from .canvas import SCALE
 from .flowshapes import ACTION, DIAMOND, DIAMOND_SIZE, FINAL, FINAL_POINT, START, START_POINT, parse_flow
-from .guide import COMMON_INPUT, IMAGE_RESULT, NEW_INPUT, PLACES_RESULT, flow
+from .guide import COMMON_INPUT, IMAGE_RESULT, NEW_INPUT, flow, places_result
 
 FLOW = RelationType("흐름", end=ARROW_HEAD)
 SHAPES = {"initial": START_POINT, "final": FINAL_POINT, "action": ACTION, "decision": DIAMOND, "merge": DIAMOND}
@@ -63,7 +63,7 @@ TOOL = f"""액티비티도를 그려 PNG 파일로 저장하고, 검사 결과�
 {NEW_INPUT}
 
 결과
-{PLACES_RESULT}
+{places_result(SPEC)}
 {IMAGE_RESULT}
 - elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
 시작 점으로 들어오거나 끝 점에서 나가는 흐름은 그 밖의 입력이 맞을 때 따로 모아 알린다. \

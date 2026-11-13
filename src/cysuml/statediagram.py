@@ -13,7 +13,7 @@ from .boxdiagram import ARROW_HEAD, ELEMENT_WORDS, LABEL_LINE, NEST_PAD, Diagram
 from .canvas import SCALE
 from .classdiagram import ROW, SECTION_PAD
 from .flowshapes import DIAMOND, DIAMOND_SIZE, FINAL, FINAL_POINT, NAME_BAND, START, START_POINT, STATE, parse_flow
-from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACES_RESULT, flow
+from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, flow, places_result
 
 TRANSITION = RelationType("전이", end=ARROW_HEAD)
 SHAPES = {"initial": START_POINT, "final": FINAL_POINT, "state": STATE, "choice": DIAMOND}
@@ -73,7 +73,7 @@ TOOL = f"""상태도를 그려 PNG 파일로 저장하고, 검사 결과와 그�
 {NESTING}
 
 결과
-{PLACES_RESULT}
+{places_result(SPEC)}
 {IMAGE_RESULT}
 - elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
 시작 점으로 들어오거나 끝 점에서 나가는 전이는 그 밖의 입력이 맞을 때 따로 모아 알린다. \

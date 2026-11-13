@@ -27,7 +27,7 @@ from . import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, 
 from .canvas import MIN_SCALE, SCALE
 from .guide import COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, MAX_IMAGE_EDGE, MEMBERS, flow, relation_fields
 from .parsing import InputError
-from .report import Report, fmt_rect
+from .report import Report, fmt_num, fmt_rect
 from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
 
 MAX_NAME_BYTES = 200  # 파일 이름(확장자 빼고) UTF-8 길이 상한. 파일 시스템 한도는 보통 255바이트
@@ -214,10 +214,12 @@ def _save(png: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[Path]
 
 
 def _places(drawing: boxdiagram.Drawing) -> list[str]:
-    """AI가 배치하는 그림의 요소마다 그린 자리(클래스도는 "상자 자리"). 모양 밖 이름이 있는 요소는 모양 자리를 함께 적는다."""
+    """AI가 배치하는 그림의 요소마다 그린 자리(클래스도는 "상자 자리"). 모양 밖 이름이 있는 요소는 모양 자리를, 선이 모양
+    가운데에서 비켜난 점을 향하는 요소(aims_aside를 켠 모양)는 그 점을 함께 적는다."""
     def one(p: boxdiagram.PlacedBox) -> str:
         shape = f", 모양 {fmt_rect(p.shape_rect)}" if p.shape_rect != p.rect else ""
-        return f"{p.key}({fmt_rect(p.rect)}{shape})"
+        aim = f", 향하는 점 {fmt_num(p.anchor[0])}, {fmt_num(p.anchor[1])}" if boxdiagram.aims_off_center(p.shape) else ""
+        return f"{p.key}({fmt_rect(p.rect)}{shape}{aim})"
     noun = drawing.layout.spec.words.noun
     return [f"{noun} 자리(왼, 위, 폭×높이): " + ", ".join(one(p) for p in drawing.layout.boxes)]
 
