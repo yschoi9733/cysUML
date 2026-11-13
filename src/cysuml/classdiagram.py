@@ -105,7 +105,7 @@ def _member(r: Reader, v, path: str, operation: bool) -> Optional[Row]:
     name = part("name")
     visibility = r.choice(o["visibility"], _at(path, "visibility"), VISIBILITY) if "visibility" in o else (
         "+" if operation else "-")
-    static = r.flag(o["static"], _at(path, "static")) if "static" in o else False  # type: ignore[attr-defined]
+    static = r.flag(o["static"], _at(path, "static")) if "static" in o else False
     if operation:
         params = [r.text(p, _at(_at(path, "params"), i))
                   for i, p in enumerate(r.items(o["params"], _at(path, "params")) if "params" in o else [])]

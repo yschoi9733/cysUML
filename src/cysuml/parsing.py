@@ -71,6 +71,12 @@ class Reader:
             return None
         return T.normalize(v).strip() if name else T.normalize(v)
 
+    def flag(self, v, path: str) -> bool:
+        if not isinstance(v, bool):
+            self.fail(path, f"true나 false여야 한다(받은 값 {show(v)})")
+            return False
+        return v
+
     def choice(self, v, path: str, options: tuple[str, ...]) -> Optional[str]:
         if not isinstance(v, str) or v not in options:
             self.fail(path, f"{' · '.join(repr(o) for o in options)} 가운데 하나여야 한다(받은 값 {show(v)})")

@@ -361,6 +361,8 @@ def test_wrong_element_input(element, expected):
     ([el("package", "P", 0, 0, **{"in": "P"})], [], "elements[0].in: 제 자신 안에 둘 수 없다"),
     ([el("package", "P", 0, 0, **{"in": "Q"}), el("package", "Q", 0, 0, **{"in": "P"})], [],
      "elements[0].in: in이 고리를 이룬다('P' → 'Q' → 'P')"),
+    ([el("package", "P", 0, 0, **{"in": "Q"}), el("package", "Q", 0, 0, **{"in": "P"})], [],
+     "elements[1].in: in이 고리를 이룬다('Q' → 'P' → 'Q')"),
     ([el("package", "P", 0, 0), el("class", "C", 20, 44, **{"in": "P"})], [rel("dependency", "C", "P")],
      "relations[0]: 한 끝('C')이 다른 끝('P') 안에 있다 — 품은 요소와 그 안의 요소는 선으로 잇지 않는다"),
     ([el("class", "A", 0, 0), el("class", "B", 200, 0)], [rel("flow", "A", "B", navigable="to")],
@@ -374,6 +376,13 @@ def test_wrong_keys_nesting_and_relations(elements, relations, expected):
     with pytest.raises(InputError) as e:
         draw(elements, relations)
     assert any(p.startswith(expected) for p in e.value.problems), e.value.problems
+
+
+def test_only_elements_in_a_loop_are_told_about_it():
+    # A가 제 자신 안에 있으면 A만 알린다 — A 안의 B는 고리가 아니다
+    with pytest.raises(InputError) as e:
+        draw([el("package", "A", 0, 0, **{"in": "A"}), el("package", "B", 20, 44, **{"in": "A"})])
+    assert e.value.problems == ("elements[0].in: 제 자신 안에 둘 수 없다",)
 
 
 def test_class_diagram_tool_keeps_its_own_input():

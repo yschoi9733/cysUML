@@ -404,12 +404,6 @@ class _Reader(Reader):
             return None
         return f
 
-    def flag(self, v, path: str) -> bool:
-        if not isinstance(v, bool):
-            self.fail(path, f"true나 false여야 한다(받은 값 {_show(v)})")
-            return False
-        return v
-
     def point(self, v, path: str) -> Optional[Point]:
         if not isinstance(v, (list, tuple)) or len(v) != 2:
             self.fail(path, f"[x, y]여야 한다(받은 값 {_show(v)})")
@@ -494,9 +488,11 @@ class _Reader(Reader):
         두 열쇠를 따로 돌려준다."""
         spec = self.spec
         before = len(self.problems)
-        o = self.obj(v, path, spec.relation_fields(), (("kind",) if spec.default_relation is None else ()) + ("from", "to"))
+        fields = spec.relation_fields()
+        o = self.obj(v, path, fields, (("kind",) if spec.default_relation is None else ()) + ("from", "to"))
         if o is None:
             return None, None, None
+        o = {k: x for k, x in o.items() if k in fields}  # 모르는 필드는 위에서 알렸다
         kind = (self.choice(o["kind"], _at(path, "kind"), tuple(spec.relations)) if "kind" in o
                 else spec.default_relation)
         t = spec.relations.get(kind) if kind is not None else None
@@ -569,9 +565,8 @@ class _Reader(Reader):
                                  f"요소를 두는 종류: {holders or '없음'}")
             else:
                 chain = [e.key, *ancestors(parent_of, e.key)]
-                up = parent_of.get(chain[-1])
-                if up in chain:
-                    self.fail(where, f"in이 고리를 이룬다({' → '.join(_show(k) for k in chain + [up])})")
+                if parent_of.get(chain[-1]) == e.key:  # 이 요소로 돌아오는 고리만(바깥 요소끼리의 고리는 그 요소들이 알린다)
+                    self.fail(where, f"in이 고리를 이룬다({' → '.join(_show(k) for k in chain + [e.key])})")
         return len(self.problems) == before
 
     def diagram(self, data) -> Optional[Diagram]:

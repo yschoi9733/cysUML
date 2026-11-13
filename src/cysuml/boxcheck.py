@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
 from .boxdiagram import LABEL_CLEAR, NEST_PAD, Drawing, Layout, NameZone, PlacedBox, PlacedRelation, Words, josa
 from .canvas import Line, Point, Polygon
-from .geom import (Border, Box, Segment, alongside, axis_gap, between, clip, crossings, distance, enters, grow, hits,
+from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, crossings, distance, enters, grow, hits,
                    inside, meets, outline, span, touches)
 from .report import Finding, fmt_num, fmt_rect, round1
 from .report import Report as _Report
@@ -272,12 +272,13 @@ def _cover(segments: Iterable[Segment]) -> Box:
     return span(pt for s in segments for pt in s)
 
 
-def _parts(segments: Iterable[Segment], rect: Box) -> list[Segment]:
-    return [c for p, q in segments if (c := clip(p, q, rect)) is not None]
-
-
 def _clipped(segments: Iterable[Segment], border: Border) -> list[Segment]:
+    """선분마다 테두리 안(테두리 위 포함)에 든 부분."""
     return [c for p, q in segments if (c := border.clip(p, q)) is not None]
+
+
+def _parts(segments: Iterable[Segment], rect: Box) -> list[Segment]:
+    return _clipped(segments, RectBorder(rect))
 
 
 def _same(a: Any, b: Any) -> bool:

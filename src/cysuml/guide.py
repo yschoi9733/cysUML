@@ -18,7 +18,7 @@ from .canvas import MIN_SCALE, SCALE
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
 DEFAULT_DIR = "diagrams"
 
-KIND_NAMES = {  # 불합격 종류(boxcheck.KINDS)를 도구 설명에 쓰는 말
+KIND_NAMES = {  # 불합격 종류(boxcheck.KINDS)를 도구 설명에 쓰는 말. "요소"는 도구의 말(클래스도는 상자)로 바꿔 쓴다(kind_names)
     "box_overlap": "요소끼리 겹치거나 붙음",
     "inner_off_area": "안의 요소가 바깥 요소의 칸 밖으로 나가거나 테두리·이름 칸에 붙음",
     "line_through_box": "선이 그 선과 상관없는 요소를 지나감",
@@ -44,14 +44,19 @@ PLACED_FLOW = """AI가 배치하는 그림(클래스도·패키지도 등)을 �
 선끼리 엇갈린 곳과 그림 크기는 알림이라 불합격이 아니다. 다만 엇갈림은 적을수록 읽기 좋다."""
 
 
-def flow(kinds: Optional[Iterable[str]] = None) -> str:
+def kind_names(kinds: Iterable[str], noun: str = "요소") -> list[str]:
+    """불합격 종류를 도구 설명에 쓰는 말. noun은 그 도구가 요소를 부르는 말이다(받침 없는 말 — 상자·요소 — 이라 조사는 그대로)."""
+    return [KIND_NAMES[k].replace("요소", noun) for k in kinds]
+
+
+def flow(kinds: Optional[Iterable[str]] = None, noun: str = "요소") -> str:
     """(가) AI가 배치하는 그림의 그리는 흐름. kinds(그 도구에서 날 수 있는 불합격 종류)를 주면 끝에 불합격 목록을 붙인다 —
-    서버 안내문에는 목록 없이 넣는다."""
+    서버 안내문에는 목록 없이 넣는다. noun은 불합격 목록에서 요소를 부르는 말이다(클래스도 도구는 상자)."""
     if kinds is None:
         return PLACED_FLOW
-    kinds = tuple(kinds)
-    names = ", ".join(KIND_NAMES[k] for k in kinds)
-    return f"{PLACED_FLOW}\n\n불합격(선이 요소나 글자를 지나는 등 문서에 넣을 수 없는 그림) {len(kinds)}가지: {names}."
+    names = kind_names(tuple(kinds), noun)
+    return (f"{PLACED_FLOW}\n\n불합격(선이 {noun}나 글자를 지나는 등 문서에 넣을 수 없는 그림) {len(names)}가지: "
+            f"{', '.join(names)}.")
 
 
 COMMON_INPUT = f"""- file_name: 저장할 파일 이름(확장자 없이). 같은 이름이면 덮어쓴다.

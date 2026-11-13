@@ -475,11 +475,18 @@ def cls0(**fields):
     (lambda d: d.update(classes=[]), "classes: 상자가 하나 이상 있어야 한다"),
     (lambda d: d.pop("classes"), "입력: 'classes' 필드가 빠졌다"),
     (lambda d: d.update(title="x"), "title: 모르는 필드다"),
+    (rel(stereotype="<<use>>"), "relations[0].stereotype: 모르는 필드다"),
 ])
 def test_wrong_input_says_where_and_what(change, expected):
     with pytest.raises(C.InputError) as e:
         C.render(mutate(change))
     assert any(p.startswith(expected) for p in e.value.problems), e.value.problems
+
+
+def test_field_the_class_tool_does_not_take_is_told_once():
+    with pytest.raises(C.InputError) as e:
+        C.parse(mutate(rel(stereotype="<<use>>")))
+    assert len(e.value.problems) == 1 and "모르는 필드다" in e.value.problems[0]
 
 
 def test_wrong_kind_still_reports_problems_in_members():

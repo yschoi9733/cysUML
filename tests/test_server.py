@@ -66,9 +66,9 @@ EXAMPLES = {  # README 예시 file_name → 도구. 예시를 더하면 줄을 �
     "packages": "draw_package_diagram",
     "checkout": "draw_sequence_diagram",
 }
-PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령과 날 수 있는 불합격 종류
-    "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS),
-    "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS),
+PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야 하는 배치 요령, 날 수 있는 불합격 종류, 요소를 부르는 말
+    "draw_class_diagram": (server.CLASS_TIPS, classcheck.KINDS, "상자"),
+    "draw_package_diagram": (packagediagram.TIPS, boxcheck.KINDS, "요소"),
 }
 
 
@@ -88,9 +88,9 @@ def test_lists_every_tool_with_its_inputs():
 def test_each_tool_carries_its_flow_and_tips_and_the_instructions_carry_the_flows_only():
     instructions, tools, _ = run(server.mcp)
     seq_tool = tools["draw_sequence_diagram"].description
-    for name, (tips, kinds) in PLACED_TOOLS.items():
+    for name, (tips, kinds, noun) in PLACED_TOOLS.items():
         tool = tools[name].description
-        assert guide.flow(kinds) in tool and tips in tool
+        assert guide.flow(kinds, noun) in tool and tips in tool
         assert server.SEQUENCE_FLOW not in tool and guide.PLACED_FLOW not in seq_tool
         assert tips not in instructions
         assert tips not in seq_tool
@@ -115,8 +115,12 @@ def test_sequence_description_names_every_field_kind_and_limit_the_reader_takes(
 def test_description_names_the_failure_kinds_of_each_tool_in_check_order():
     assert tuple(guide.KIND_NAMES) == boxcheck.KINDS
     assert set(classcheck.KINDS) == set(boxcheck.KINDS) - set(boxcheck.NESTED_KINDS)
-    assert ", ".join(guide.KIND_NAMES[k] for k in classcheck.KINDS) + "." in server.CLASS_TOOL
-    assert not any(guide.KIND_NAMES[k] in server.CLASS_TOOL for k in boxcheck.NESTED_KINDS)
+    # 클래스도 도구는 요소를 상자라고 부른다(그 도구의 입력·결과·검사 글과 같은 말)
+    class_names = guide.kind_names(classcheck.KINDS, "상자")
+    assert ", ".join(class_names) + "." in server.CLASS_TOOL
+    assert "상자끼리 겹치거나 붙음" in class_names and "선이 그 선과 상관없는 상자를 지나감" in class_names
+    assert not any("요소" in n for n in class_names)
+    assert not any(n in server.CLASS_TOOL for n in guide.kind_names(boxcheck.NESTED_KINDS, "상자"))
     assert ", ".join(guide.KIND_NAMES.values()) + "." in packagediagram.TOOL
 
 
