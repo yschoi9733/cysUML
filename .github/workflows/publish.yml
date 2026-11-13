@@ -16,7 +16,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: 태그가 main에 들어간 커밋에 달렸는지 보기
+        run: |
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::태그 $GITHUB_REF_NAME 의 커밋이 main에 없다 — main의 squash 커밋에 태그를 단다"
+            exit 1
+          fi
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
@@ -28,8 +35,10 @@ jobs:
             exit 1
           fi
       - run: uv build
-      - name: 빌드한 휠을 설치한 환경에서 테스트
-        run: uv run --isolated --no-project --with dist/*.whl --with pytest pytest
+      - name: 빌드한 휠을 설치한 환경에서 테스트(지원하는 가장 낮은 파이썬 3.10과 러너 기본 파이썬)
+        run: |
+          uv run --isolated --no-project --python 3.10 --with dist/*.whl --with pytest pytest
+          uv run --isolated --no-project --with dist/*.whl --with pytest pytest
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist
