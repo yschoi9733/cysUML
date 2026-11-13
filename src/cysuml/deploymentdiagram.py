@@ -9,11 +9,10 @@ from __future__ import annotations
 from typing import Any
 
 from . import boxdiagram as B
-from .boxcheck import KINDS
 from .boxdiagram import ELEMENT_WORDS, LABEL_LINE, NEST_PAD, Diagram, Drawing, Spec
 from .canvas import SCALE
 from .classdiagram import HEAD, NAME_LINE, RELATIONS, RULES
-from .guide import COMMON_INPUT, IMAGE_RESULT, NESTING, NEW_INPUT, PLACED_ELEMENTS, flow, places_result, relation_fields
+from .guide import PLACED_ELEMENTS, box_tool, relation_fields, spacing_tips
 from .shapes import DEPTH, SHAPES
 
 SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none", rules=RULES)
@@ -64,31 +63,11 @@ top + {INNER_TOP + 2 * NAME_LINE:g}).
 아래에 꺾는 점(via)을 하나 준다(이름 칸 옆 앞면이 40px보다 좁아 꺾는 점이 앞면 밖(두께 띠나 노드 밖)에 놓여도 된다. 이름 칸 \
 자리는 불합격 항목의 "이름 칸"에 나온다). 보내는 요소가 바깥 노드 오른쪽 위 모서리 근처라 꺾는 점까지 가는 선이 그 모서리의 \
 비스듬한 두께 띠 선을 따라가 불합격하면, 보내는 요소를 옆으로 20px쯤 옮긴다. 끝 요소가 더 깊으면 위에 두지 않는다 — 이 꺾는 점으로는 안쪽 노드의 이름을 비키지 못한다.
-- 요소 사이는 관계 이름·스테레오타입 글자가 들어갈 만큼 띄운다. 가로 80px·세로 60px쯤에서 시작하고, 글자가 길면 더 띄운다.
-- 요소 크기는 도구가 글자와 안의 요소에 맞춰 늘린다. 그린 크기는 결과의 "요소 자리"에서 보고 다음 입력에 쓴다."""
+{spacing_tips(SPEC, "관계 이름·스테레오타입")}"""
 
-TOOL = f"""배치도(deployment diagram)를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 소프트웨어(컴포넌트·아티팩트)가 \
+INTRO = """배치도(deployment diagram)를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 소프트웨어(컴포넌트·아티팩트)가 \
 어느 컴퓨터(노드)에 놓여 도는지 보인다. 노드 안에 컴포넌트·아티팩트·노드를 넣고, 노드끼리 통신 경로를, 노드 밖 요소에서 노드로 \
 «deploy»를 긋는다. 컴포넌트·아티팩트는 아이콘 표기로도 그리고, 클래스·패키지 요소도 한 그림에 섞어 그릴 수 있다. 요소는 준 왼쪽 위(left·top) 그대로, 관계선은 준 꺾는 점(via)을 \
-따라 그리고, 요소 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다.
+따라 그리고, 요소 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다."""
 
-입력
-{PLACED_ELEMENTS}
-{relation_fields(SPEC)}
-{COMMON_INPUT}
-
-{NEW_INPUT}
-
-{NESTING}
-
-{NOTATION}
-
-결과
-{places_result(SPEC)}
-{IMAGE_RESULT}
-- elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
-그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.
-
-{flow(KINDS, SPEC.words)}
-
-{TIPS}"""
+TOOL = box_tool(INTRO, SPEC, f"{PLACED_ELEMENTS}\n{relation_fields(SPEC)}", TIPS, notation=NOTATION)

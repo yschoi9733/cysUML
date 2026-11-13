@@ -12,8 +12,8 @@ from mcp.client.stdio import StdioServerParameters
 from PIL import Image
 
 from cysuml import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, componentdiagram,
-                    deploymentdiagram, guide, packagediagram, sequencecheck, sequencediagram, server, shapes, statediagram,
-                    usecasediagram)
+                    deploymentdiagram, flowshapes, guide, packagediagram, sequencecheck, sequencediagram, server, shapes,
+                    statediagram, usecasediagram)
 from cysuml.canvas import SCALE
 from cysuml.parsing import InputError
 from cysuml.report import Finding
@@ -91,6 +91,14 @@ PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야
 }
 
 TRUNK_TOOLS = [n for n, (_, _, spec) in PLACED_TOOLS.items() if any(t.trunk for t in spec.relations.values())]
+BOX_TOOLS = {  # 상자 그림 도구 → 그림 모듈, relations 인자 설명의 말, 선 글자 이름(요령 끝 항목), 혼자 그릴 요소 종류
+    "draw_package_diagram": (packagediagram, "관계", "관계 이름·스테레오타입", "class"),
+    "draw_component_diagram": (componentdiagram, "관계", "관계 이름·스테레오타입", "component"),
+    "draw_deployment_diagram": (deploymentdiagram, "관계", "관계 이름·스테레오타입", "node"),
+    "draw_use_case_diagram": (usecasediagram, "관계", "관계 이름·스테레오타입", "use_case"),
+    "draw_state_diagram": (statediagram, "전이", "전이", "state"),
+    "draw_activity_diagram": (activitydiagram, "흐름", "흐름", "action"),
+}
 
 
 def test_lists_every_tool_with_its_inputs():
@@ -160,6 +168,72 @@ def test_relation_fields_follow_the_relation_kinds_a_tool_takes():
     assert "함께 오면" not in text
     plain = boxdiagram.Spec(classdiagram.CLASS_SHAPES, {k: classdiagram.RELATIONS[k] for k in kinds[:2]}, navigable="none")
     assert "공유 줄기" not in guide.relation_fields(plain)
+
+
+def test_box_tools_are_registered_from_their_module():
+    # 클래스도 밖의 AI가 배치하는 도구는 모두 _box_tool로 등록한다. 입력 스키마 이름은 도구 이름을 따르고(SDK가 함수 이름으로 짓는다),
+    # relations 설명만 도구마다 다르다
+    assert set(BOX_TOOLS) == set(PLACED_TOOLS) - {"draw_class_diagram"}
+    _, tools, _ = run(server.mcp)
+    for name, (module, word, _, _) in BOX_TOOLS.items():
+        tool = tools[name]
+        assert tool.description == module.TOOL, name
+        schema = tool.input_schema
+        assert schema["title"] == f"{name}Arguments"
+        assert schema["properties"]["elements"]["description"] == "요소 목록(하나 이상). 필드는 도구 설명에 있다."
+        assert schema["properties"]["relations"]["description"] == f"{word} 목록. 필드는 도구 설명에 있다."
+        assert schema["properties"]["relations"]["default"] is None and schema["properties"]["scale"]["default"] == SCALE
+        assert module.SPEC.list_field == "elements"
+
+
+@pytest.mark.parametrize("name", BOX_TOOLS)
+def test_each_box_tool_draws_with_and_without_relations(tmp_path, name):
+    kind = BOX_TOOLS[name][3]
+    elements = [{"kind": kind, "name": n, "left": x, "top": 0} for n, x in (("A", 0), ("B", 300))]
+    alone, both = run(server.mcp, (name, {"file_name": "alone", "elements": elements[:1], "out_dir": str(tmp_path)}),
+                      (name, {"file_name": "both", "elements": elements, "relations": [], "out_dir": str(tmp_path),
+                              "scale": 1}))[2]
+    for r in (alone, both):
+        assert not r.is_error and text(r).startswith("합격"), text(r)
+    assert image(both).size == Image.open(tmp_path / "both.png").size
+    assert (tmp_path / "alone.png").exists()
+
+
+def test_box_tool_descriptions_share_their_input_result_and_closing_tips():
+    for name, (module, _, label, _) in BOX_TOOLS.items():
+        tool, spec = module.TOOL, module.SPEC
+        holds = any(s.holds for s in spec.shapes.values())
+        assert tool.startswith(module.INTRO + "\n\n입력\n") and tool.endswith("\n\n" + module.TIPS), name
+        for part in (guide.COMMON_INPUT, guide.NEW_INPUT, guide.places_result(spec), guide.IMAGE_RESULT):
+            assert tool.count(part) == 1, name
+        # 중첩 절과 "안의 요소"는 안에 요소를 두는 모양이 있는 도구에만(액티비티도는 없다)
+        assert (guide.NESTING in tool) == holds == (name != "draw_activity_diagram"), name
+        assert module.TIPS.endswith("\n" + guide.spacing_tips(spec, label))
+        assert ("글자와 안의 요소에 맞춰" in module.TIPS) == holds
+        # 따로 모아 알리는 오류는 시작·끝 점이 있는 그림(상태도·액티비티도)만, 표기 절은 배치도만 넣는다
+        more = flowshapes.ends_errors(spec) + " " if module in (statediagram, activitydiagram) else ""
+        assert ("따로 모아 알린다" in tool) == bool(more), name
+        assert ("배치도(deployment diagram) 표기:" in tool) == (module is deploymentdiagram)
+        assert (f"\n- elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 "
+                f"돌려준다. {more}그림이 너무 커서") in tool
+    assert "시작 점으로 들어오거나 끝 점에서 나가는 전이는 " in statediagram.TOOL
+    assert "시작 점으로 들어오거나 끝 점에서 나가는 흐름은 " in activitydiagram.TOOL
+    # 배치도 표기 절은 중첩 절 뒤, 결과 절 앞이다
+    tool = deploymentdiagram.TOOL
+    assert tool.index(guide.NESTING) < tool.index(deploymentdiagram.NOTATION) < tool.index("\n\n결과\n")
+
+
+def test_closing_tips_of_every_placed_tool_say_the_next_input():
+    # "배치"는 배치도(deployment diagram)와 헷갈리므로 요령 끝은 "다음 입력에 쓴다"로 맞춘다
+    instructions, tools, _ = run(server.mcp)
+    for name, (tips, _, spec) in PLACED_TOOLS.items():
+        noun = spec.words.noun
+        assert tips.endswith(f'그린 크기는 결과의 "{noun} 자리"에서 보고 다음 입력에 쓴다.'), name
+    for text_ in (instructions, *(t.description for t in tools.values())):
+        assert "다음 배치에" not in text_
+    assert server.CLASS_TIPS.endswith("\n" + guide.spacing_tips(classdiagram.SPEC, "관계 이름·다중도",
+                                                                f"(폭은 {classdiagram.MIN_WIDTH}px 이상)"))
+    assert "(폭은 90px 이상)" in server.CLASS_TIPS
 
 
 def test_tools_with_trunk_relations():
