@@ -342,6 +342,38 @@ def test_two_kinds_to_one_parent_given_as_the_description_says_pass(tmp_path, na
 
 
 
+@pytest.mark.parametrize("name_side, chosen, other", [("right", "left", "right"), ("left", "right", "left")])
+def test_second_trunk_goes_away_from_the_parent_name_outside_the_shape(tmp_path, name_side, chosen, other):
+    """이름을 모양 밖 옆에 쓰는 부모(아이콘 표기 아티팩트) — 아티팩트가 상속하고 클래스가 실현한다. 설명대로 둘째 줄기는 이름 반대쪽
+    변(이름이 오른쪽이면 왼쪽 거울)에 모으고 x2는 모양 자리로 셈한다. 이름 쪽 변으로 모으면 그 이름을 지난다."""
+    parent = {"kind": "artifact_icon", "id": "P", "name": "app.jar", "left": 200, "top": 0, "name_side": name_side}
+    first = {"file_name": "trunk", "elements": [parent], "out_dir": str(tmp_path)}
+    (left, top, width, height), px, py, _ = middles("draw_package_diagram", "elements", first)["P"]
+    y = top + height + 30
+    kinds = (R, G, R, G)
+    boxes = [parent] + [{"kind": "class" if k == R else "artifact", "name": f"C{i}", "left": x, "top": top + height + 60,
+                         "width": 140} for i, (k, x) in enumerate(zip(kinds, TWO_KINDS[1]))]
+    args = {"file_name": "trunk", "elements": boxes, "out_dir": str(tmp_path)}
+    m = middles("draw_package_diagram", "elements", args)
+
+    def draw_to(side):
+        x2 = left + width + guide.TRUNK_SIDE if side == "right" else left - guide.TRUNK_SIDE
+        relations = []
+        for i, k in enumerate(kinds):
+            cx = m[f"C{i}"][1]
+            if k == kinds[0]:
+                via = [[px, y]] if cx == px else [[cx, y], [px, y]]
+            else:
+                via = [[x2, py]] if cx == x2 else [[cx, y + guide.TRUNK_SPLIT], [x2, y + guide.TRUNK_SPLIT], [x2, py]]
+            relations.append({"kind": k, "from": f"C{i}", "to": "P", "via": via})
+        (r,) = run(server.mcp, ("draw_package_diagram", {**args, "relations": relations}))[2]
+        return text(r)
+
+    assert draw_to(chosen).startswith("합격"), draw_to(chosen)
+    crossed = draw_to(other)
+    assert crossed.startswith("불합격") and "이름 칸" in crossed, crossed
+
+
 @pytest.mark.parametrize("name, parent, end", [
     ("draw_package_diagram", {"kind": "package", "name": "P"}, "패키지('P')는"),
     ("draw_component_diagram", {"kind": "lollipop", "id": "P", "name": "Payment API", "name_side": "right"},

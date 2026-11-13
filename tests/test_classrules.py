@@ -270,8 +270,9 @@ def test_only_classes_realize_components_quietly(source):
         assert n.hint.startswith("상속을 뜻했으면 kind를 'generalization'으로")
     else:  # 컴포넌트는 실체화가 가는 종류다 — 걸린 것은 하는 쪽 종류다
         assert n.problem == f"실체화를 하는 쪽이 to를 실현하지 않는 종류다(from 'a': {source!r}, to 'c': 'component')."
-        assert n.hint.startswith("컴포넌트를 실현하는 것은 클래스다 — 아티팩트가 컴포넌트를 구현하는 것이면 dependency에 "
-                                 "stereotype 'manifest'를 달고")
+        # «manifest» 의존은 아티팩트일 때만 권한다
+        manifest = "아티팩트가 컴포넌트를 구현하는 것이면 dependency에 stereotype 'manifest'를 달고, " if source == "artifact" else ""
+        assert n.hint == f"컴포넌트를 실현하는 것은 클래스·추상 클래스다 — {manifest}다른 뜻이면 dependency를 쓴다."
         (p,) = problems(P, elements, [rel("generalization", "a", "c")])
         assert p.endswith("from·to나 요소의 kind를 고친다")
     assert report(P, [el("abstract", "a", 0, 250), el("component", "c", 0)], [rel("realization", "a", "c")]).notices == ()
@@ -316,7 +317,7 @@ def test_inheritance_hint_is_left_out_when_the_same_inheritance_already_exists()
 
 
 @pytest.mark.parametrize("realization, fix", [
-    (("A", "I"), "같은 from·to의 realization이 이미 있다 — 이 상속을 지운다"),
+    (("A", "I"), "같은 from·to의 realization이 이미 있다. 이 상속을 지운다"),
     (("I", "A"), "인터페이스를 구현하는 것이면 kind를 'realization'으로 바꾼다"),  # 거꾸로 가는 실체화는 다른 선이라 바꿔도 된다
 ])
 def test_realization_hint_of_an_inheritance_error_is_left_out_when_that_realization_exists(realization, fix):
@@ -330,7 +331,15 @@ def test_reversed_realization_hint_is_left_out_when_the_reversed_realization_exi
     # 인터페이스 I -> 클래스 A 상속은 거꾸로 적은 실체화일 수 있는데, A -> I 실체화가 이미 있으면 상속을 지우라고 한다
     (p,) = class_problems([box("A", 0), box("I", 300, kind="interface")],
                           [rel("realization", "A", "I"), rel("generalization", "I", "A")])
-    assert p.endswith("거꾸로 가는 realization이 이미 있다 — 이 상속을 지운다")
+    assert p.endswith("거꾸로 가는 realization이 이미 있다. 이 상속을 지운다")
+    assert p.count(" — ") == 1  # 오류 글과 고치는 법을 가르는 줄표는 하나다
+
+
+def test_reversed_realization_notice_says_to_delete_when_the_right_one_exists():
+    # 컴포넌트 -> 클래스 실체화는 방향이 거꾸로인데, 클래스 -> 컴포넌트 실체화가 이미 있으면 바꾸라고 하지 않고 지우라고 한다
+    (n,) = report(CD, [el("component", "K", 0), el("class", "X", 0, 200)],
+                  [rel("realization", "X", "K"), rel("realization", "K", "X", via=[[-40, 200], [-40, 0]])]).notices
+    assert n.hint.endswith("거꾸로 가는 실체화가 이미 있다. 이 실체화를 지운다.")
 
 
 def test_realization_hint_in_tools_with_components_names_component_realization():
@@ -424,9 +433,9 @@ def test_tool_descriptions_state_the_rules_of_the_kinds_the_tool_takes():
             '상속의 끝이 될 수 없는 종류: "package".') in P.TOOL
     assert '상속의 끝이 될 수 없는 종류: "package"·"lollipop".' in CD.TOOL
     assert ('from이 "interface"·"lollipop"·"package" 가운데 하나인 것, to가 "interface"·"lollipop" 밖의 종류인 것(to가 '
-            '"component"·"component_icon" 가운데 하나이고 from이 "class"·"abstract"인 것은 빼고).') in CD.TOOL
+            '"component"·"component_icon" 가운데 하나이고 from이 "class"·"abstract" 가운데 하나인 것은 빼고).') in CD.TOOL
     assert ('from이 "interface"·"package" 가운데 하나인 것, to가 "interface" 밖의 종류인 것(to가 "component"·"component_icon" '
-            '가운데 하나이고 from이 "class"·"abstract"인 것은 빼고).') in D.TOOL
+            '가운데 하나이고 from이 "class"·"abstract" 가운데 하나인 것은 빼고).') in D.TOOL
     # 따옴표 친 종류 이름 바로 뒤에 받침에 따라 갈리는 조사를 붙이지 않는다("lollipop"는은 틀린다 — 이고·인 같은 서술은 괜찮다)
     for tool in (server.CLASS_TOOL, P.TOOL, CD.TOOL, D.TOOL):
         rules = "\n".join(line for line in tool.splitlines() if line.startswith(("  - 규칙:", "  - 알림:")))
