@@ -155,10 +155,10 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     pairs = ", ".join(f"{t.label}끼리" for t in trunks)  # 클래스도·패키지도는 "상속끼리, 실체화끼리", 유즈케이스도는 "일반화끼리"
     for phrase in (f"  - 공유 줄기: 같은 부모(to)로 가는 {pairs}는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 쓰게 "
                    "그려도 된다. 삼각형이 정확히 같은 자리에 그려지면 그 선들이 포개져도 불합격이 아니다",
-                   "부모를 위에, 자식들을 그 아래에 두고 이렇게 준다:",
+                   "부모를 위에, 자식들을 그 아래 한 줄에 두고 이렇게 준다:",
                    f"    - 가운데 x·y: 결과의 {noun} 자리에서 왼 + 폭/2, 위 + 높이/2",
                    f"    - 줄기 높이 y는 부모 {noun}의 아래 {edge}",
-                   f"가장 위 자식 {noun}의 위 {edge} 사이 가운데쯤에 정한다",
+                   f"자식 {noun}들의 위 {edge} 사이 가운데쯤에 정한다",
                    f"부모 아래 {edge}에서 삼각형 길이 {boxdiagram.TRIANGLE[0]}px보다 가까우면 입력 오류다",
                    "    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다",
                    "자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다"):
@@ -168,10 +168,11 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
            "(첫 줄기보다 아래, 자식 쪽)",
            "via에 [자식 가운데 x, y2], [x2, y2], [x2, 부모 가운데 y] 세 점을 주어",
            "자식 가운데 x가 x2와 같으면 [x2, 부모 가운데 y] 하나만 준다.",
-           f"첫 종류 자식의 가운데 x가 x2에서 {guide.TRUNK_NEAR}px 안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 {edge}의 "
+           f"걸리거나, 부모 오른쪽 {edge}에 다른 선이 닿거나, 첫 종류 자식의 가운데 x가 x2에서 {guide.TRUNK_NEAR}px 안이면 "
+           f"왼쪽으로 거울처럼 x2 = 부모 왼쪽 {edge}의 "
            f"x(왼) − {guide.TRUNK_SIDE}로 두어",
            f"왼쪽도 그렇게 막히면 걸린 {noun}를 옮기거나 자식 차례를 바꾼다.",
-           f"y2가 가장 위 자식의 위 {edge}보다 {guide.TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
+           f"y2가 자식 {noun}들의 위 {edge}보다 {guide.TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
            f"{guide.TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다.")
     for phrase in two:  # 줄기 종류가 하나인 도구(유즈케이스도)에는 두 줄기를 나누는 법이 없다
         assert (phrase in text) == (len(trunks) > 1), phrase
@@ -268,9 +269,11 @@ R, G = "realization", "generalization"
 TWO_KINDS = (R, R, G, G), (0, 200, 400, 600)
 
 
-def two_kinds(tmp_path, name, field, kinds, lefts, side="right", room=guide.TRUNK_ROOM, parent_kind="interface", more=()):
+def two_kinds(tmp_path, name, field, kinds, lefts, side="right", room=guide.TRUNK_ROOM, parent_kind="interface", more=(),
+              others=()):
     """부모 P(왼 200, 폭 140) 아래 room 띄운 줄에 자식(kinds[i] — 실체화는 클래스, 상속은 인터페이스)을 두고, 설명대로 첫 종류는
-    아래 변에, 다른 종류는 side 쪽 변에 모은다. (첫 그림 결과 글, 줄기를 준 그림 결과 글, 두 종류를 한 줄기로 모은 그림 결과 글)."""
+    아래 변에, 다른 종류는 side 쪽 변에 모은다. more·others는 더 둘 요소·관계. (줄기를 준 그림 결과 글, 두 종류를 한 줄기로
+    모은 그림 결과 글)."""
     parent = {"kind": parent_kind, "name": "P", "left": 200, "top": 0, "width": 140}
     (left, top, width, height), px, py, _ = middles(name, field, {"file_name": "trunk", field: [parent],
                                                                   "out_dir": str(tmp_path)})["P"]
@@ -283,7 +286,7 @@ def two_kinds(tmp_path, name, field, kinds, lefts, side="right", room=guide.TRUN
     y = (top + height + child_top) / 2
     y2 = y + guide.TRUNK_SPLIT
     x2 = left + width + guide.TRUNK_SIDE if side == "right" else left - guide.TRUNK_SIDE
-    trunks, together = [], []
+    trunks, together = list(others), list(others)
     for i, k in enumerate(kinds):
         cx = m[f"C{i}"][1]
         first = [[px, y]] if cx == px else [[cx, y], [px, y]]
@@ -326,6 +329,17 @@ def test_second_trunk_goes_to_the_left_when_the_right_column_is_taken(tmp_path, 
     assert left.startswith("합격"), left
 
 
+def test_second_trunk_goes_to_the_left_when_a_line_leaves_the_right_side(tmp_path):
+    # 부모 오른쪽 변 가운데에서 같은 높이의 Q로 연관선이 나가면 둘째 줄기 끝 구간이 그 선과 포개진다
+    more = [{"kind": "class", "name": "Q", "left": 480, "top": 0}]
+    others = [{"kind": "association", "from": "P", "to": "Q", "navigable": "none"}]
+    right, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", (R, G, R, G), TWO_KINDS[1], more=more, others=others)
+    assert right.startswith("불합격") and "선끼리 포개진다" in right
+    left, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", (R, G, R, G), TWO_KINDS[1], side="left", more=more,
+                        others=others)
+    assert left.startswith("합격"), left
+
+
 @pytest.mark.parametrize("lefts, side", [((0, 300), "right"), ((300, 100), "left")])
 def test_second_kind_child_right_under_the_column_gets_one_point(tmp_path, lefts, side):
     # 둘째 종류 자식의 가운데 x가 x2(오른쪽 370, 왼쪽 170)와 같으면 [x2, 부모 가운데 y] 하나만 — 세 점을 주면 앞 점과 같아 입력 오류
@@ -345,9 +359,10 @@ def test_relation_fields_say_where_lines_start_for_each_tool():
 
 def test_new_tools_tell_what_the_result_adds_to_the_places_of_their_shapes():
     aim = '  선이 모양 가운데에서 비켜난 점을 향하는 요소(kind "package")는 그 뒤에 그 점을 "향하는 점 x, y"로 덧붙인다'
-    for _, _, spec in PLACED_TOOLS.values():
+    _, tools, _ = run(server.mcp)
+    for name, (_, _, spec) in PLACED_TOOLS.items():
         if spec.extended:
-            assert guide.places_result(spec) in packagediagram.TOOL or guide.places_result(spec) in usecasediagram.TOOL
+            assert guide.places_result(spec) in tools[name].description, name
     assert guide.places_result(packagediagram.SPEC).startswith(guide.PLACES_RESULT + "\n" + aim)
     # 유즈케이스도: 액터의 모양 자리는 붙고, 액터·유즈케이스가 향하는 점은 가운데를 정수로 내린 점이라 붙이지 않는다
     assert guide.places_result(usecasediagram.SPEC) == guide.PLACES_RESULT + "\n" + guide.OUTSIDE_PLACES
@@ -356,6 +371,18 @@ def test_new_tools_tell_what_the_result_adds_to_the_places_of_their_shapes():
     plain = boxdiagram.Spec({k: s for k, s in packagediagram.SPEC.shapes.items() if not boxdiagram.aims_off_center(s)},
                             classdiagram.RELATIONS, extended=True)
     assert guide.places_result(plain) == guide.PLACES_RESULT
+
+
+def test_shapes_that_aim_aside_are_the_shapes_whose_lines_aim_away_from_the_middle():
+    # aims_aside는 모양이 손으로 켠다 — 모든 도구의 모든 모양을 그려, 향하는 점이 모양 가운데에서 1px 넘게 비켜났는지와 맞춰 본다
+    # (액터·유즈케이스는 가운데를 정수로 내린 점이라 0.5px 안이다)
+    for _, _, spec in PLACED_TOOLS.values():
+        for kind, shape in spec.shapes.items():
+            d = boxdiagram.render(spec, {spec.list_field: [{"kind": kind, "name": "X", "left": 0.5, "top": 0.5}]})
+            (p,) = d.layout.boxes
+            l, t, r, b = p.shape_rect
+            aside = abs(p.anchor[0] - (l + r) / 2) > 1 or abs(p.anchor[1] - (t + b) / 2) > 1
+            assert boxdiagram.aims_off_center(shape) == aside, kind
 
 
 def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):

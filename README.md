@@ -128,7 +128,8 @@ stand outside it and write their name beside the figure, on the side `name_side`
 
 It gets back the same things as the package diagram tool. An actor's place covers the figure and its name, and the
 figure's own place comes after it. The check is the same as for package diagrams, and it also fails when a line runs
-through an actor's name or the name at the top of the system boundary.
+through an actor's name or the name at the top of the system boundary. Generalization lines to one parent may share
+one trunk, as inheritance lines do in class diagrams.
 
 ### Sequence diagrams
 
@@ -226,7 +227,7 @@ uvx --from git+https://github.com/yschoi9733/cysUML cysuml
 - **유즈케이스도**는 `draw_use_case_diagram`으로 그린다. 액터·유즈케이스·시스템 경계를 그리고, 연관·의존(«include»·«extend»)·
   일반화로 잇는다. 유즈케이스는 `in`으로 시스템 경계 안에 넣고, 액터는 경계 밖에 두어 이름을 사람 모양 옆(`name_side`가 정한
   쪽)에 쓴다. 결과는 패키지도와 같고, 액터는 이름까지 덮는 자리 뒤에 사람 모양 자리를 함께 돌려준다. 검사는 패키지도와 같고,
-  선이 액터 이름이나 시스템 경계 이름을 지나도 불합격이다.
+  선이 액터 이름이나 시스템 경계 이름을 지나도 불합격이다. 같은 부모로 가는 일반화 선은 클래스도의 상속처럼 한 줄기로 모아도 된다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
   프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
   파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면

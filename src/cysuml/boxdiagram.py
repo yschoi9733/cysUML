@@ -157,8 +157,8 @@ class Shape:
 
 
 def aims_off_center(shape: Shape) -> bool:
-    """선이 모양 가운데에서 비켜난 점을 향하는 모양인지(aims_aside). 도구 설명과 결과 글이 같은 판정을 쓴다. anchor를 고쳤어도
-    가운데를 정수로 내린 점처럼 사실상 가운데면 아니다."""
+    """모양이 켠 aims_aside를 돌려준다 — 도구 설명과 결과 글이 이 하나를 본다. 판정은 모양이 한다: anchor를 비켜난 점으로 고친
+    모양이 켜고, 가운데를 정수로 내린 점처럼 사실상 가운데면 켜지 않는다(test_server가 모든 모양에서 둘이 맞는지 본다)."""
     return shape.aims_aside
 
 
