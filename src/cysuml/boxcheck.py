@@ -19,8 +19,8 @@ from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
 from .boxdiagram import LABEL_CLEAR, NEST_PAD, Drawing, Layout, NameZone, PlacedBox, PlacedRelation, Words, josa
 from .canvas import Line, Point, Polygon
-from .geom import (Border, Box, alongside, axis_gap, between, clip, crossings, distance, enters, grow, hits, inside,
-                   meets, outline, span, touches)
+from .geom import (Border, Box, Segment, alongside, axis_gap, between, clip, crossings, distance, enters, grow, hits,
+                   inside, meets, outline, span, touches)
 from .report import Finding, fmt_num, fmt_rect, round1
 from .report import Report as _Report
 
@@ -53,8 +53,6 @@ KINDS = (  # 불합격 종류(이 차례로 낸다)
     "text_overlap",  # 선 글자끼리 겹친다
 )
 NESTED_KINDS = ("inner_off_area", "line_through_name", "line_along_container")  # 안에 요소를 두거나 이름 칸이 있는 그림에서만 난다
-
-Segment = tuple[Point, Point]
 
 
 def label_hint(w: Words) -> str:

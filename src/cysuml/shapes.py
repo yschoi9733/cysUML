@@ -23,7 +23,14 @@ DEPTH = 8          # 노드 두께 띠의 폭. BOX_CLEARANCE의 두 배 안이�
 NODE_BODY = 24     # 노드 앞면에서 이름 줄 밖에 더하는 높이
 
 
-class PackageShape(Shape):
+class _HeadShape(Shape):
+    """이름을 클래스 머리 칸처럼 쓰는 모양: «스테레오타입» 줄 아래에 이름 줄(굵게)."""
+
+    def head(self, e: Element) -> list[tuple[str, bool]]:
+        return head_lines(self.keyword(e), e.name)
+
+
+class PackageShape(_HeadShape):
     """패키지: 이름(과 스테레오타입)을 쓴 탭이 몸통 왼쪽 위에 붙은 폴더. 안에 요소를 두는 칸은 몸통이고, 선은 몸통 테두리에 닿는다.
     탭은 몸통 밖에 붙은 이름 칸이라 그 패키지가 끝인 선도 지나가면 안 된다 — 그래서 선은 몸통 가운데가 아니라 탭 오른쪽 몸통의
     가운데를 향한다. 탭 오른쪽 빈 곳은 패키지가 아니다."""
@@ -31,7 +38,7 @@ class PackageShape(Shape):
     holds = True
 
     def _tab(self, e: Element) -> tuple[list[tuple[str, bool]], float, float]:
-        head = head_lines(self.keyword(e), e.name)
+        head = self.head(e)
         return head, max(TAB_MIN, head_width(head)), head_height(head)
 
     def size(self, e: Element) -> tuple[float, float]:
@@ -65,13 +72,10 @@ class PackageShape(Shape):
         draw_head(c, head, l + tab_w / 2, t, p.key)
 
 
-class _IconBox(Shape):
+class _IconBox(_HeadShape):
     """머리 칸 오른쪽 위에 아이콘을 단 상자(컴포넌트·아티팩트). 이름은 상자 세로 가운데에 쓴다."""
 
     ICON = (12, 15)  # 아이콘 폭·높이
-
-    def head(self, e: Element) -> list[tuple[str, bool]]:
-        return head_lines(self.keyword(e), e.name)
 
     def size(self, e: Element) -> tuple[float, float]:
         head = self.head(e)
@@ -108,14 +112,11 @@ class ArtifactShape(_IconBox):
         c.line([(x + w - fold, y), (x + w - fold, y + fold), (x + w, y + fold)], owner=owner)
 
 
-class NodeShape(Shape):
+class NodeShape(_HeadShape):
     """노드: 오른쪽과 위에 두께(DEPTH)가 보이는 입체 상자. 선 끝은 겉 테두리(육각형)에 닿는다. 이름은 앞면 위쪽 가운데에 쓰고, 안에
     요소를 두는 칸은 이름 줄 아래 앞면이다. 두께 띠와 앞면 윗변·오른변은 테두리 선이다."""
 
     holds = True
-
-    def head(self, e: Element) -> list[tuple[str, bool]]:
-        return head_lines(self.keyword(e), e.name)
 
     def size(self, e: Element) -> tuple[float, float]:
         head = self.head(e)

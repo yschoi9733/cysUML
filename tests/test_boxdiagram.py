@@ -239,6 +239,21 @@ def test_outside_name_goes_below_the_shape_and_the_place_covers_both():
     assert server._places(d) == [f"요소 자리(왼, 위, 폭×높이): LongInterfaceName({fmt_rect(p.rect)}, 모양 {fmt_rect(p.shape_rect)})"]
 
 
+def test_outside_name_shape_ignores_a_default_width():
+    class WideDot(Dot):
+        default_width = 200  # 모양 밖 이름이 있는 모양은 크기를 받지 않으므로 자리를 늘리지 않는다
+
+    spec = B.Spec({"dot": Dot(), "wide": WideDot()}, {"flow": FLOW})
+    plain, wide = (draw([el(k, "Api", 0, 0)], spec=spec).layout.boxes[0] for k in ("dot", "wide"))
+    assert (wide.rect, wide.shape_rect, wide.zones) == (plain.rect, plain.shape_rect, plain.zones)
+
+
+def test_placed_elements_and_borders_are_hashable():
+    d = draw([el("class", "A", 0, 0), el("gem", "G", 200, 0), el("oval", "O", 400, 0), dot("D", 600, 0)])
+    assert len({hash(p) for p in d.layout.boxes}) == 4
+    assert G.PolygonBorder([(0, 0), (1, 0), (0, 1)]) in {G.PolygonBorder([(0, 0), (1, 0), (0, 1)])}
+
+
 def test_two_line_outside_name_is_two_texts_and_a_taller_place():
     one, two = draw([dot("Api")]).layout.boxes[0], draw([dot(["Api", "v2"], id="api")])
     (p,) = two.layout.boxes

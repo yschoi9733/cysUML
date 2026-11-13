@@ -120,6 +120,13 @@ def test_description_names_the_failure_kinds_of_each_tool_in_check_order():
     assert ", ".join(guide.KIND_NAMES.values()) + "." in packagediagram.TOOL
 
 
+def test_relation_fields_say_where_lines_start_for_each_tool():
+    # 클래스도는 상자 가운데, 새 도구는 요소 종류에 따로 적은 점(패키지는 탭 오른쪽 몸통의 가운데)
+    assert "선은 상자 가운데에서 첫 꺾는 점(없으면 상대 상자 가운데)으로 가는 선이 상자 변과" in server.CLASS_TOOL
+    assert "선은 요소 가운데(요소 종류에 따로 적은 모양은 그 점)에서" in packagediagram.TOOL
+    assert "탭 오른쪽 몸통의 가운데를 향한다" in packagediagram.TOOL
+
+
 def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):
     r = draw(file_name="order", classes=ORDER, relations=PLACES, out_dir=str(tmp_path))
     assert not r.is_error

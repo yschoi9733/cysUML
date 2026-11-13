@@ -131,6 +131,8 @@ def relation_fields(kinds: Iterable[str], navigable: str = "to", words: Words = 
         lines.append(f"  - from_multiplicity·to_multiplicity·navigable: {'·'.join(assoc)}만 쓴다. navigable은 화살촉을 둘 쪽 "
                      f"{options}이다{tail}.")
     noun, edge = words.noun, words.edge
-    lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {noun} 가운데에서 첫 꺾는 점(없으면 상대 {noun} 가운데)으로 가는 선이 "
+    middle, other = ((f"{noun} 가운데", f"상대 {noun} 가운데") if box
+                     else (f"{noun} 가운데(요소 종류에 따로 적은 모양은 그 점)", f"상대 {noun}의 그 점"))
+    lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "
                  f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다.")
     return "\n".join(lines)

@@ -400,7 +400,8 @@ class RectBorder(Border):
     def __eq__(self, other) -> bool:
         return isinstance(other, RectBorder) and other.rect == self.rect
 
-    __hash__ = None  # type: ignore[assignment]
+    def __hash__(self) -> int:
+        return hash(self.rect)
 
     @property
     def bounds(self) -> Box:
@@ -456,6 +457,7 @@ class PolygonBorder(Border):
         self.points = pts
         self._sign = 1 if _area(pts) > 0 else -1
         self._empty = empty
+        self._edges = tuple(zip(pts, pts[1:] + pts[:1]))
 
     def __repr__(self) -> str:
         return f"PolygonBorder({self.points})"
@@ -463,7 +465,8 @@ class PolygonBorder(Border):
     def __eq__(self, other) -> bool:
         return isinstance(other, PolygonBorder) and other.points == self.points and other._empty == self._empty
 
-    __hash__ = None  # type: ignore[assignment]
+    def __hash__(self) -> int:
+        return hash((self.points, self._empty))
 
     @property
     def bounds(self) -> Box:
@@ -543,7 +546,7 @@ class PolygonBorder(Border):
         return not self._empty and all(self._inward(a, b, v) > 0 for a, b in self.edges())
 
     def edges(self) -> tuple[Segment, ...]:
-        return tuple(zip(self.points, self.points[1:] + self.points[:1]))
+        return self._edges
 
     def meets(self, box: Box) -> bool:
         if self._empty or not meets(self.bounds, box):
@@ -575,7 +578,8 @@ class EllipseBorder(Border):
         return isinstance(other, EllipseBorder) and (other.cx, other.cy, other.rx, other.ry) == (
             self.cx, self.cy, self.rx, self.ry)
 
-    __hash__ = None  # type: ignore[assignment]
+    def __hash__(self) -> int:
+        return hash((self.cx, self.cy, self.rx, self.ry))
 
     @property
     def bounds(self) -> Box:

@@ -809,7 +809,8 @@ def _place(spec: Spec, diagram: Diagram) -> tuple[PlacedBox, ...]:
             cr = done[c.key].rect
             w = max(w, cr[2] + NEST_PAD + insets[2] - e.left)
             h = max(h, cr[3] + NEST_PAD + insets[3] - e.top)
-        w, h = max(e.min_width, w), max(e.min_height, h)
+        if zone is None:  # 모양 밖 이름이 있는 모양은 크기를 받지 않는다(모양과 이름 자리를 위에서 이미 정했다)
+            w, h = max(e.min_width, w), max(e.min_height, h)
         rect = (e.left, e.top, e.left + w, e.top + h)
         if zone is not None:
             sx, sy = e.left + offset[0], e.top + offset[1]
