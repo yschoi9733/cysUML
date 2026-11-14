@@ -731,17 +731,30 @@ def test_lines_given_the_side_edge_recipe_are_drawn_as_before():
     assert [r.points[-1] for r in d.layout.relations] == [(270, 42), (340, 21)] and K.check(d).passed
 
 
-@pytest.mark.parametrize("dx, follows", [(0, True), (B.AIM_EPS / 2, True), (B.AIM_EPS * 2, False)])
-def test_a_line_follows_its_kinds_point_only_from_right_under_it(dx, follows):
-    # 결과 글은 점을 소수 한 자리로 적으니 AIM_EPS 안이면 그 점 바로 아래로 본다. 꺾는 점 없이 자식 가운데가 바로 아래여도 된다
+@pytest.mark.parametrize("dx, follows", [(0, True), (B.AIM_EPS / 2, True), (-B.AIM_EPS / 2, True), (B.AIM_EPS * 2, False)])
+def test_a_line_follows_its_kinds_point_only_from_a_bend_right_under_it(dx, follows):
+    # 결과 글은 점을 소수 한 자리로 적으니 AIM_EPS 안이면 그 점 바로 아래로 보고, 마지막 꺾는 점의 x를 그 점에 맞춰 끝 구간을
+    # 세운다. 꺾는 점 없는 선은 자식 가운데가 바로 아래여도 따르지 않는다(AI가 그 점을 쓰려고 준 선이 아니다)
     half = B.AIM_SPLIT / 2
     d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200)],
              [rel("generalization", "A", "P", via=[[45, 120], [245 - half + dx, 120]]), rel("realization", "B", "P")])
     a = d.layout.relations[0]
     assert a.aim == ((245 - half, 24) if follows else None)
-    straight = draw([el("class", "P", 200, 0), el("class", "A", 200 - half + dx, 200), el("class", "B", 400, 200)],
+    if follows:
+        assert a.points[-2:] == ((245 - half, 120), (245 - half, 48))
+    straight = draw([el("class", "P", 200, 0), el("class", "A", 200 - half, 200), el("class", "B", 400, 200)],
                     [rel("generalization", "A", "P"), rel("realization", "B", "P")])
-    assert (straight.layout.relations[0].aim is not None) == follows
+    assert straight.layout.relations[0].aim is None
+
+
+def test_lines_of_one_kind_within_the_rounding_share_one_triangle():
+    # 두 자식이 결과 글의 반올림 안에서 조금씩 다른 x(230.04·229.97)를 주어도 같은 점으로 맞춰 삼각형 하나를 함께 쓴다
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "A2", -200, 200), el("class", "B", 300, 200)],
+             [rel("generalization", "A", "P", via=[[45, 120], [230.04, 120]]),
+              rel("generalization", "A2", "P", via=[[-155, 120], [229.97, 120]]),
+              rel("realization", "B", "P", via=[[345, 120], [260, 120]])])
+    assert [r.points[-1] for r in d.layout.relations] == [(230, 48), (230, 48), (260, 48)]
+    assert K.check(d).passed
 
 
 def test_lines_from_the_side_keep_aiming_at_the_middle_beside_split_lines():
@@ -775,8 +788,7 @@ def test_one_trunk_kind_or_other_kinds_keep_the_middle():
     assert d.layout.by_key["G"].aims == () and d.layout.by_key["Q"].aims == ()
 
 
-@pytest.mark.parametrize("width, split", [(B.AIM_SPLIT + 2 * B.TRIANGLE[1], True),
-                                          (B.AIM_SPLIT + 2 * B.TRIANGLE[1] - 1, False)])
+@pytest.mark.parametrize("width, split", [(B.AIM_EDGE, True), (B.AIM_EDGE - 1, False)])  # 도구 설명이 알리는 가장 좁은 변
 def test_parent_too_narrow_for_two_triangles_side_by_side_keeps_the_middle(width, split):
     p = two_kinds_to(el("class", "P", 200, 0, width=width)).layout.by_key["P"]
     assert p.width == width and bool(p.aims) == split

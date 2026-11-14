@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from .boxcheck import KINDS, bend_away
-from .boxdiagram import (AIM_SPLIT, ARROW, ARROW_HEAD, ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, TRIANGLE, RelationType, Spec,
+from .boxdiagram import (AIM_EDGE, AIM_SPLIT, ARROW, ARROW_HEAD, ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec,
                          Words, aims_off_center, josa)
 from .canvas import MIN_SCALE, SCALE
 from .report import fmt_num
@@ -265,7 +265,7 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
     if len(types) > 1:
         assert len(types) == 2, "향하는 점을 세 종류 이상으로 나누는 요령은 없다"
         (first, second), half = (t.label for t in types), fmt_num(AIM_SPLIT / 2)
-        narrow = fmt_num(AIM_SPLIT + 2 * TRIANGLE[1])  # boxdiagram._split_aims가 점을 정하는 가장 좁은 변(가운데를 향할 때)
+        narrow = fmt_num(AIM_EDGE)
         to = josa(edge, "으로", "로")
         shape_edge = "(모양 자리가 덧붙어 있으면 모양 자리의 변)" if outside else ""
         away = f"(모양 밖 이름이 오른쪽에 있으면 왼쪽 {edge}{to})" if outside else ""
@@ -285,7 +285,8 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
                   f"정해지지 않는다(덧붙지 않는다). 그 부모로는 한 종류만 아래 {edge}에 모으고, 다른 종류는 줄기를 y + {TRUNK_SPLIT}에 "
                   f"두고 마지막 꺾는 점을 부모 오른쪽 {edge}{shape_edge}에서 {TRUNK_SIDE}px 밖, 부모 가운데 높이에 두어 오른쪽 "
                   f"{edge}{to} 들인다{away}. 그 세로 줄이 다른 {noun}에 걸리거나, 그 {edge}에 다른 선이 닿거나, 그 줄에서 "
-                  f"{TRUNK_NEAR}px 안에 아래 {edge}{to} 가는 자식의 가운데 x가 있으면 거울처럼 반대쪽 {edge}{to} 들인다."]
+                  f"{TRUNK_NEAR}px 안에 아래 {edge}{to} 가는 자식의 가운데 x가 있으면 거울처럼 반대쪽 {edge}{to} 들인다. 양쪽 다 "
+                  f"막히면 걸린 {noun}{josa(noun, '을', '를')} 옮기거나 자식 차례를 바꾼다."]
     return "\n".join(lines)
 
 

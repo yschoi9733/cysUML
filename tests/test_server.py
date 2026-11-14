@@ -292,7 +292,8 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
            f"다른 종류는 줄기를 y + {guide.TRUNK_SPLIT}에 두고 마지막 꺾는 점을 부모 오른쪽 {edge}{shape_edge}에서 "
            f"{guide.TRUNK_SIDE}px 밖, 부모 가운데 높이에 두어 오른쪽 {edge}{to} 들인다{away}.",
            f"그 세로 줄이 다른 {noun}에 걸리거나, 그 {edge}에 다른 선이 닿거나, 그 줄에서 {guide.TRUNK_NEAR}px 안에 아래 {edge}{to} "
-           f"가는 자식의 가운데 x가 있으면 거울처럼 반대쪽 {edge}{to} 들인다.")
+           f"가는 자식의 가운데 x가 있으면 거울처럼 반대쪽 {edge}{to} 들인다. 양쪽 다 막히면 걸린 {noun}를 옮기거나 자식 차례를 "
+           "바꾼다.")
     for phrase in two:  # 줄기 종류가 하나인 도구(유즈케이스도)에는 종류마다 향하는 점이 없다
         assert (phrase in text) == (len(trunks) > 1), phrase
     # 가운데는 그 도구의 결과에 덧붙는 것으로 셈한다 — 패키지를 받는 도구는 향하는 점, 모양 밖 이름이 있는 도구(유즈케이스도의
@@ -514,6 +515,37 @@ def test_parent_too_narrow_for_two_triangles_takes_the_other_kind_on_a_side(tmp_
     assert draw_to(chosen).startswith("합격"), draw_to(chosen)
     crossed = draw_to(other)
     assert crossed.startswith("불합격") and "이름 칸" in crossed, crossed
+
+
+@pytest.mark.parametrize("more, others, blocked", [
+    ([{"name": "S", "left": 260, "top": 0}], [], "선이 상자를 지난다"),  # 오른쪽 세로 줄에 다른 상자
+    ([{"name": "Q", "left": 400, "top": 0}], [{"kind": "association", "from": "P", "to": "Q", "navigable": "none"}],
+     "선끼리 포개진다"),  # 오른쪽 변 가운데에서 같은 높이의 Q로 나가는 선
+])
+def test_narrow_parent_takes_the_other_kind_on_the_left_when_the_right_is_taken(tmp_path, more, others, blocked):
+    """폭 40 클래스 P는 아래 변이 AIM_EDGE보다 좁아 향하는 점이 정해지지 않는다 — 상속은 아래 변에, 실체화(클래스로 가니 표기 규칙
+    알림이 붙는다)는 옆 변으로 들인다.
+    오른쪽 세로 줄이 다른 상자에 걸리거나 오른쪽 변에 다른 선이 닿으면 설명대로 왼쪽으로 들여야 합격한다."""
+    boxes = [{"name": "P", "left": 200, "top": 0, "width": 40}, *more,
+             {"name": "A", "left": 0, "top": 108}, {"name": "B", "left": 300, "top": 108}]
+    args = {"file_name": "narrow", "classes": boxes, "out_dir": str(tmp_path)}
+    m = middles("draw_class_diagram", "classes", {**args, "relations": [{"kind": G, "from": "A", "to": "P"},
+                                                                         {"kind": R, "from": "B", "to": "P"}]})
+    (left, top, width, height), px, py, _, aims = m["P"]
+    assert width < boxdiagram.AIM_EDGE and aims == {}
+    y = (top + height + 108) / 2
+
+    def draw_to(side):
+        x2 = left + width + guide.TRUNK_SIDE if side == "right" else left - guide.TRUNK_SIDE
+        y2 = y + guide.TRUNK_SPLIT
+        relations = [*others, {"kind": G, "from": "A", "to": "P", "via": [[m["A"][1], y], [px, y]]},
+                     {"kind": R, "from": "B", "to": "P", "via": [[m["B"][1], y2], [x2, y2], [x2, py]]}]
+        (r,) = run(server.mcp, ("draw_class_diagram", {**args, "relations": relations}))[2]
+        return text(r)
+
+    right = draw_to("right")
+    assert right.startswith("불합격") and blocked in right, right
+    assert draw_to("left").startswith("합격"), draw_to("left")
 
 
 @pytest.mark.parametrize("name, parent, end", [
