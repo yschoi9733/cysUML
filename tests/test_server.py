@@ -3,7 +3,9 @@ import io
 import json
 import os
 import re
+import stat
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -765,6 +767,29 @@ def test_a_json_file_not_saved_by_cysuml_is_kept_and_nothing_is_written(tmp_path
     assert "상자 자리(왼, 위, 폭×높이): Order(0, 0, 90×48)" in text(r)
     assert [p.name for p in tmp_path.iterdir()] == ["order.json"]
     assert (None if kept.is_fifo() else kept.stat().st_size, kept.stat().st_mtime_ns) == before
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO가 없다")
+def test_a_file_that_turns_into_a_fifo_after_it_is_looked_at_does_not_hang_the_save(tmp_path, monkeypatch):
+    kept = tmp_path / "order.json"
+    os.mkfifo(kept)
+    real = os.stat
+
+    def looks_regular(path, *args, **kwargs):  # 볼 때는 보통 파일이었다가, 열기 전에 FIFO로 바뀐 것과 같다
+        st = real(path, *args, **kwargs)
+        return os.stat_result((stat.S_IFREG | 0o644, *st[1:])) if Path(path) == kept else st
+    monkeypatch.setattr(server.os, "stat", looks_regular)
+    found = []
+    worker = threading.Thread(target=lambda: found.append(server._not_ours(kept)), daemon=True)
+    worker.start()
+    worker.join(5)
+    hung = worker.is_alive()
+    if hung:  # 읽다 멈췄다 — 쓰는 쪽을 열었다 닫아 풀어 주고 실패로 친다
+        with open(kept, "wb"):
+            pass
+        worker.join(5)
+    assert not hung
+    assert found == ["보통 파일이 아니다"]
 
 
 def test_an_input_file_saved_by_hand_with_tool_and_file_name_is_overwritten(tmp_path):

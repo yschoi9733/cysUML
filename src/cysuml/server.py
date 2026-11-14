@@ -39,10 +39,14 @@ from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPAN
 
 MAX_NAME_BYTES = 200  # 파일 이름(확장자 빼고) UTF-8 길이 상한. 파일 시스템 한도는 보통 255바이트
 MAX_RECORD_BYTES = 16 * 2**20  # 이보다 큰 같은 이름 .json은 읽지 않고 남의 파일로 본다. PNG로 그릴 수 있는 그림의 입력은 훨씬 작다
-# 그리기 도구 이름. 같은 이름 .json의 tool이 이 가운데 하나여야 cysUML이 저장한 파일로 본다(등록한 도구와 같은지는 test_server가 본다)
-TOOL_NAMES = ("draw_class_diagram", "draw_package_diagram", "draw_component_diagram", "draw_deployment_diagram",
-              "draw_use_case_diagram", "draw_state_diagram", "draw_activity_diagram", "draw_sequence_diagram")
 NAME_FORBIDDEN = set('/\\:*?"<>|')
+TOOL_NAMES: list[str] = []  # 등록한 그리기 도구 이름(_named가 모은다). 같은 이름 .json의 tool이 이 가운데 하나여야 cysUML 것으로 본다
+
+
+def _named(name: str) -> str:
+    """그리기 도구 이름을 TOOL_NAMES에 모으고 그대로 돌려준다. 도구를 등록하는 자리에서 부른다."""
+    TOOL_NAMES.append(name)
+    return name
 
 CLASS_TIPS = f"""클래스도 배치 요령:
 - 연결이 가장 많은 클래스를 가운데에 둔다.
@@ -205,21 +209,28 @@ def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
 def _not_ours(path: Path) -> Optional[str]:
     """path에 cysUML이 저장한 입력 파일(tool이 cysUML 도구 이름이고 file_name이 든 JSON 객체)로 보이지 않는 것이 있으면 그 까닭을
     돌려준다. 입력 파일 이름이 package.json 같은 남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 없거나 폴더면 None이다
-    (폴더는 쓸 때 오류로 알린다)."""
+    (폴더는 쓸 때 오류로 알린다). 종류와 크기는 연 핸들로 본다 — 보고 나서 여는 사이에 FIFO로 바뀌어도 읽다 멈추지 않게(이 함수는
+    저장 잠금 안에서 돈다)."""
     try:
-        st = os.stat(path)
+        if stat.S_ISDIR(os.stat(path).st_mode):
+            return None
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))  # FIFO도 쓰는 쪽을 기다리지 않고 열린다
     except FileNotFoundError:
         return None
-    if stat.S_ISDIR(st.st_mode):
-        return None
-    if not stat.S_ISREG(st.st_mode):  # FIFO 등은 읽으면 멈출 수 있다
-        return "보통 파일이 아니다"
-    if st.st_size > MAX_RECORD_BYTES:
-        return f"{MAX_RECORD_BYTES // 2**20}MiB보다 크다"
-    try:
-        v = json.loads(path.read_bytes())
     except OSError as e:
         return f"읽을 수 없다({e.strerror or e})"
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            return "보통 파일이 아니다"
+        if st.st_size > MAX_RECORD_BYTES:
+            return f"{MAX_RECORD_BYTES // 2**20}MiB보다 크다"
+        try:
+            raw = f.read()
+        except OSError as e:
+            return f"읽을 수 없다({e.strerror or e})"
+    try:
+        v = json.loads(raw)
     except (ValueError, RecursionError):  # UnicodeDecodeError도 ValueError다
         return "JSON으로 읽을 수 없다"
     if not (isinstance(v, dict) and v.get("tool") in TOOL_NAMES and isinstance(v.get("file_name"), str)):
@@ -255,24 +266,29 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
     image, kept = folder / f"{name}.png", folder / f"{name}.json"
     files = ((image, png), (kept, record))
     where = f"out_dir {folder}" if given else f"기본 폴더 {folder}(서버 작업 폴더 아래 {DEFAULT_DIR}/)"
-    target, staged, done = image, [], []  # target: 지금 다루는 자리 — 실패하면 오류 글에 쓴다
+    staged: list[tuple[Path, Path]] = []  # (임시 파일, 바꿔 넣을 자리)
+    done: list[Path] = []  # 바꿔 넣은 자리
+    at = image  # 실패하면 오류 글에 쓸 자리 — 실패할 수 있는 단계마다 그 단계가 다루는 파일로 바꿔 둔다
     left = ""  # 그림만 바뀐 채 멈췄을 때 옛 입력 파일이 어떻게 됐는지
     try:
         with _saving:
             folder.mkdir(parents=True, exist_ok=True)
-            target = kept
+            at = kept
             if why := _not_ours(kept):
                 return None, (f"그림을 저장하지 않았다 — {where}에 같은 이름의 {kept.name}이 있는데 {why}. cysUML이 저장한 입력 "
                               "파일로 보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일을 손봤다면 JSON 문법과 tool·file_name을 "
                               "되살리고, 아니면 다른 file_name이나 out_dir을 준다.")
-            for target, _ in files:  # 한쪽만 바꿔 넣은 채 멈추지 않게 먼저 본다
-                if target.is_dir():
+            for path, _ in files:  # 한쪽만 바꿔 넣은 채 멈추지 않게 먼저 본다
+                if path.is_dir():
+                    at = path
                     raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR))
-            for target, data in files:
-                staged.append((_stage(target, data), target))
-            for tmp, target in staged:
+            for path, data in files:
+                at = path
+                staged.append((_stage(path, data), path))
+            for tmp, path in staged:
+                at = path
                 try:
-                    os.replace(tmp, target)
+                    os.replace(tmp, path)
                 except OSError:
                     if done:  # 잠금 안에서 지운다 — 밖이면 그 사이 다른 부름이 저장한 새 입력 파일을 지울 수 있다
                         try:
@@ -283,17 +299,17 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
                         except OSError:
                             left = f"앞서 저장한 {kept.name}이 남아 이 그림과 맞지 않는다(지우지도 못했다)"
                     raise
-                done.append(target)
+                done.append(path)
     except (OSError, ValueError) as e:  # ValueError: 경로에 NUL 글자
         reason = e.strerror if isinstance(e, OSError) and e.strerror else e
         if done:
             return None, (f"입력 파일을 저장하지 못했다 — {where}에 그림 {image.name}은(는) 새로 썼지만 {kept.name}을(를) 쓸 수 "
                           f"없다({reason}). {left}. 막은 것을 풀고 같은 입력으로 다시 그린다.")
-        return None, (f"그림을 저장하지 못했다 — {where}에 {target.name}을(를) 쓸 수 없다({reason}). "
+        return None, (f"그림을 저장하지 못했다 — {where}에 {at.name}을(를) 쓸 수 없다({reason}). "
                       "쓸 수 있는 폴더를 out_dir에 절대 경로로 준다.")
     finally:
-        for tmp, target in staged:
-            if target not in done:
+        for tmp, path in staged:
+            if path not in done:
                 with contextlib.suppress(OSError):
                     tmp.unlink()
     return (image, kept), None
@@ -371,7 +387,10 @@ OutDir = Annotated[Optional[str], Field(description=f"저장할 폴더. 주지 �
 Scale = Annotated[float, Field(ge=MIN_SCALE, allow_inf_nan=False, description=f"출력 배율(기본 {SCALE:g}). 보통은 주지 않는다.")]
 
 
-@mcp.tool(name="draw_class_diagram", description=CLASS_TOOL)
+CLASS_NAME = _named("draw_class_diagram")
+
+
+@mcp.tool(name=CLASS_NAME, description=CLASS_TOOL)
 def draw_class_diagram(
         file_name: FileName,
         classes: Annotated[Any, _listed("상자 목록(하나 이상). 필드는 도구 설명에 있다.")],
@@ -380,12 +399,14 @@ def draw_class_diagram(
         scale: Scale = SCALE,
 ) -> CallToolResult:
     data = {"classes": classes} if relations is None else {"classes": classes, "relations": relations}
-    return _draw("draw_class_diagram", file_name, data, scale, classdiagram.render, classcheck.check, out_dir, _places)
+    return _draw(CLASS_NAME, file_name, data, scale, classdiagram.render, classcheck.check, out_dir, _places)
 
 
 def _box_tool(name: str, diagram: ModuleType, word: str = "관계") -> None:
     """상자 그림 도구 하나를 등록한다. 그림 모듈(diagram)의 render·TOOL을 쓰고, 인자는 file_name·elements·relations·out_dir·
     scale이다. word는 relations 인자 설명에 쓰는 말(관계·전이·흐름)이다."""
+    _named(name)
+
     def tool(file_name, elements, relations=None, out_dir=None, scale=SCALE):
         data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
         return _draw(name, file_name, data, scale, diagram.render, boxcheck.check, out_dir, _places)
@@ -406,7 +427,10 @@ _box_tool("draw_state_diagram", statediagram, "전이")
 _box_tool("draw_activity_diagram", activitydiagram, "흐름")
 
 
-@mcp.tool(name="draw_sequence_diagram", description=SEQUENCE_TOOL)
+SEQUENCE_NAME = _named("draw_sequence_diagram")
+
+
+@mcp.tool(name=SEQUENCE_NAME, description=SEQUENCE_TOOL)
 def draw_sequence_diagram(
         file_name: FileName,
         participants: Annotated[Any, _listed("참여자 목록(하나 이상). 필드는 도구 설명에 있다.")],
@@ -418,4 +442,4 @@ def draw_sequence_diagram(
 ) -> CallToolResult:
     given = {"messages": messages, "frames": frames, "notes": notes}
     data = {"participants": participants, **{k: v for k, v in given.items() if v is not None}}
-    return _draw("draw_sequence_diagram", file_name, data, scale, sequencediagram.render, sequencecheck.check, out_dir)
+    return _draw(SEQUENCE_NAME, file_name, data, scale, sequencediagram.render, sequencecheck.check, out_dir)
