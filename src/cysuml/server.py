@@ -243,7 +243,8 @@ def _stage(path: Path, data: bytes) -> Path:
 def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[tuple[Path, Path]], Optional[str]]:
     """((저장한 그림 경로, 입력 파일 경로), 문제). 비었거나 공백뿐인 out_dir은 주지 않은 것으로 본다. 두 파일을 임시 파일에 다 쓴
     뒤 바꿔 넣는다 — 쓰다 실패하거나 같은 이름으로 동시에 써도 깨진 파일이 남지 않는다. 그림을 먼저 바꿔 넣는다: 흔한 실패(Windows
-    에서 뷰어가 PNG를 잡고 있다)에는 둘 다 그대로 두고, 그림만 바뀐 채 멈추면 입력 파일이 그 그림의 것이 아니라고 알린다."""
+    에서 뷰어가 PNG를 잡고 있다)에는 둘 다 그대로 두고, 그림만 바뀐 채 멈추면 옛 입력 파일을 지워 다음에 그 파일을 이 그림의 입력으로
+    읽어 고치는 일을 막는다."""
     given = (out_dir or "").strip()
     if given.startswith("~") and os.path.expanduser(given).startswith("~"):
         return None, f"out_dir {given!r}의 '~'를 홈 폴더로 풀 수 없다. 저장하지 않았다 — out_dir을 절대 경로로 준다."
@@ -255,6 +256,7 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
     files = ((image, png), (kept, record))
     where = f"out_dir {folder}" if given else f"기본 폴더 {folder}(서버 작업 폴더 아래 {DEFAULT_DIR}/)"
     target, staged, done = image, [], []  # target: 지금 다루는 자리 — 실패하면 오류 글에 쓴다
+    left = ""  # 그림만 바뀐 채 멈췄을 때 옛 입력 파일이 어떻게 됐는지
     try:
         with _saving:
             folder.mkdir(parents=True, exist_ok=True)
@@ -269,14 +271,24 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
             for target, data in files:
                 staged.append((_stage(target, data), target))
             for tmp, target in staged:
-                os.replace(tmp, target)
+                try:
+                    os.replace(tmp, target)
+                except OSError:
+                    if done:  # 잠금 안에서 지운다 — 밖이면 그 사이 다른 부름이 저장한 새 입력 파일을 지울 수 있다
+                        try:
+                            kept.unlink()
+                            left = f"앞서 저장한 {kept.name}은 이 그림과 맞지 않아 지웠다"
+                        except FileNotFoundError:
+                            left = f"{kept.name}은 없다"
+                        except OSError:
+                            left = f"앞서 저장한 {kept.name}이 남아 이 그림과 맞지 않는다(지우지도 못했다)"
+                    raise
                 done.append(target)
     except (OSError, ValueError) as e:  # ValueError: 경로에 NUL 글자
         reason = e.strerror if isinstance(e, OSError) and e.strerror else e
         if done:
             return None, (f"입력 파일을 저장하지 못했다 — {where}에 그림 {image.name}은(는) 새로 썼지만 {kept.name}을(를) 쓸 수 "
-                          f"없다({reason}). 지금 {kept.name}은 이 그림의 입력이 아니다(앞서 저장한 것이거나 없다). 막은 것을 풀고 "
-                          "같은 입력으로 다시 그린다.")
+                          f"없다({reason}). {left}. 막은 것을 풀고 같은 입력으로 다시 그린다.")
         return None, (f"그림을 저장하지 못했다 — {where}에 {target.name}을(를) 쓸 수 없다({reason}). "
                       "쓸 수 있는 폴더를 out_dir에 절대 경로로 준다.")
     finally:

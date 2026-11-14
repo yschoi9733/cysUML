@@ -811,14 +811,31 @@ def test_a_picture_that_cannot_be_put_in_place_leaves_both_files_as_they_were(tm
     assert sorted(p.name for p in tmp_path.iterdir()) == ["order.json", "order.png"]  # 임시 파일도 남지 않는다
 
 
-def test_when_only_the_picture_is_put_in_place_the_error_says_the_input_file_is_not_its_input(tmp_path, monkeypatch):
+@pytest.mark.parametrize("before, removable, left, names", [
+    (False, True, "order.json은 없다", ["order.png"]),
+    (True, True, "앞서 저장한 order.json은 이 그림과 맞지 않아 지웠다", ["order.png"]),
+    (True, False, "앞서 저장한 order.json이 남아 이 그림과 맞지 않는다(지우지도 못했다)", ["order.json", "order.png"]),
+], ids=["no-input-before", "stale-removed", "stale-kept"])
+def test_when_only_the_picture_is_put_in_place_the_old_input_file_is_removed(tmp_path, monkeypatch, before, removable, left,
+                                                                              names):
+    if before:
+        draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
+    old_png = (tmp_path / "order.png").read_bytes() if before else None
     failing_replace(monkeypatch, ".json")
-    r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
+    if not removable:
+        real = Path.unlink
+
+        def unlink(self, missing_ok=False):
+            if self.name == "order.json":
+                raise PermissionError(1, "Operation not permitted")
+            real(self, missing_ok)
+        monkeypatch.setattr(Path, "unlink", unlink)
+    r = draw(file_name="order", classes=ORDER, relations=PLACES, out_dir=str(tmp_path))
     assert r.is_error
     assert text(r).startswith(f"입력 파일을 저장하지 못했다 — out_dir {tmp_path}에 그림 order.png은(는) 새로 썼지만 order.json을(를) "
-                              "쓸 수 없다(Operation not permitted). 지금 order.json은 이 그림의 입력이 아니다(앞서 저장한 것이거나 "
-                              "없다). 막은 것을 풀고 같은 입력으로 다시 그린다.\n")
-    assert [p.name for p in tmp_path.iterdir()] == ["order.png"]  # 임시 파일도 남지 않는다
+                              f"쓸 수 없다(Operation not permitted). {left}. 막은 것을 풀고 같은 입력으로 다시 그린다.\n")
+    assert sorted(p.name for p in tmp_path.iterdir()) == names  # 임시 파일도 남지 않는다
+    assert (tmp_path / "order.png").read_bytes() != old_png
 
 
 def test_an_input_that_cannot_be_encoded_is_still_valid_json():
