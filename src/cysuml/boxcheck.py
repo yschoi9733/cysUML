@@ -551,7 +551,7 @@ def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box], w: Words
         at = f"{whose}의 {h.name}(자리 {fmt_rect(span(h.points))}), {b.title}."
         if b.first:
             yield Finding("head_under_own_box", (*_owners(rels), b.name), span(h.points),
-                          f"선 끝 모양이 그 {w.noun} 안으로 들어간다: {at}",
+                          f"선 끝 모양이 그 끝의 {w.noun} 안으로 들어간다: {at}",
                           f"선이 {w.noun} {w.edge}에 너무 비스듬히 들어온다 — {w.noun}를 옮기거나 꺾는 점(via)을 주어 "
                           f"{w.edge}에 곧게 닿게 한다.")
         else:

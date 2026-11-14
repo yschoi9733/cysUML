@@ -559,7 +559,7 @@ def test_slanted_line_whose_triangle_goes_into_the_name_area_fails():
     r = report(elements, [rel("generalization", "X", "작업", via=[[-165, -70]])])
     (f,) = r.failures
     assert f.kind == "head_under_own_box" and f.elements == ("X->작업", "작업")
-    assert "선 끝 모양이 그 요소 안으로 들어간다" in f.problem and "삼각형" in f.problem
+    assert "선 끝 모양이 그 끝의 요소 안으로 들어간다" in f.problem and "삼각형" in f.problem
 
 
 def test_line_through_the_inside_of_its_end_outer_element_is_an_input_error():
