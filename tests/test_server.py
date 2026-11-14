@@ -814,6 +814,20 @@ def test_an_input_file_that_cannot_be_read_is_kept(tmp_path):
     assert [p.name for p in tmp_path.iterdir()] == ["order.json"]
 
 
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="Windows와 root는 권한을 빼도 연다")
+def test_a_folder_that_cannot_be_searched_is_a_write_error_not_a_file_that_is_there(tmp_path):
+    folder = tmp_path / "img"
+    folder.mkdir()
+    folder.chmod(0o600)  # 읽고 쓸 수는 있지만 안의 파일을 찾지 못한다
+    try:
+        r = draw(file_name="order", classes=ORDER, out_dir=str(folder))
+    finally:
+        folder.chmod(0o755)
+    assert r.is_error
+    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {folder}에 order.json을(를) 쓸 수 없다(Permission denied). ")
+    assert list(folder.iterdir()) == []
+
+
 def failing_replace(monkeypatch, suffix):
     real = os.replace
 

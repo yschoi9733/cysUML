@@ -209,12 +209,16 @@ def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
 def _not_ours(path: Path) -> Optional[str]:
     """path에 cysUML이 저장한 입력 파일(tool이 cysUML 도구 이름이고 file_name이 든 JSON 객체)로 보이지 않는 것이 있으면 그 까닭을
     돌려준다. 입력 파일 이름이 package.json 같은 남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 없거나 폴더면 None이다
-    (폴더는 쓸 때 오류로 알린다). 종류와 크기는 연 핸들로 본다 — 보고 나서 여는 사이에 FIFO로 바뀌어도 읽다 멈추지 않게(이 함수는
-    저장 잠금 안에서 돈다)."""
+    (폴더는 쓸 때 오류로 알린다). 있는지 보다 난 오류(폴더 탐색 권한 등)는 그대로 올려 쓰기 오류로 알린다. 종류와 크기는 연 핸들로
+    본다 — 보고 나서 여는 사이에 FIFO로 바뀌어도 읽다 멈추지 않게(이 함수는 저장 잠금 안에서 돈다)."""
     try:
         if stat.S_ISDIR(os.stat(path).st_mode):
             return None
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))  # FIFO도 쓰는 쪽을 기다리지 않고 열린다
+    except FileNotFoundError:
+        return None
+    try:
+        # FIFO도 쓰는 쪽을 기다리지 않고 열린다. Windows는 O_BINARY가 없으면 글자 모드로 읽는다
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
     except FileNotFoundError:
         return None
     except OSError as e:
@@ -266,8 +270,8 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
     image, kept = folder / f"{name}.png", folder / f"{name}.json"
     files = ((image, png), (kept, record))
     where = f"out_dir {folder}" if given else f"기본 폴더 {folder}(서버 작업 폴더 아래 {DEFAULT_DIR}/)"
-    staged: list[tuple[Path, Path]] = []  # (임시 파일, 바꿔 넣을 자리)
-    done: list[Path] = []  # 바꿔 넣은 자리
+    staged: list[tuple[Path, Path]] = []
+    done: list[Path] = []
     at = image  # 실패하면 오류 글에 쓸 자리 — 실패할 수 있는 단계마다 그 단계가 다루는 파일로 바꿔 둔다
     left = ""  # 그림만 바뀐 채 멈췄을 때 옛 입력 파일이 어떻게 됐는지
     try:
