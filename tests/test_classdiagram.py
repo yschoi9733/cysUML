@@ -346,21 +346,67 @@ def test_name_moves_even_with_multiplicities_when_they_keep_their_free_spots():
     assert [lab.role for lab in r.labels] == ["name", "from_multiplicity", "to_multiplicity"] and K.check(d).passed
 
 
-def test_name_is_not_moved_into_the_spot_its_multiplicities_need(monkeypatch):
-    # 위아래로 32px 떨어진 두 상자 사이의 짧은 선이라 이름의 가운데 자리 둘이 상자에 붙는다. 다중도가 없으면 이름을 선을 따라
-    # 옮겨 합격한다. 다중도가 있으면 옮긴 이름 때문에 from 다중도가 빈 자리를 못 찾는다 — 빈 자리를 못 찾은 글자가 가운데에 둘
-    # 때(이름 하나)보다 적지 않으니 옮기지 않는다(옮기기 전 도구와 같은 그림)
+def middle_only(monkeypatch):
+    """선을 따라 더 볼 자리를 없애 이름 글자를 가운데 후보에만 둔다(옮기기 전 도구와 같다)."""
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+
+
+def kinds_of(drawing):
+    return [f.kind for f in K.check(drawing).failures]
+
+
+def without_multiplicities(data):
+    bare = copy.deepcopy(data)
+    for r in bare["relations"]:
+        r.pop("from_multiplicity", None)
+        r.pop("to_multiplicity", None)
+    return bare
+
+
+def test_name_is_not_moved_when_its_multiplicities_would_fail_more(monkeypatch):
+    # 짧고 비스듬한 선이라 이름의 가운데 자리 둘이 상자에 붙는다. 다중도가 없으면 이름을 선을 따라 옮겨 합격한다. 다중도가 있으면
+    # 옮긴 이름 때문에 다중도가 선에 닿고 서로 겹쳐(걸린 것 둘) 가운데에 둔 것(이름이 상자에 붙음, 하나)보다 나쁘니 옮기지 않는다
+    data = {"classes": [{"name": "A", "left": 30, "top": 180}, {"name": "B", "left": -10, "top": 270}],
+            "relations": [{"kind": "aggregation", "from": "A", "to": "B", "name": "«use»",
+                           "from_multiplicity": "1..*", "to_multiplicity": "1"}]}
+    moved = C.render(without_multiplicities(data))
+    (r,) = moved.layout.relations
+    assert (r.labels[0].x, r.labels[0].y) not in C.name_spots(r.points, "«use»") and K.check(moved).passed
+    d = C.render(data)
+    assert kinds_of(d) == ["text_on_box"]
+    with monkeypatch.context() as m:
+        middle_only(m)
+        assert d.layout.relations[0].labels == C.render(data).layout.relations[0].labels
+    with monkeypatch.context() as m:
+        m.setattr(B._Spots, "misses", lambda self, start: (0, 0))  # 견주지 않고 옮긴 쪽을 쓰면 다중도가 걸린다
+        assert kinds_of(C.render(data)) == ["line_through_text", "text_overlap"]
+
+
+def test_name_moves_when_that_trades_a_box_overlap_for_one_label_overlap(monkeypatch):
+    # 걸린 것이 가운데(이름이 상자에 붙음)와 옮긴 쪽(다중도가 이름에 겹침) 모두 하나면, 피할 것에 걸린 글자가 없는 옮긴 쪽을 쓴다
     data = {"classes": [{"name": "A", "left": 120, "top": -100}, {"name": "B", "left": 160, "top": -20}],
             "relations": [{"kind": "composition", "from": "A", "to": "B", "name": "has",
                            "from_multiplicity": "1..*", "to_multiplicity": "*"}]}
-    bare = copy.deepcopy(data)
-    del bare["relations"][0]["from_multiplicity"], bare["relations"][0]["to_multiplicity"]
-    moved = C.render(bare)
-    (r,) = moved.layout.relations
-    assert (r.labels[0].x, r.labels[0].y) not in C.name_spots(r.points, "has") and K.check(moved).passed
     d = C.render(data)
-    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
-    assert d.layout.relations[0].labels == C.render(data).layout.relations[0].labels
+    (r,) = d.layout.relations
+    assert (r.labels[0].x, r.labels[0].y) not in C.name_spots(r.points, "has") and kinds_of(d) == ["text_overlap"]
+    middle_only(monkeypatch)
+    assert kinds_of(C.render(data)) == ["text_on_box"]
+
+
+def test_name_with_no_free_spot_stays_in_the_middle_even_beside_a_spot_that_only_touches_lines(monkeypatch):
+    # 가운데는 Up·Down이 막고, 그 옆 빈 곳(x 90~120, 260~300)은 세로선 U0→D0(x 105)·U1→D1(x 280)이 지난다. 상자에는 안 걸리고
+    # 선에만 닿는 자리는 있지만 빈 자리가 아니라 옮기지 않는다 — 그런 자리는 선 여러 개에 닿아 불합격이 늘 수 있다
+    data = walled(120, 260, kind="dependency", name="has")
+    for i, x in enumerate((105, 280)):
+        data["classes"] += [{"name": f"U{i}", "left": x - 45, "top": -300}, {"name": f"D{i}", "left": x - 45, "top": 300}]
+        data["relations"].append({"kind": "association", "from": f"U{i}", "to": f"D{i}", "navigable": "none"})
+    d = C.render(data)
+    label = d.layout.relations[0].labels[0]
+    assert (label.x, label.y) in C.name_spots(((90, 24), (300, 24)), "has")
+    assert kinds_of(d) == ["text_on_box"]
+    middle_only(monkeypatch)
+    assert C.render(data).layout.relations[0].labels == d.layout.relations[0].labels
 
 
 def test_name_with_no_free_spot_along_the_line_stays_in_the_middle():
