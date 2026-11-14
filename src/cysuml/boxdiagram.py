@@ -772,12 +772,15 @@ def name_spots(points: tuple[Point, ...], lines: Union[str, tuple[str, ...]]) ->
     return _beside(points[k], points[k + 1], lines_box(0, 0, lines))
 
 
-def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[list[Point]]:
+def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[tuple[T.Box, list[Point]]]:
     """가운데 후보(name_spots) 둘이 다 피할 것에 걸릴 때 더 볼 이름 글자 자리를, 구간마다 가운데에서 가까운 것부터 묶음으로
     낸다. 가장 긴 구간을 따라 가운데에서 양쪽으로 NAME_STEP씩 옮긴 자리마다 선 양옆 둘(진행 방향 앞쪽·뒤쪽 차례로 네 자리가 한
     묶음), 그다음 구간도 길이 차례로 그 가운데(두 자리)부터 같게 낸다. 글자는 제 구간 옆을 벗어나지 않는다 — 글자 상자를
-    구간 방향으로 비춘 폭이 구간 안에 드는 자리만 낸다."""
+    구간 방향으로 비춘 폭이 구간 안에 드는 자리만 낸다. 묶음마다 그 구간의 띠(그 구간 묶음들의 흰 바탕을 다 덮는 상자 — 구간마다
+    같은 값)도 함께 낸다."""
     box = lines_box(0, 0, lines)
+    # 글자 가운데는 선에서 (원점에서 가장 먼 모서리까지) + NAME_GAP 안이고, 흰 바탕은 그 가운데에서 다시 그만큼 + LABEL_CLEAR 안이다
+    far = max(math.hypot(cx, cy) for cx in (box[0], box[2]) for cy in (box[1], box[3]))
     for n, k in enumerate(_segments_by_length(points)):
         p, q = points[k], points[k + 1]
         ln = math.dist(p, q)
@@ -785,11 +788,12 @@ def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[l
             continue
         ux, uy = (q[0] - p[0]) / ln, (q[1] - p[1]) / ln
         room = ln / 2 - max(abs(cx * ux + cy * uy) for cx in (box[0], box[2]) for cy in (box[1], box[3]))
+        band = grow(span((p, q)), 2 * far + NAME_GAP + LABEL_CLEAR)
         if n and room >= 0:
-            yield _beside(p, q, box)
+            yield band, _beside(p, q, box)
         i = 1
         while i * NAME_STEP <= room:
-            yield _beside(p, q, box, i * NAME_STEP) + _beside(p, q, box, -i * NAME_STEP)
+            yield band, _beside(p, q, box, i * NAME_STEP) + _beside(p, q, box, -i * NAME_STEP)
             i += 1
 
 
@@ -824,6 +828,9 @@ def obstacles(boxes: tuple[PlacedBox, ...], holders: frozenset[str] = frozenset(
     return Obstacles(tuple(solids), tuple(frames))
 
 
+_Pool = tuple[list[Border], list[Segment], list[tuple[Point, Point, T.Box]], list[T.Box]]  # _Spots._pool
+
+
 class _Spots:
     """선 글자의 자리를 고른다. 글자의 흰 바탕(글자 상자를 LABEL_CLEAR만큼 넓힌 것)이 피할 것(Obstacles)에 겹치지 않는 자리,
     그 가운데 관계선과 선 끝 모양(화살촉·삼각형·마름모)과 앞서 놓은 선 글자에 닿지 않는 자리, 그 가운데 피할 것에서 먼
@@ -841,27 +848,39 @@ class _Spots:
         self.clean.append(room and clear)
         return p
 
-    def state(self) -> tuple[tuple[T.Box, ...], tuple[bool, ...]]:
-        return tuple(self.labels), tuple(self.clean)
+    def cut(self, start: int) -> tuple[list[T.Box], list[bool]]:
+        """start번째부터 놓은 글자를 들어내 돌려준다(put으로 도로 놓는다)."""
+        tail = self.labels[start:], self.clean[start:]
+        del self.labels[start:], self.clean[start:]
+        return tail
 
-    def restore(self, state: tuple[tuple[T.Box, ...], tuple[bool, ...]]) -> None:
-        self.labels, self.clean = list(state[0]), list(state[1])
+    def put(self, tail: tuple[list[T.Box], list[bool]]) -> None:
+        self.labels += tail[0]
+        self.clean += tail[1]
 
     def misses(self, start: int) -> int:
         """start번째부터 놓은 글자 가운데 빈 자리를 못 찾은 것의 수."""
         return self.clean[start:].count(False)
 
-    def _best(self, lines: tuple[str, ...], candidates: list[Point],
-              avoid: Obstacles) -> tuple[tuple[bool, bool, float], Point, T.Box]:
+    def _pool(self, region: T.Box, avoid: Obstacles) -> _Pool:
+        """흰 바탕이 region 안인 후보들이 닿을 수 있는 것만 거른 피할 것·선·앞서 놓은 글자. 피할 것은 MULT_ENOUGH 밖이면 점수가 같아
+        거리를 잴 필요가 없다."""
+        reach = grow(region, MULT_ENOUGH)
+        return ([b for b in avoid.solids if meets(b.bounds, reach)], [s for s in avoid.frames if meets(span(s), reach)],
+                [s for s in self.segments if meets(s[2], region)], [x for x in self.labels if meets(x, region)])
+
+    def _best(self, lines: tuple[str, ...], candidates: list[Point], avoid: Obstacles,
+              pool: Optional[_Pool] = None) -> tuple[tuple[bool, bool, float], Point, T.Box]:
+        """후보 가운데 가장 나은 것(점수, 자리, 글자 상자). pool은 이 후보들을 덮는 더 넓은 곳에서 미리 거른 것이다(_pool)."""
         boxes = [lines_box(x, y, lines) for x, y in candidates]
         wides = [grow(b, LABEL_CLEAR) for b in boxes]
         region = span(pt for w in wides for pt in (w[:2], w[2:]))
-        # 후보들이 닿을 수 있는 것만 먼저 거른다. 피할 것은 MULT_ENOUGH 밖이면 점수가 같아 거리를 잴 필요가 없다.
+        solids, frames, segments, labels = pool or (avoid.solids, avoid.frames, self.segments, self.labels)
         reach = grow(region, MULT_ENOUGH)
-        near_solids = [b for b in avoid.solids if meets(b.bounds, reach)]
-        near_frames = [s for s in avoid.frames if meets(span(s), reach)]
-        near_segments = [(p, q) for p, q, bb in self.segments if meets(bb, region)]
-        near_labels = [x for x in self.labels if meets(x, region)]
+        near_solids = [b for b in solids if meets(b.bounds, reach)]
+        near_frames = [s for s in frames if meets(span(s), reach)]
+        near_segments = [(p, q) for p, q, bb in segments if meets(bb, region)]
+        near_labels = [x for x in labels if meets(x, region)]
         best = None
         for p, box, wide in zip(candidates, boxes, wides):
             room = min([b.gap(wide) for b in near_solids] + [segment_gap(wide, s) for s in near_frames],
@@ -882,8 +901,11 @@ class _Spots:
         묶음 차례로 보아 처음 빈 자리가 나온 묶음의 가장 나은 자리로 옮기고, 빈 자리가 없으면 가운데 후보에 둔다."""
         best = self._best(lines, name_spots(points, lines), avoid)
         if slide and not best[0][0]:
-            for ring in slide_spots(points, lines):
-                found = self._best(lines, ring, avoid)
+            pool, pooled = None, None
+            for band, ring in slide_spots(points, lines):
+                if band is not pooled:  # 구간마다 한 번만 거른다
+                    pool, pooled = self._pool(band, avoid), band
+                found = self._best(lines, ring, avoid, pool)
                 if found[0][0] and found[0][1]:
                     return self._keep(found), True
         return self._keep(best), False
@@ -1068,17 +1090,17 @@ def layout(diagram: Diagram) -> Layout:
         if held not in avoids:
             avoids[held] = obstacles(placed, held)
         avoid = avoids[held]
-        before = spots.state()
+        start = len(spots.labels)
         labels, moved = _relation_labels(spots, r, points, avoid, slide=True)
-        if moved and len(labels) > 1:
-            # 선을 따라 옮긴 이름이 같은 관계의 다중도 자리를 차지했을 수 있다. 이름을 가운데에 둔 것과 견주어, 빈 자리를 못 찾은
-            # 글자가 더 적을 때만 옮긴 쪽을 쓴다
-            slid, after = labels, spots.state()
-            spots.restore(before)
+        if moved and (missed := spots.misses(start)):
+            # 선을 따라 옮긴 이름(빈 자리다) 때문에 같은 관계의 다중도가 빈 자리를 못 찾았을 수 있다. 이름을 가운데에 둔 것과
+            # 견주어, 빈 자리를 못 찾은 글자가 더 적을 때만 옮긴 쪽을 쓴다
+            slid, tail = labels, spots.cut(start)
             labels, _ = _relation_labels(spots, r, points, avoid, slide=False)
-            if spots.misses(len(before[0])) > after[1][len(before[0]):].count(False):
+            if spots.misses(start) > missed:
+                spots.cut(start)
+                spots.put(tail)
                 labels = slid
-                spots.restore(after)
         out.append(replace(p, labels=tuple(labels)))
     return Layout(spec, placed, tuple(out), lines_of)
 

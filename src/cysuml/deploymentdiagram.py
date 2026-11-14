@@ -12,7 +12,7 @@ from . import boxdiagram as B
 from .boxdiagram import ELEMENT_WORDS, NEST_PAD, Diagram, Drawing, Spec
 from .canvas import SCALE
 from .classdiagram import HEAD, NAME_LINE, RELATIONS, RULES
-from .guide import PLACED_ELEMENTS, box_tool, relation_fields, spacing_tips
+from .guide import LABEL_ROOM, PLACED_ELEMENTS, box_tool, relation_fields, spacing_tips
 from .shapes import DEPTH, SHAPES
 
 SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none", rules=RULES)
@@ -52,8 +52,9 @@ top + {INNER_TOP + 2 * NAME_LINE:g}).
 - 노드 밖에서 노드 안의 요소(노드 안의 노드 포함 — 아래에서 "끝 요소")로 가는 선이 끝 요소를 품은 노드들의 이름(앞면 위 가운데)을 \
 지나면 불합격이다. 선을 보내는 요소는 가장 바깥 노드의 옆에 끝 요소와 같은 높이로(보내는 요소의 top을 끝 요소의 윗변과 아랫변 \
 사이에) 두거나, 아래에 끝 요소와 같은 가로 자리로(보내는 요소의 left를 끝 요소의 왼변과 오른변 사이에) 둔다. 왼쪽·오른쪽·아래 \
-가운데 노드 테두리에서 끝 요소까지 가는 길에 다른 요소가 없는 쪽을 고른다. 가장 바깥 노드와는 요소 사이 \
-기본 간격("요소 사이는" 항목)만큼 띄우면 된다 — 선 글자(«deploy»·프로토콜 이름)는 도구가 선을 따라 노드 테두리를 비킨 자리에 놓는다.
+가운데 노드 테두리에서 끝 요소까지 가는 길에 다른 요소가 없는 쪽을 고른다. 그 선의 글자(«deploy»·프로토콜 \
+이름)는 도구가 선을 따라 노드 테두리를 비킨 자리에 놓으니, 가장 바깥 노드와는 그 글자가 들어갈 만큼 띄우면 된다 — {LABEL_ROOM}. \
+«deploy» 한 줄이면 요소 사이 기본 간격("요소 사이는" 항목)으로 넉넉하다.
 - 끝 요소가 가장 바깥 노드 바로 안의 노드이면 선을 보내는 요소를 위에 둘 수도 있다. 이름 칸 바로 위는 피하고, 이름 칸에서 보내는 \
 요소 쪽으로 40px쯤 바깥, 이름 칸 아랫변에서 10px 아래에 꺾는 점(via)을 하나 준다(이름 칸 옆 앞면이 40px보다 좁아 꺾는 점이 앞면 밖(두께 띠나 노드 밖)에 놓여도 된다. 이름 칸 \
 자리는 불합격 항목의 "이름 칸"에 나온다). 보내는 요소가 바깥 노드 오른쪽 위 모서리 근처라 꺾는 점까지 가는 선이 그 모서리의 \

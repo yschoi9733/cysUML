@@ -371,11 +371,18 @@ def test_name_with_no_free_spot_along_the_line_stays_in_the_middle():
     assert [f.kind for f in K.check(d).failures] == ["text_on_box"]
 
 
+def span_in(inner, outer):
+    return outer[0] <= inner[0] and outer[1] <= inner[1] and inner[2] <= outer[2] and inner[3] <= outer[3]
+
+
 def test_slide_spots_walk_out_from_the_middle_and_stay_beside_their_segment():
     points = ((0, 0), (100, 0), (100, 30))  # 가로 100px 구간 다음 세로 30px 구간
     lines = ("uses",)
     b = B.lines_box(0, 0, lines)
-    rings = list(B.slide_spots(points, lines))
+    banded = list(B.slide_spots(points, lines))
+    rings = [ring for _, ring in banded]
+    # 구간의 띠는 그 구간 묶음들의 흰 바탕을 다 덮는다
+    assert all(span_in(G.grow(B.lines_box(x, y, lines), C.LABEL_CLEAR), band) for band, ring in banded for x, y in ring)
     n = int((50 - max(-b[0], b[2])) // B.NAME_STEP)  # 가로 구간에서 글자 상자가 구간 안에 드는 묶음 수
     across, down = rings[:n], rings[n:]
     # 가로 구간: 가운데(50)에서 앞쪽·뒤쪽으로 5px씩 옮긴 네 자리씩, 글자 상자가 구간(x 0~100) 밖으로 나가기 전까지

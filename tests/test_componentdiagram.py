@@ -11,10 +11,11 @@ from cysuml import boxcheck as K
 from cysuml import boxdiagram as B
 from cysuml import componentdiagram as C
 from cysuml import geom as G
-from cysuml import server
+from cysuml import guide, server
 from cysuml.boxdiagram import LABEL_LINE, HeadMark, NameZone
 from cysuml.canvas import Ellipse, Line, Polygon, Text
 from cysuml.parsing import InputError
+from cysuml.text import text_width
 
 README = Path(__file__).resolve().parent.parent / "README.md"
 
@@ -166,7 +167,10 @@ def test_label_from_outside_a_package_moves_off_its_border_at_the_basic_spacing(
     (r,) = d.layout.relations
     (label,) = r.labels
     assert (label.x, label.y) not in B.name_spots(r.points, label.lines)
-    assert "넉넉히 떼어 놓는다" not in C.TIPS
+    assert "넉넉히 떼어 놓는다" not in C.TIPS and guide.LABEL_ROOM in C.TIPS
+    # 요령의 간격(아래면 줄 수 × 15 + 글자 폭 ÷ 4 + 25px)만큼 아래에 두어도 합격한다
+    below = el("artifact", "order.jar", svc[0] + 10, pkg[3] + 15 + text_width("«manifest»") / 4 + 25)
+    assert report([*elements, below], [rel("dependency", "order.jar", "OrderService", stereotype="manifest")]).passed
 
 
 @pytest.mark.parametrize("gap, passed", [(20, False), (30, False), (40, True), (90, True)])
