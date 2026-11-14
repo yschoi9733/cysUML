@@ -423,11 +423,19 @@ def test_label_faults_count_each_element_each_relation_line_and_each_label():
     spots = B._Spots([((-30, -2), (30, -2)), ((-30, 2), (30, 2)), ((0, -30), (0, 30))], ["r1", "r1", "r2"])
     spots.labels.append((-5, -5, 5, 5))
     avoid = B.Obstacles((G.RectBorder((-20, -20, -5, 20)), G.RectBorder((5, -20, 20, 20))),
-                        (((-40, -1), (40, -1)), ((-40, 1), (40, 1))))
+                        (((-40, -1), (40, -1)), ((-40, 1), (40, 1))), ("X", "Y"), ("H", "H"))
     best = spots._best(("abc",), [(0, 0)], avoid)
-    assert best[0][:2] == (False, False) and best[3] == 6
+    assert (best.off, best.free, best.faults) == (False, False, 6)
     spots._keep(best)
     assert spots.misses(0) == (6, 1)
+
+
+def test_label_faults_count_an_element_once_and_lines_through_one_place_once():
+    # 끝을 품은 요소 H의 이름 칸과 테두리 선에 함께 걸리면 H 하나, 또 다른 품은 요소 K의 테두리 선에도 걸리면 둘이다. 같은 자리를
+    # 지나는(포개진) 관계 둘의 선은 하나다(검사도 요소마다, 같은 자리의 선들은 한 항목으로 알린다)
+    spots = B._Spots([((-30, 0), (30, 0)), ((-30, 0), (30, 0))], ["r1", "r2"])
+    avoid = B.Obstacles((G.RectBorder((-20, -20, 20, -3)),), (((-40, 3), (40, 3)), ((-40, 4), (40, 4))), ("H",), ("H", "K"))
+    assert spots._best(("abc",), [(0, 0)], avoid).faults == 2 + 1
 
 
 def span_in(inner, outer):
@@ -439,9 +447,11 @@ def test_slide_spots_walk_out_from_the_middle_and_stay_beside_their_segment():
     lines = ("uses",)
     b = B.lines_box(0, 0, lines)
     banded = list(B.slide_spots(points, lines))
-    rings = [ring for _, ring in banded]
+    assert len(banded) == 2  # 구간마다 (띠, 묶음들)
+    rings = [ring for _, rings in banded for ring in rings]
     # 구간의 띠는 그 구간 묶음들의 흰 바탕을 다 덮는다
-    assert all(span_in(G.grow(B.lines_box(x, y, lines), C.LABEL_CLEAR), band) for band, ring in banded for x, y in ring)
+    assert all(span_in(G.grow(B.lines_box(x, y, lines), C.LABEL_CLEAR), band)
+               for band, rings in banded for ring in rings for x, y in ring)
     n = int((50 - max(-b[0], b[2])) // B.NAME_STEP)  # 가로 구간에서 글자 상자가 구간 안에 드는 묶음 수
     across, down = rings[:n], rings[n:]
     # 가로 구간: 가운데(50)에서 앞쪽·뒤쪽으로 5px씩 옮긴 네 자리씩, 글자 상자가 구간(x 0~100) 밖으로 나가기 전까지

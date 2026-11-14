@@ -17,11 +17,11 @@ import math
 import numbers
 from dataclasses import dataclass, field, replace
 from functools import cached_property
-from typing import Any, Callable, Iterator, Mapping, Optional, Union
+from typing import Any, Callable, Iterable, Iterator, Mapping, NamedTuple, Optional, Union
 
 from . import text as T
 from .canvas import BG_MARGIN, SCALE, Canvas, Line, Point, Polygon, Text
-from .geom import Border, RectBorder, Segment, gap, grow, hits, meets, outline, segment_gap, span
+from .geom import Border, RectBorder, Segment, clip, gap, grow, hits, meets, outline, segment_gap, span
 from .parsing import InputError, Reader
 from .parsing import at as _at
 from .parsing import show as _show
@@ -50,6 +50,7 @@ MULT_ANGLES = (math.pi / 8, math.pi / 6, math.pi / 4, math.pi / 3)
 MULT_DISTANCES = (20, 25, 30, 35, 40, 50)
 MULT_ENOUGH = 20    # 요소와 이만큼 떨어지면 더 멀리 두지 않고 선 끝에 가까운 자리를 고른다
 NAME_STEP = 5       # 이름 글자의 가운데 후보가 다 걸릴 때 선을 따라 옮겨 보는 간격
+PLACE_EPS = 1e-3    # 여러 선이 걸린 자리가 이 안으로 같으면 한 자리로 묶는다(검사도 이 값으로 묶는다)
 
 NEST_PAD = 20       # 바깥 요소를 늘릴 때 안의 요소 둘레에 두는 여백. 검사도 안의 요소가 칸 테두리에서 이만큼 떨어졌는지 본다
 NAME_SEP = 4        # 모양과 모양 밖 이름 사이
@@ -772,12 +773,11 @@ def name_spots(points: tuple[Point, ...], lines: Union[str, tuple[str, ...]]) ->
     return _beside(points[k], points[k + 1], lines_box(0, 0, lines))
 
 
-def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[tuple[T.Box, list[Point]]]:
-    """가운데 후보(name_spots) 둘이 다 피할 것에 걸릴 때 더 볼 이름 글자 자리를, 구간마다 가운데에서 가까운 것부터 묶음으로
-    낸다. 가장 긴 구간을 따라 가운데에서 양쪽으로 NAME_STEP씩 옮긴 자리마다 선 양옆 둘(진행 방향 앞쪽·뒤쪽 차례로 네 자리가 한
-    묶음), 그다음 구간도 길이 차례로 그 가운데(두 자리)부터 같게 낸다. 글자는 제 구간 옆을 벗어나지 않는다 — 글자 상자를
-    구간 방향으로 비춘 폭이 구간 안에 드는 자리만 낸다. 묶음마다 그 구간의 띠(그 구간 묶음들의 흰 바탕을 다 덮는 상자 — 구간마다
-    같은 값)도 함께 낸다."""
+def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[tuple[T.Box, list[list[Point]]]]:
+    """가운데 후보(name_spots) 둘이 다 피할 것에 걸릴 때 더 볼 이름 글자 자리를 구간마다 (띠, 묶음들)로 낸다. 묶음은 가운데에서
+    가까운 것부터다 — 가장 긴 구간은 가운데에서 양쪽으로 NAME_STEP씩 옮긴 자리마다 선 양옆 둘(진행 방향 앞쪽·뒤쪽 차례로 네 자리가
+    한 묶음), 그다음 구간도 길이 차례로 그 가운데(두 자리)부터 같게 낸다. 글자는 제 구간 옆을 벗어나지 않는다 — 글자 상자를 구간
+    방향으로 비춘 폭이 구간 안에 드는 자리만 낸다. 띠는 그 구간 묶음들의 흰 바탕을 다 덮는 상자다."""
     box = lines_box(0, 0, lines)
     # 글자 가운데는 선에서 (원점에서 가장 먼 모서리까지) + NAME_GAP 안이고, 흰 바탕은 그 가운데에서 다시 그만큼 + LABEL_CLEAR 안이다
     far = max(math.hypot(cx, cy) for cx in (box[0], box[2]) for cy in (box[1], box[3]))
@@ -788,15 +788,10 @@ def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[t
             continue
         ux, uy = (q[0] - p[0]) / ln, (q[1] - p[1]) / ln
         room = ln / 2 - max(abs(cx * ux + cy * uy) for cx in (box[0], box[2]) for cy in (box[1], box[3]))
-        if room < 0:  # 이 구간에서 낼 자리가 없다
-            continue
-        band = grow(span((p, q)), 2 * far + NAME_GAP + LABEL_CLEAR)
-        if n:
-            yield band, _beside(p, q, box)
-        i = 1
-        while i * NAME_STEP <= room:
-            yield band, _beside(p, q, box, i * NAME_STEP) + _beside(p, q, box, -i * NAME_STEP)
-            i += 1
+        rings = ([_beside(p, q, box)] if n else []) + [_beside(p, q, box, i * NAME_STEP) + _beside(p, q, box, -i * NAME_STEP)
+                                                        for i in range(1, int(room // NAME_STEP) + 1)]
+        if room >= 0 and rings:
+            yield grow(span((p, q)), 2 * far + NAME_GAP + LABEL_CLEAR), rings
 
 
 def multiplicity_spots(end: Point, toward: Point) -> list[Point]:
@@ -809,10 +804,13 @@ def multiplicity_spots(end: Point, toward: Point) -> list[Point]:
 
 @dataclass(frozen=True)
 class Obstacles:
-    """선 글자가 피할 것: solids는 겹치면 안 되는 테두리(요소, 이름 칸), frames는 닿으면 안 되는 선(끝을 품은 요소의 테두리 선)."""
+    """선 글자가 피할 것: solids는 겹치면 안 되는 테두리(요소, 이름 칸), frames는 닿으면 안 되는 선(끝을 품은 요소의 테두리 선).
+    solid_keys·frame_keys는 하나하나가 어느 요소의 것인지다 — 걸린 것을 요소마다 셀 때 쓰고, 비면 하나하나 다른 요소로 친다."""
 
     solids: tuple[Border, ...]
     frames: tuple[Segment, ...] = ()
+    solid_keys: tuple[str, ...] = ()
+    frame_keys: tuple[str, ...] = ()
 
 
 def obstacles(boxes: tuple[PlacedBox, ...], holders: frozenset[str] = frozenset()) -> Obstacles:
@@ -820,25 +818,58 @@ def obstacles(boxes: tuple[PlacedBox, ...], holders: frozenset[str] = frozenset(
     요소는 통째로 피한다(몸통 밖 이름 칸도)."""
     solids: list[Border] = []
     frames: list[Segment] = []
+    solid_keys: list[str] = []
+    frame_keys: list[str] = []
     for p in boxes:
         if p.key in holders:
-            solids += [RectBorder(z.rect) for z in p.zones]
+            mine = [RectBorder(z.rect) for z in p.zones]
             frames += p.frame
+            frame_keys += [p.key] * len(p.frame)
         else:
-            solids.append(p.border)
-            solids += [RectBorder(z.rect) for z in p.zones if z.outside]
-    return Obstacles(tuple(solids), tuple(frames))
+            mine = [p.border] + [RectBorder(z.rect) for z in p.zones if z.outside]
+        solids += mine
+        solid_keys += [p.key] * len(mine)
+    return Obstacles(tuple(solids), tuple(frames), tuple(solid_keys), tuple(frame_keys))
 
 
-_Pool = tuple[list[Border], list[Segment], list[tuple[Point, Point, T.Box, object]], list[T.Box]]  # _Spots._pool
-_Best = tuple[tuple[bool, bool, float], Point, T.Box, int]  # _Spots._best: 점수, 자리, 글자 상자, 걸린 것의 수
+_Pool = tuple[list[tuple[Border, object]], list[tuple[Segment, object]], list[tuple[Point, Point, T.Box, object]],
+              list[T.Box]]  # _Spots._pool: (피할 것, 요소 열쇠)·(테두리 선, 요소 열쇠)·(선분과 그 상자, 그린 관계)·앞서 놓은 글자
+
+
+class _Best(NamedTuple):
+    """후보 가운데 가장 나은 것. score는 견주는 점수(피할 것을 비켰다, 빈 자리다, 피할 것에서 떨어진 거리 — MULT_ENOUGH까지)이고,
+    faults는 걸린 것의 수다(_Spots)."""
+
+    score: tuple[bool, bool, float]
+    spot: Point
+    box: T.Box
+    faults: int
+
+    @property
+    def off(self) -> bool:
+        """피할 것을 비켰다."""
+        return self.score[0]
+
+    @property
+    def free(self) -> bool:
+        """빈 자리다(피할 것·선·앞서 놓은 글자에 다 안 닿는다)."""
+        return self.score[0] and self.score[1]
+
+
+def _places(boxes: Iterable[T.Box]) -> int:
+    """자리 수 — PLACE_EPS 안으로 같은 상자는 한 자리로 친다(검사가 같은 자리를 지나는 선들을 한 항목으로 묶는 것과 같다)."""
+    seen: list[T.Box] = []
+    for b in boxes:
+        if not any(all(abs(u - v) <= PLACE_EPS for u, v in zip(b, s)) for s in seen):
+            seen.append(b)
+    return len(seen)
 
 
 class _Spots:
     """선 글자의 자리를 고른다. 글자의 흰 바탕(글자 상자를 LABEL_CLEAR만큼 넓힌 것)이 피할 것(Obstacles)에 겹치지 않는 자리,
     그 가운데 관계선과 선 끝 모양(화살촉·삼각형·마름모)과 앞서 놓은 선 글자에 닿지 않는 자리, 그 가운데 피할 것에서 먼
-    (MULT_ENOUGH까지) 자리가 낫고, 같으면 후보 목록의 앞쪽이다. 놓은 글자마다 걸린 것의 수도 적어 둔다(misses) — 피할 것은
-    하나하나(끝을 품은 요소의 테두리 선은 모아 하나), 선은 그린 관계(owners)마다, 앞서 놓은 글자는 하나하나 센다."""
+    (MULT_ENOUGH까지) 자리가 낫고, 같으면 후보 목록의 앞쪽이다. 놓은 글자마다 걸린 것의 수도 적어 둔다(misses) — 검사가 알리는
+    단위대로, 피할 것은 요소마다, 선은 글자를 지나는 자리마다(같은 자리를 지나는 관계들은 하나), 앞서 놓은 글자는 하나하나 센다."""
 
     def __init__(self, segments: list[Segment], owners: Optional[list[str]] = None):
         self.segments = [(p, q, span((p, q)), owners[i] if owners else i) for i, (p, q) in enumerate(segments)]
@@ -846,10 +877,9 @@ class _Spots:
         self.marks: list[tuple[int, int]] = []  # 글자마다 (걸린 것의 수, 피할 것에 걸렸다)
 
     def _keep(self, best: _Best) -> Point:
-        (room, _, _), p, box, faults = best
-        self.labels.append(box)
-        self.marks.append((faults, int(not room)))
-        return p
+        self.labels.append(best.box)
+        self.marks.append((best.faults, int(not best.off)))
+        return best.spot
 
     def cut(self, start: int) -> tuple[list[T.Box], list[tuple[int, int]]]:
         """start번째부터 놓은 글자를 들어내 돌려준다(put으로 도로 놓는다)."""
@@ -869,29 +899,37 @@ class _Spots:
     def _pool(self, region: T.Box, avoid: Obstacles, within: Optional[_Pool] = None) -> _Pool:
         """흰 바탕이 region 안인 후보들이 닿을 수 있는 피할 것·선·앞서 놓은 글자(within이 있으면 그 가운데서 거른다). 피할 것은
         MULT_ENOUGH 밖이면 점수가 같아 거리를 잴 필요가 없다."""
-        solids, frames, segments, labels = within or (avoid.solids, avoid.frames, self.segments, self.labels)
+        if within is None:
+            within = (list(zip(avoid.solids, avoid.solid_keys or [("solid", i) for i in range(len(avoid.solids))])),
+                      list(zip(avoid.frames, avoid.frame_keys or [("frame", i) for i in range(len(avoid.frames))])),
+                      self.segments, self.labels)
+        solids, frames, segments, labels = within
         reach = grow(region, MULT_ENOUGH)
-        return ([b for b in solids if meets(b.bounds, reach)], [s for s in frames if meets(span(s), reach)],
+        return ([b for b in solids if meets(b[0].bounds, reach)], [f for f in frames if meets(span(f[0]), reach)],
                 [s for s in segments if meets(s[2], region)], [x for x in labels if meets(x, region)])
 
     def _best(self, lines: tuple[str, ...], candidates: list[Point], avoid: Obstacles,
               pool: Optional[_Pool] = None) -> _Best:
-        """후보 가운데 가장 나은 것(점수, 자리, 글자 상자, 걸린 것의 수). pool은 이 후보들을 덮는 더 넓은 곳에서 미리 거른 것이다(_pool)."""
+        """후보 가운데 가장 나은 것. pool은 이 후보들을 덮는 더 넓은 곳에서 미리 거른 것이다(_pool)."""
         boxes = [lines_box(x, y, lines) for x, y in candidates]
         wides = [grow(b, LABEL_CLEAR) for b in boxes]
         region = span(pt for w in wides for pt in (w[:2], w[2:]))
         near_solids, near_frames, near_segments, near_labels = self._pool(region, avoid, pool)
-        best = None
+        best: Optional[_Best] = None
         for p, box, wide in zip(candidates, boxes, wides):
-            solid_gaps = [b.gap(wide) for b in near_solids]
-            frame_gaps = [segment_gap(wide, s) for s in near_frames]
+            solid_gaps = [b.gap(wide) for b, _ in near_solids]
+            frame_gaps = [segment_gap(wide, s) for s, _ in near_frames]
             room = min(solid_gaps + frame_gaps, default=MULT_ENOUGH)
-            on_lines = {owner for a, b, _, owner in near_segments if hits(a, b, wide)}
+            parts: dict[object, list[Point]] = {}  # 그린 관계마다 글자의 흰 바탕 안에 든 선의 점들
+            for a, b, _, owner in near_segments:
+                if (c := clip(a, b, wide)) is not None:
+                    parts.setdefault(owner, []).extend(c)
             on_labels = sum(gap(wide, x) < 0 for x in near_labels)
-            score = (room >= 0, not (on_lines or on_labels), min(room, MULT_ENOUGH))
-            if best is None or score > best[0]:
-                faults = sum(g < 0 for g in solid_gaps) + any(g < 0 for g in frame_gaps) + len(on_lines) + on_labels
-                best = score, p, box, faults
+            score = (room >= 0, not (parts or on_labels), min(room, MULT_ENOUGH))
+            if best is None or score > best.score:
+                hit = ({k for (_, k), g in zip(near_solids, solid_gaps) if g < 0}
+                       | {k for (_, k), g in zip(near_frames, frame_gaps) if g < 0})
+                best = _Best(score, p, box, len(hit) + _places(span(pts) for pts in parts.values()) + on_labels)
         assert best is not None
         return best
 
@@ -901,17 +939,16 @@ class _Spots:
     def pick_name(self, lines: tuple[str, ...], points: tuple[Point, ...], avoid: Obstacles,
                   slide: bool = True) -> tuple[Point, bool]:
         """이름 글자 자리와, 선을 따라 옮겼는지. 가운데 후보 둘이 다 피할 것에 걸리면(slide일 때) 선을 따라 더 본 자리(slide_spots)를
-        묶음 차례로 보아 처음 빈 자리(피할 것·선·앞서 놓은 글자에 다 안 닿는 자리)가 나온 묶음의 가장 나은 자리로 옮기고, 빈 자리가
-        없으면 가운데 후보에 둔다. 피할 것만 비키고 선에 닿는 자리로는 옮기지 않는다 — 선 여러 개에 닿아 불합격이 늘 수 있다."""
+        구간마다 묶음 차례로 보아 처음 빈 자리가 나온 묶음의 가장 나은 자리로 옮기고, 빈 자리가 없으면 가운데 후보에 둔다. 피할
+        것만 비키고 선에 닿는 자리로는 옮기지 않는다 — 선 여러 개에 닿아 불합격이 늘 수 있다."""
         best = self._best(lines, name_spots(points, lines), avoid)
-        if slide and not best[0][0]:
-            pool, pooled = None, None
-            for band, ring in slide_spots(points, lines):
-                if band != pooled:  # 구간마다 한 번만 거른다
-                    pool, pooled = self._pool(band, avoid), band
-                found = self._best(lines, ring, avoid, pool)
-                if found[0][0] and found[0][1]:
-                    return self._keep(found), True
+        if slide and not best.off:
+            for band, rings in slide_spots(points, lines):
+                pool = self._pool(band, avoid)  # 구간마다 한 번만 거른다
+                for ring in rings:
+                    found = self._best(lines, ring, avoid, pool)
+                    if found.free:
+                        return self._keep(found), True
         return self._keep(best), False
 
 
