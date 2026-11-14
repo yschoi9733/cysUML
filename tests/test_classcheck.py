@@ -79,7 +79,7 @@ def test_line_running_along_its_own_end_box_fails(via_y, passed):
     if not passed:
         (f,) = r.failures
         assert f.kind == "line_along_own_box" and f.elements == ("A->B", "A")
-        assert "선이 그 선의 끝 상자에 4px 안으로 붙어 간다" in f.problem and "상자 A(0, 0, 90×48)" in f.problem
+        assert "선이 자기 끝 상자에 4px 안으로 붙어 간다" in f.problem and "상자 A(0, 0, 90×48)" in f.problem
         assert "테두리가 두 겹" in f.hint
 
 
@@ -204,6 +204,7 @@ def test_multiplicity_crossed_by_another_line_fails():
     (f,) = r.failures
     assert f.kind == "line_through_text" and f.elements == ("C->D", "A->B")
     assert "to 쪽 다중도 '0..* {ordered, unique}'" in f.problem and "relations[1]" in f.problem
+    assert f.hint.startswith("선 글자 자리는 도구가 그 글자가 붙은 선 둘레의 빈 곳에서 고른다 — ")
 
 
 def test_moving_the_other_line_away_from_the_multiplicity_passes():
@@ -387,7 +388,8 @@ def test_line_under_its_own_diamond_fails():
     via = [[150, 24], [150, 80], [100, 80], [100, 10], [200, 10], [200, 24]]
     r = report([box("A", 0, 0), box("B", 400, 0)], [rel("aggregation", "A", "B", navigable="none", via=via)])
     (f,) = r.failures
-    assert f.kind == "line_through_head" and f.elements == ("A->B",) and "같은 관계의 선 끝 모양" in f.problem
+    assert f.kind == "line_through_head" and f.elements == ("A->B",) and "자기 선 끝 모양" in f.problem
+    assert f.hint.startswith("꺾는 점(via)을 고쳐 선이 자기 선 끝 모양을 비켜 가게 한다")
     assert report([box("A", 0, 0), box("B", 400, 0)], [rel("association", "A", "B", navigable="none", via=via)]).passed
 
 
@@ -414,7 +416,7 @@ def test_line_bent_beside_its_own_arrowhead_fails_within_the_overlap_gap(end, pa
     if not passed:
         (f,) = r.failures
         assert f.kind == "line_through_head" and f.elements == ("A->B",)
-        assert "선이 같은 관계의 선 끝 모양에 닿는다" in f.problem and "화살촉" in f.problem
+        assert "선이 자기 선 끝 모양에 닿는다" in f.problem and "화살촉" in f.problem
 
 
 def test_overlap_hides_only_the_end_shapes_it_reaches():
