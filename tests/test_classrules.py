@@ -447,7 +447,7 @@ def test_tool_descriptions_state_the_rules_of_the_kinds_the_tool_takes():
     assert ('from이 "interface"·"package" 가운데 하나인 것, to가 "interface" 밖의 종류인 것(to가 "component"·"component_icon" '
             '가운데 하나이고 from이 "class"·"abstract" 가운데 하나인 것은 빼고).') in D.TOOL
     # 따옴표 친 종류 이름 바로 뒤에 받침에 따라 갈리는 조사를 붙이지 않는다("lollipop"는은 틀린다 — 이고·인 같은 서술은 괜찮다)
-    for tool in (server.CLASS_TOOL, P.TOOL, CD.TOOL, D.TOOL):
+    for tool in (server.CLASS_TOOL, P.TOOL, CD.TOOL, D.TOOL, usecasediagram.TOOL):
         rules = "\n".join(line for line in tool.splitlines() if line.startswith(("  - 규칙:", "  - 알림:")))
         assert not re.search(r'"(?:[은는가을를]|이 |으?로)', rules), rules
     # 흐름 안내(서버 안내문·도구 설명)도 표기 규칙 알림이 불합격이 아니라고 적는다
@@ -455,8 +455,8 @@ def test_tool_descriptions_state_the_rules_of_the_kinds_the_tool_takes():
     # 자기 자신 금지는 관계 종류(reflexive)에서 꺾는 점 줄에 적는다
     assert ("자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다(상속·실체화는 꺾는 점이 있어도 자기 자신으로 갈 수 "
             "없다).") in server.CLASS_TOOL
-    # 유즈케이스도의 일반화는 클래스도 관계가 아니라 이 규칙을 적지 않는다
-    assert "  - 규칙:" not in usecasediagram.TOOL and "자기 자신으로 갈 수 없다" not in usecasediagram.TOOL
+    # 유즈케이스도의 일반화는 클래스도 관계가 아니라 이 규칙을 적지 않는다(제 규칙은 test_usecaserules)
+    assert "상속" not in usecasediagram.TOOL and "실체화" not in usecasediagram.TOOL
 
 
 def call(name, args):
