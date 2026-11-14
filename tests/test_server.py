@@ -750,7 +750,8 @@ NOT_JSON = "JSON으로 읽을 수 없다"
     (lambda p: p.write_text('{"tool": "draw_class_diagram", "file_name": "order",}'), NOT_JSON),  # 손보다 남긴 쉼표
     (lambda p: p.write_text("메모"), NOT_JSON),
     (lambda p: p.write_bytes(b"\xff\xfe\x00"), NOT_JSON),
-    (lambda p: p.write_text("[" * 100_000 + "]" * 100_000), NOT_JSON),  # 너무 깊어 파이썬이 읽지 못한다
+    # 3.13까지는 너무 깊어 읽지 못하고(RecursionError), 3.14는 읽어 낸다
+    (lambda p: p.write_text("[" * 100_000 + "]" * 100_000), (NOT_JSON, NOT_AN_OBJECT)),
     pytest.param(mkfifo, "보통 파일이 아니다", marks=pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO가 없다")),
     (huge, "16MiB보다 크다"),
 ], ids=["package", "no-file-name", "tool-not-text", "other-tool", "tool-list", "list", "comma", "text", "bytes", "deep", "fifo",
@@ -761,24 +762,42 @@ def test_a_json_file_not_saved_by_cysuml_is_kept_and_nothing_is_written(tmp_path
     before = None if kept.is_fifo() else kept.stat().st_size, kept.stat().st_mtime_ns
     r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
     assert r.is_error
-    assert text(r).startswith(f"그림을 저장하지 않았다 — out_dir {tmp_path}에 같은 이름의 order.json이 있는데 {why}. cysUML이 "
-                              "저장한 입력 파일로 보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일이면 읽을 수 있는 JSON "
-                              "객체(tool·file_name 포함)로 되돌리고, 아니면 다른 file_name이나 out_dir을 준다.\n")
+    assert any(text(r).startswith(kept_message(tmp_path, w)) for w in (why if isinstance(why, tuple) else (why,))), text(r)
     assert "상자 자리(왼, 위, 폭×높이): Order(0, 0, 90×48)" in text(r)
     assert [p.name for p in tmp_path.iterdir()] == ["order.json"]
     assert (None if kept.is_fifo() else kept.stat().st_size, kept.stat().st_mtime_ns) == before
+
+
+def kept_message(folder, why):
+    return (f"그림을 저장하지 않았다 — out_dir {folder}에 같은 이름의 order.json이 있는데 {why}. cysUML이 저장한 입력 파일로 "
+            "보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일이면 읽을 수 있는 JSON 객체(tool·file_name 포함)로 되돌리고, "
+            "아니면 다른 file_name이나 out_dir을 준다.\n")
+
+
+@pytest.mark.parametrize("target", ["missing.json", "real.json"], ids=["dangling", "to-a-record"])
+def test_a_symlink_in_place_of_the_input_file_is_kept(tmp_path, target):
+    (tmp_path / "real.json").write_text('{"tool": "draw_class_diagram", "file_name": "order"}')
+    try:
+        (tmp_path / "order.json").symlink_to(tmp_path / target)
+    except OSError:  # Windows는 권한이 있어야 링크를 만든다
+        pytest.skip("심볼릭 링크를 만들 수 없다")
+    r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
+    assert r.is_error
+    assert text(r).startswith(kept_message(tmp_path, "심볼릭 링크다"))
+    assert (tmp_path / "order.json").is_symlink()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["order.json", "real.json"]
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO가 없다")
 def test_a_file_that_turns_into_a_fifo_after_it_is_looked_at_does_not_hang_the_save(tmp_path, monkeypatch):
     kept = tmp_path / "order.json"
     os.mkfifo(kept)
-    real = os.stat
+    real = os.lstat
 
     def looks_regular(path, *args, **kwargs):  # 볼 때는 보통 파일이었다가, 열기 전에 FIFO로 바뀐 것과 같다
         st = real(path, *args, **kwargs)
         return os.stat_result((stat.S_IFREG | 0o644, *st[1:])) if Path(path) == kept else st
-    monkeypatch.setattr(server.os, "stat", looks_regular)
+    monkeypatch.setattr(server.os, "lstat", looks_regular)
     found = []
     worker = threading.Thread(target=lambda: found.append(server._not_ours(kept)), daemon=True)
     worker.start()

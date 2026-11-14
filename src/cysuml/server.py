@@ -44,9 +44,18 @@ TOOL_NAMES: list[str] = []  # 등록한 그리기 도구 이름(_named가 모은
 
 
 def _named(name: str) -> str:
-    """그리기 도구 이름을 TOOL_NAMES에 모으고 그대로 돌려준다. 도구를 등록하는 자리에서 부른다."""
+    """도구를 등록하는 자리에서 부른다."""
     TOOL_NAMES.append(name)
     return name
+
+
+def _is_dir(path: Path) -> bool:
+    """없으면 False, 폴더를 탐색하지 못하는 등의 오류는 올린다 — Path.is_dir은 파이썬 버전마다 오류를 삼키는 범위가 달라 쓰지
+    않는다(3.14는 모두 삼킨다)."""
+    try:
+        return stat.S_ISDIR(os.stat(path).st_mode)
+    except FileNotFoundError:
+        return False
 
 CLASS_TIPS = f"""클래스도 배치 요령:
 - 연결이 가장 많은 클래스를 가운데에 둔다.
@@ -86,7 +95,7 @@ INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리
 
 {SEQUENCE_FLOW}"""
 
-CLASS_TOOL = f"""클래스도를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 상자는 준 왼쪽 위(left·top) 그대로, \
+CLASS_TOOL = f"""클래스도를 그려 PNG와 입력 파일(.json)로 저장하고, 검사 결과와 그림을 함께 돌려준다. 상자는 준 왼쪽 위(left·top) 그대로, \
 관계선은 준 꺾는 점(via)을 따라 그리고, 상자 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다.
 
 입력
@@ -112,7 +121,7 @@ CLASS_TOOL = f"""클래스도를 그려 PNG 파일로 저장하고, 검사 결�
 
 {CLASS_TIPS}"""
 
-SEQUENCE_TOOL = f"""교류도를 그려 PNG 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 교류도는 도구가 배치한다 — 좌표는 받지 \
+SEQUENCE_TOOL = f"""교류도를 그려 PNG와 입력 파일(.json)로 저장하고, 검사 결과와 그림을 함께 돌려준다. 교류도는 도구가 배치한다 — 좌표는 받지 \
 않고, 생명선 간격과 메시지 높이를 글자 폭에 맞춰 정하고 활성 막대를 메시지에서 잇는다.
 
 입력
@@ -209,10 +218,12 @@ def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
 def _not_ours(path: Path) -> Optional[str]:
     """path에 cysUML이 저장한 입력 파일(tool이 cysUML 도구 이름이고 file_name이 든 JSON 객체)로 보이지 않는 것이 있으면 그 까닭을
     돌려준다. 입력 파일 이름이 package.json 같은 남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 없으면 None이다. 폴더는
-    부르는 쪽(_save)이 먼저 거른다. 있는지 보다 난 오류(폴더 탐색 권한 등)는 그대로 올려 쓰기 오류로 알린다. 종류와 크기는 연
-    핸들로 본다 — 보고 나서 여는 사이에 FIFO로 바뀌어도 읽다 멈추지 않게(이 함수는 저장 잠금 안에서 돈다)."""
+    부르는 쪽(_save)이 먼저 거른다. 있는지 보다 난 오류(폴더 탐색 권한 등)는 그대로 올려 쓰기 오류로 알린다. 심볼릭 링크는 끊겼든
+    아니든 덮어쓰지 않는다 — 바꿔 넣으면 링크 대상이 아니라 링크가 보통 파일로 바뀐다. 종류와 크기는 연 핸들로 본다 — 보고 나서 여는
+    사이에 FIFO로 바뀌어도 읽다 멈추지 않게(이 함수는 저장 잠금 안에서 돈다)."""
     try:
-        os.stat(path)
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            return "심볼릭 링크다"
     except FileNotFoundError:
         return None
     try:
@@ -276,9 +287,9 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
     try:
         with _saving:
             folder.mkdir(parents=True, exist_ok=True)
-            for path, _ in files:  # 한쪽만 바꿔 넣은 채 멈추지 않게 먼저 본다(폴더를 탐색하지 못하면 is_dir이 오류를 낸다)
+            for path, _ in files:  # 한쪽만 바꿔 넣은 채 멈추지 않게 먼저 본다
                 at = path
-                if path.is_dir():
+                if _is_dir(path):
                     raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR))
             at = kept
             if why := _not_ours(kept):
