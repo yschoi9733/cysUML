@@ -15,7 +15,8 @@ from typing import Any, Callable, Optional
 from . import boxdiagram as B
 from . import text as T
 from .boxdiagram import (ELEMENT_WORDS, LABEL_LINE, NEST_PAD, TRIANGLE_HEAD, Diagram, Drawing, Element, NameZone, PlacedBox,
-                         RelationType, Rules, Shape, Spec, end_of, fail_loops, floored, line_ys, parent_path)
+                         RelationType, Rules, Shape, Spec, end_of, ends_of, fail_loops, floored, line_ys,
+                         parent_path)
 from .canvas import SCALE, Canvas, Point
 from .classdiagram import RELATIONS as CLASS_RELATIONS
 from .geom import Border, EllipseBorder
@@ -164,10 +165,6 @@ def _stereo(rel: B.Relation) -> Optional[str]:
 
 def _step(rel: B.Relation) -> bool:
     return _stereo(rel) in STEPS
-
-
-def _ends(rel: B.Relation, s: str, t: str) -> str:
-    return f"{end_of('from', rel.source, s)}, {end_of('to', rel.target, t)}"
 
 
 def _other(s: str, t: str) -> Optional[str]:
@@ -335,10 +332,11 @@ class _Plan:
             self.add(o[2], path)
         if not good:
             return f"{'. '.join(dict.fromkeys(p for p in problems if p))}. {drop}"
-        blocked = "".join(f"({o[3]}{B.josa(o[3], '은', '는')} 안 된다 — {p})" for o, p in zip(options, problems) if p)
+        # 막힌 바꿈은 앞에 따로 적는다 — 권하는 말 뒤에 붙이면 그 말의 조건처럼 읽힌다
+        blocked = "".join(f"{o[3]}{B.josa(o[3], '은', '는')} 안 된다 — {p}. " for o, p in zip(options, problems) if p)
         said = [o[0] for o in good[:-1]]
-        said.append(f"{good[-1][0]}{blocked}, 아니면 {drop}" if maybe else f"{good[-1][1]}{blocked}")
-        return ", ".join(said)
+        said.append(f"{good[-1][0]}, 아니면 {drop}" if maybe else good[-1][1])
+        return blocked + ", ".join(said)
 
 
 class _InOrder(Reader):
@@ -367,7 +365,7 @@ PICK = "(자기 자신으로 가거나, 고리를 이루거나, 이미 있는 �
 def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str,
              subject: Optional[str]) -> tuple[str, str]:
     """틀린 관계(fault — _fault가 낸 규칙 이름)의 (오류 자리, 오류 글). subject는 from 쪽 유즈케이스의 주체(시스템 경계)다."""
-    a, b, ends = rel.source, rel.target, _ends(rel, s, t)
+    a, b, ends = rel.source, rel.target, ends_of(rel, s, t)
     if fault == "self_step":
         what = "포함" if _stereo(rel) == "include" else "확장"
         return path, f"유즈케이스는 자기 자신을 {what}할 수 없다(«{_stereo(rel)}») — 이 관계를 지운다"

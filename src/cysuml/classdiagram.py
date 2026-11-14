@@ -14,8 +14,8 @@ from . import boxdiagram as B
 from . import text as T
 from .boxdiagram import (ARROW, ARROW_HEAD, BOX_WORDS, DASH, DIAMOND, FILLED_DIAMOND, LABEL_CLEAR, MULT_DISTANCES,
                          MULT_ENOUGH, NAME_GAP, OPEN_DIAMOND, TRIANGLE, TRIANGLE_HEAD, Diagram, Drawing, Element, Label,
-                         Layout, PlacedBox, RelationType, Rules, Shape, Spec, draw, end_of, fail_loops, layout, name_spots,
-                         parent_path)
+                         Layout, PlacedBox, RelationType, Rules, Shape, Spec, draw, end_of, ends_of, fail_loops, layout,
+                         name_spots, parent_path)
 from .canvas import SCALE, Canvas
 from .parsing import InputError, Reader
 from .parsing import at as _at
@@ -343,7 +343,7 @@ class ClassRules(Rules):
             return True
         icons = "·".join(k for k in ICONS if k in spec.shapes)
         same = "class와 abstract는 같은 종류로 친다" + (f", 아이콘 표기({icons})도 기본 표기와 같은 종류로 친다" if icons else "")
-        r.fail(path, f"상속의 두 끝 종류가 다르다({end_of('from', rel.source, s)}, {end_of('to', rel.target, t)}) — 상속은 같은 "
+        r.fail(path, f"상속의 두 끝 종류가 다르다({ends_of(rel, s, t)}) — 상속은 같은 "
                      f"종류끼리 긋는다({same}). {fix or 'from·to나 요소의 kind를 고친다'}")
         return False
 
@@ -376,7 +376,7 @@ class ClassRules(Rules):
             problem, hint = f"{name}({_show(rel.source)}){B.josa(name, '은', '는')} 실체화하지 않는다.", f"{fix}."
         elif (d := REALIZED.get(_base(t))) and d.others and not _realizable(s, t) and not _same_kind(s, t):
             # 대상은 실체화가 가는 종류인데 하는 쪽 종류가 아니다(아티팩트 -> 컴포넌트)
-            problem = f"실체화를 하는 쪽이 to를 실현하지 않는 종류다({end_of('from', rel.source, s)}, {end_of('to', rel.target, t)})."
+            problem = f"실체화를 하는 쪽이 to를 실현하지 않는 종류다({ends_of(rel, s, t)})."
             hint = f"{d.others} — {d.by_artifact if _base(s) == 'artifact' else ''}다른 뜻이면 dependency를 쓴다."
         elif not _realizable(s, t):
             problem = f"실체화가 가는 쪽이 인터페이스가 아니다({end_of('to', rel.target, t)})."

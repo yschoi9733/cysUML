@@ -230,7 +230,7 @@ LOOP_BACK = "일반화로 두면 고리가 된다('은행' → '고객' → '은
     (rel("association", "은행", "고객"), f"{LOOP_BACK}. 이 연관을 지운다"),
     # 액터 사이 의존은 받으니 stereotype만 빼라고 하고, 일반화는 고리가 되어 권하지 않는다
     (rel("dependency", "은행", "고객", stereotype="include"),
-     f"의존을 뜻했으면 stereotype을 빼고(일반화는 안 된다 — {LOOP_BACK}), 아니면 이 관계를 지운다"),
+     f"일반화는 안 된다 — {LOOP_BACK}. 의존을 뜻했으면 stereotype을 빼고, 아니면 이 관계를 지운다"),
     (rel("generalization", "은행", "고객", stereotype="include"), f"{LOOP_BACK}. 이 관계를 지운다"),
 ])
 def test_a_later_error_is_not_told_to_close_a_loop_with_the_fix_of_an_earlier_one(second, fix):
@@ -266,8 +266,8 @@ def test_two_use_case_generalizations_with_extend_the_other_way_round_get_one_fi
     first, then = problems([rel("generalization", "주문한다", "결제한다", stereotype="extend"),
                             rel("generalization", "결제한다", "주문한다", stereotype="extend")])
     assert first.endswith(") — 확장이면 kind를 'dependency'로 바꾸고, 일반화를 뜻했으면 stereotype을 빼고, 아니면 이 관계를 지운다")
-    assert then.endswith(") — 확장이면 kind를 'dependency'로 바꾸고(일반화는 안 된다 — 일반화로 두면 고리가 된다('결제한다' → "
-                         "'주문한다' → '결제한다' — relations[0]의 고치는 법을 따르면)), 아니면 이 관계를 지운다")
+    assert then.endswith(") — 일반화는 안 된다 — 일반화로 두면 고리가 된다('결제한다' → '주문한다' → '결제한다' — relations[0]의 "
+                         "고치는 법을 따르면). 확장이면 kind를 'dependency'로 바꾸고, 아니면 이 관계를 지운다")
 
 
 def test_two_use_case_associations_the_other_way_round_do_not_become_includes_of_each_other():
@@ -356,8 +356,8 @@ REFUND = inside("sys", "use_case", "환불한다", 480, 160)
     # 일반화로 두면 고리가 된다
     ([rel("generalization", "결제한다", "환불한다"), rel("generalization", "환불한다", "주문한다"),
       rel("generalization", "주문한다", "결제한다", stereotype="extend")],
-     "확장이면 kind를 'dependency'로 바꾸고(일반화는 안 된다 — 일반화로 두면 고리가 된다('주문한다' → '결제한다' → '환불한다' → "
-     "'주문한다')), 아니면 이 관계를 지운다"),
+     "일반화는 안 된다 — 일반화로 두면 고리가 된다('주문한다' → '결제한다' → '환불한다' → '주문한다'). 확장이면 kind를 "
+     "'dependency'로 바꾸고, 아니면 이 관계를 지운다"),
     # 막힌 까닭을 모두 적는다
     ([rel("generalization", "결제한다", "주문한다"), rel("dependency", "주문한다", "결제한다", stereotype="include"),
       rel("generalization", "주문한다", "결제한다", stereotype="include")],

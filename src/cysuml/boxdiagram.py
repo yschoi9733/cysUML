@@ -256,6 +256,11 @@ def end_of(side: str, key: str, kind: str) -> str:
     return f"{side} {_show(key)}: {kind!r}"
 
 
+def ends_of(rel: Relation, source: str, target: str) -> str:
+    """오류·알림 글에서 관계의 두 끝(source·target은 두 끝의 요소 종류): from 'A': 'class', to 'B': 'interface'."""
+    return f"{end_of('from', rel.source, source)}, {end_of('to', rel.target, target)}"
+
+
 def parent_path(parents: dict[str, list[str]], start: str, goal: str) -> Optional[list[str]]:
     """parents(자식 → 부모들)의 상속을 따라 start에서 goal로 가는 가장 짧은 길(양 끝 포함). 없으면 None."""
     came: dict[str, Optional[str]] = {start: None}
