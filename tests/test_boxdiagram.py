@@ -702,44 +702,56 @@ def two_kinds_to(parent, *relations, more=(), spec=SPEC):
                 [rel("realization", "B", "P"), rel("generalization", "A", "P"), *relations], spec)
 
 
-def test_two_trunk_kinds_aim_either_side_of_the_parent_in_the_tools_order():
-    # 두 선 모두 아래 변으로 들어온다 — 입력 차례와 상관없이 도구가 받는 관계 차례(상속, 실체화)로 왼쪽부터, 가운데(245, 24)에서
-    # AIM_SPLIT/2씩
+def test_two_trunk_kinds_get_a_point_either_side_of_the_parent_in_the_tools_order():
+    # 입력 차례와 상관없이 도구가 받는 관계 차례(상속, 실체화)로 왼쪽부터, 가운데(245, 24)에서 AIM_SPLIT/2씩. 꺾는 점 없이 비스듬히
+    # 오는 선은 그 점 바로 아래에서 오지 않으니 그대로 가운데를 향한다
     d = two_kinds_to(el("class", "P", 200, 0))
     p, half = d.layout.by_key["P"], B.AIM_SPLIT / 2
     assert p.anchor == (245, 24)
     assert p.aims == (("generalization", (245 - half, 24)), ("realization", (245 + half, 24)))
-    assert [r.aim for r in d.layout.relations] == [(245 + half, 24), (245 - half, 24)]
+    assert [r.aim for r in d.layout.relations] == [None, None]
 
 
-def test_kinds_coming_in_through_different_edges_keep_the_middle():
-    # 실체화하는 C는 P 바로 아래에서 곧게, 상속하는 J는 P 옆에서 들어온다 — 같은 변으로 함께 들어오지 않으니 나누지 않아 C->P가
-    # 곧은 세로 선으로 남는다
+def test_lines_not_coming_from_right_under_a_point_keep_aiming_at_the_middle():
+    # 실체화하는 C는 P 바로 아래에서 곧게, 상속하는 J는 P 옆에서 들어온다 — 점은 정해지지만 C->P는 곧은 세로 선 그대로다
     d = draw([el("interface", "P", 200, 0), el("class", "C", 200, 200), el("interface", "J", -100, 0)],
              [rel("realization", "C", "P"), rel("generalization", "J", "P")])
-    assert d.layout.by_key["P"].aims == ()
+    assert d.layout.by_key["P"].aims != ()
     assert [r.points for r in d.layout.relations][0] == ((245, 200), (245, 42))
 
 
 def test_lines_given_the_side_edge_recipe_are_drawn_as_before():
-    # 한 종류는 아래 변 가운데로, 다른 종류는 오른쪽 변으로 들인 그림(옛 요령)은 아래 변으로 함께 들어오는 종류가 하나라 그대로다
+    # 한 종류는 아래 변 가운데로, 다른 종류는 오른쪽 변으로 들인 그림(옛 요령)은 어느 선도 점 바로 아래·위에서 오지 않아 그대로다
     elements = [el("interface", "P", 200, 0, width=140), el("interface", "A", 0, 102, width=140),
                 el("class", "B", 400, 102, width=140)]
     relations = [rel("generalization", "A", "P", via=[[70, 72], [270, 72]]),
                  rel("realization", "B", "P", via=[[470, 92], [370, 92], [370, 21]])]
     d = draw(elements, relations)
-    assert d.layout.by_key["P"].aims == ()
+    assert [r.aim for r in d.layout.relations] == [None, None]
     assert [r.points[-1] for r in d.layout.relations] == [(270, 42), (340, 21)] and K.check(d).passed
 
 
-def test_only_lines_through_the_shared_edge_aim_at_the_split_points():
-    # 아래 변으로 상속·실체화가 함께 들어오고, 실체화 하나는 오른쪽 변으로 가로로 들어온다 — 그 선은 가운데 높이 그대로 오른쪽 변에
-    # 닿고, 나눈 점을 향하지 않는다
+@pytest.mark.parametrize("dx, follows", [(0, True), (B.AIM_EPS / 2, True), (B.AIM_EPS * 2, False)])
+def test_a_line_follows_its_kinds_point_only_from_right_under_it(dx, follows):
+    # 결과 글은 점을 소수 한 자리로 적으니 AIM_EPS 안이면 그 점 바로 아래로 본다. 꺾는 점 없이 자식 가운데가 바로 아래여도 된다
     half = B.AIM_SPLIT / 2
-    d = two_kinds_to(el("class", "P", 200, 0), rel("realization", "Q", "P"), more=[el("class", "Q", 500, 0)])
-    q = next(r for r in d.layout.relations if r.relation.source == "Q")
-    assert q.aim is None and q.points[-1] == (290, 24)
-    assert d.layout.by_key["P"].aims == (("generalization", (245 - half, 24)), ("realization", (245 + half, 24)))
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200)],
+             [rel("generalization", "A", "P", via=[[45, 120], [245 - half + dx, 120]]), rel("realization", "B", "P")])
+    a = d.layout.relations[0]
+    assert a.aim == ((245 - half, 24) if follows else None)
+    straight = draw([el("class", "P", 200, 0), el("class", "A", 200 - half + dx, 200), el("class", "B", 400, 200)],
+                    [rel("generalization", "A", "P"), rel("realization", "B", "P")])
+    assert (straight.layout.relations[0].aim is not None) == follows
+
+
+def test_lines_from_the_side_keep_aiming_at_the_middle_beside_split_lines():
+    # 아래 변으로 두 종류가 제 점을 향해 들어오고, 실체화 하나는 오른쪽 변으로 가로로 들어온다 — 그 선은 가운데 높이 그대로다
+    half = B.AIM_SPLIT / 2
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200), el("class", "Q", 500, 0)],
+             [rel("generalization", "A", "P", via=[[45, 120], [245 - half, 120]]),
+              rel("realization", "B", "P", via=[[345, 120], [245 + half, 120]]), rel("realization", "Q", "P")])
+    assert [r.aim for r in d.layout.relations] == [(245 - half, 24), (245 + half, 24), None]
+    assert d.layout.relations[2].points[-1] == (290, 24) and K.check(d).passed
 
 
 def test_two_kinds_coming_in_through_the_top_edge_are_split_too():

@@ -272,13 +272,14 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
         assert phrase in text, phrase
     half, narrow = boxdiagram.AIM_SPLIT // 2, boxdiagram.AIM_SPLIT + 2 * boxdiagram.TRIANGLE[1]
     to = "으로" if edge == "변" else "로"
-    away = f"(모양 밖 이름이 옆에 있으면 이름 반대쪽 {edge}{to})" if outside else ""
-    two = (f"    - 같은 부모의 아래 {edge}{to} 상속·실체화가 함께 들어오면 그 {edge}{to} 들어오는 선이 향하는 점이 종류마다 갈려 두 "
-           f"종류의 삼각형이 나란히 놓인다 — 상속은 가운데에서 왼쪽으로 {half}px, 실체화는 오른쪽으로 {half}px(옆 {edge}{to} "
-           "들어오는 선은 그대로 가운데를 향한다).",
-           '그렇게 그린 결과의 그 부모 자리 뒤에 "상속 향하는 점 x, y, 실체화 향하는 점 x, y"로 덧붙는다. 자식마다 위 두 점의 [부모 '
-           "가운데 x, y] 대신 [제 종류의 향하는 점 x, y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 "
-           "하나만 준다).",
+    shape_edge = "(모양 자리가 덧붙어 있으면 모양 자리의 변)" if outside else ""
+    away = f"(모양 밖 이름이 오른쪽에 있으면 왼쪽 {edge}{to})" if outside else ""
+    two = (f"    - 같은 부모로 상속·실체화가 함께 오면 종류마다 향하는 점이 정해진다 — 상속은 가운데에서 왼쪽으로 {half}px, 실체화는 "
+           f'오른쪽으로 {half}px이고, 결과의 그 부모 자리 뒤에 "상속 향하는 점 x, y, 실체화 향하는 점 x, y"로 덧붙는다.',
+           f"마지막 꺾는 점을 제 종류의 그 점 바로 아래(x가 같게)에 둔 선은 그 점을 향해 아래 {edge}에 곧게 들어가 두 종류의 삼각형이 "
+           "나란히 놓이고(부모가 아래에 있으면 바로 위), 그 밖의 선은 그대로 가운데를 향한다.",
+           "그러니 자식마다 위 두 점의 [부모 가운데 x, y] 대신 [제 종류의 향하는 점 x, y]를 주어 종류마다 줄기를 따로 모은다(자식 "
+           "가운데 x가 그 점의 x와 같으면 그 점 하나만 준다).",
            "    - 상속 자식이 모두 상속 향하는 점보다 왼쪽(같은 x 포함)에, 실체화 자식이 모두 실체화 향하는 점보다 오른쪽(같은 x "
            "포함)에 있으면 두 줄기를 같은 높이 y에 둔다.",
            f"아니면 같은 높이에서 두 줄기가 포개지니, 한 종류의 줄기를 y + {guide.TRUNK_SPLIT}(자식 쪽)에 둔다.",
@@ -287,11 +288,11 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
            f"위 줄기 종류의 자식 가운데 x가 다른 종류의 향하는 점 x에서 {guide.TRUNK_NEAR}px 안이면 세로 줄끼리 포개지니 그 자식을 "
            "옮긴다.",
            f"    - 부모 아래 {edge}" + ("이" if edge == "변" else "가") + f" {narrow}px보다 좁아 삼각형 둘이 나란히 들지 않으면 "
-           "향하는 점이 나뉘지 않는다(덧붙지 않는다).",
-           f"다른 종류는 줄기를 y + {guide.TRUNK_SPLIT}에 두고 마지막 꺾는 점을 부모 옆 {edge}에서 {guide.TRUNK_SIDE}px 밖, 부모 "
-           f"가운데 높이에 두어 옆 {edge}{to} 들인다{away}.",
-           f"그 세로 줄이 다른 {noun}·선에 걸리거나 그 줄에서 {guide.TRUNK_NEAR}px 안에 아래 {edge}{to} 가는 자식의 가운데 x가 "
-           f"있으면 반대쪽 옆 {edge}{to} 들인다.")
+           "향하는 점이 정해지지 않는다(덧붙지 않는다).",
+           f"다른 종류는 줄기를 y + {guide.TRUNK_SPLIT}에 두고 마지막 꺾는 점을 부모 오른쪽 {edge}{shape_edge}에서 "
+           f"{guide.TRUNK_SIDE}px 밖, 부모 가운데 높이에 두어 오른쪽 {edge}{to} 들인다{away}.",
+           f"그 세로 줄이 다른 {noun}에 걸리거나, 그 {edge}에 다른 선이 닿거나, 그 줄에서 {guide.TRUNK_NEAR}px 안에 아래 {edge}{to} "
+           f"가는 자식의 가운데 x가 있으면 거울처럼 반대쪽 {edge}{to} 들인다.")
     for phrase in two:  # 줄기 종류가 하나인 도구(유즈케이스도)에는 종류마다 향하는 점이 없다
         assert (phrase in text) == (len(trunks) > 1), phrase
     # 가운데는 그 도구의 결과에 덧붙는 것으로 셈한다 — 패키지를 받는 도구는 향하는 점, 모양 밖 이름이 있는 도구(유즈케이스도의
@@ -571,10 +572,11 @@ def test_new_tools_tell_what_the_result_adds_to_the_places_of_their_shapes():
             assert guide.places_result(spec) in tools[name].description, name
     assert guide.places_result(packagediagram.SPEC).startswith(guide.PLACES_RESULT + "\n" + guide.OUTSIDE_PLACES + "\n" + aim)
     # 상속·실체화를 함께 받는 도구는 종류마다 향하는 점을 덧붙인다고 끝에 적는다 — 클래스도 결과 설명도 같은 글을 쓴다
-    kinds = ('  아래(위) {0} 상속·실체화가 함께 들어오는 {1}는 그 뒤에 그 {0} 들어오는 선이 종류마다 향하는 점을 "상속 향하는 '
-             '점 x, y, 실체화 향하는 점 x, y"로 덧붙인다(공유 줄기를 종류마다 그 점으로 모을 때 쓴다).')
-    assert guide.places_result(packagediagram.SPEC).endswith("\n" + kinds.format("테두리로", "요소"))
-    class_aims = kinds.format("변으로", "상자")
+    kinds = ('  같은 부모로 상속·실체화가 함께 오는 {}는 그 뒤에 종류마다 향하는 점을 "상속 향하는 점 x, y, 실체화 향하는 점 x, '
+             'y"로 덧붙인다(마지막 꺾는 점을 그 점 바로 아래나 위에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 종류마다 그 점으로 '
+             "모을 때 쓴다).")
+    assert guide.places_result(packagediagram.SPEC).endswith("\n" + kinds.format("요소"))
+    class_aims = kinds.format("상자")
     assert guide.trunk_aims(classdiagram.SPEC) == class_aims and class_aims in server.CLASS_TOOL
     # 유즈케이스도: 액터의 모양 자리는 붙고, 액터·유즈케이스가 향하는 점은 가운데를 정수로 내린 점이라 붙이지 않는다. 공유 줄기는
     # 일반화 하나뿐이라 종류마다 향하는 점도 없다

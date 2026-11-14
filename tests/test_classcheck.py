@@ -328,18 +328,16 @@ def test_shared_trunk_of_an_inheritance_tree_passes(kind):
     assert r.passed and r.crossings == ()
 
 
-@pytest.mark.parametrize("kind_a, kind_b", [("association", "association"), ("generalization", "association")])
+@pytest.mark.parametrize("kind_a, kind_b", [("generalization", "realization"), ("association", "association"),
+                                            ("generalization", "association")])
 def test_shared_trunk_of_other_relations_fails(kind_a, kind_b):
+    # 상속·실체화가 함께 오는 P에는 종류마다 향하는 점(180·210)이 정해지지만, 그 점 바로 아래가 아닌 가운데(195)로 모은 선은 그대로
+    # 가운데를 향해 포개진다
     assert kinds(tree(kind_a, kind_b)) == ["line_overlap"]
-
-
-def test_two_kinds_gathered_to_one_point_of_a_parent_fail():
-    # 상속·실체화가 함께 오는 P는 종류마다 가운데 양옆(180·210)을 향하므로, 두 줄기를 가운데 위 (195, 120) 한 점으로 모으면 두
-    # 삼각형이 서로 반대로 기울어 겹친다
-    assert kinds(tree("generalization", "realization")) == ["head_overlap"]
-    d = C.render({"classes": [box("P", 150, 0), box("C1", 0, 200), box("C2", 300, 200)],
-                  "relations": [rel("realization", "C2", "P"), rel("generalization", "C1", "P")]})
-    assert d.layout.by_key["P"].aims == (("generalization", (180, 24)), ("realization", (210, 24)))
+    if kind_b == "realization":
+        d = C.render({"classes": [box("P", 150, 0), box("C1", 0, 200), box("C2", 300, 200)],
+                      "relations": [rel("realization", "C2", "P"), rel("generalization", "C1", "P")]})
+        assert d.layout.by_key["P"].aims == (("generalization", (180, 24)), ("realization", (210, 24)))
 
 
 def test_siblings_with_slightly_shifted_triangles_are_not_a_trunk():

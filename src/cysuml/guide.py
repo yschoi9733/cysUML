@@ -115,9 +115,9 @@ def trunk_aims(spec: Spec) -> str:
         return ""
     noun, edge, labels = spec.words.noun, spec.words.edge, _joined(t.label for t in types)
     shown = ", ".join(f"{t.label} 향하는 점 x, y" for t in types)
-    return (f"  아래(위) {edge}{josa(edge, '으로', '로')} {labels}{josa(labels, '이', '가')} 함께 들어오는 {noun}는 그 뒤에 그 "
-            f"{edge}{josa(edge, '으로', '로')} 들어오는 선이 종류마다 향하는 점을 \"{shown}\"로 덧붙인다(공유 줄기를 종류마다 그 점으로 "
-            "모을 때 쓴다).")
+    return (f"  같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오는 {noun}는 그 뒤에 종류마다 향하는 점을 \"{shown}\"로 "
+            f"덧붙인다(마지막 꺾는 점을 그 점 바로 아래나 위에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 종류마다 그 점으로 모을 때 "
+            "쓴다).")
 
 
 def places_result(spec: Spec) -> str:
@@ -265,25 +265,27 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
     if len(types) > 1:
         assert len(types) == 2, "향하는 점을 세 종류 이상으로 나누는 요령은 없다"
         (first, second), half = (t.label for t in types), fmt_num(AIM_SPLIT / 2)
-        narrow = fmt_num(AIM_SPLIT + 2 * TRIANGLE[1])  # boxdiagram._split_aims가 나누는 가장 좁은 변(가운데를 향할 때)
+        narrow = fmt_num(AIM_SPLIT + 2 * TRIANGLE[1])  # boxdiagram._split_aims가 점을 정하는 가장 좁은 변(가운데를 향할 때)
         to = josa(edge, "으로", "로")
-        away = f"(모양 밖 이름이 옆에 있으면 이름 반대쪽 {edge}{to})" if outside else ""
-        lines += [f"    - 같은 부모의 아래 {edge}{to} {first}·{second}{josa(second, '이', '가')} 함께 들어오면 그 {edge}{to} "
-                  f"들어오는 선이 향하는 점이 종류마다 갈려 두 종류의 {head}{ga} 나란히 놓인다 — {first}{josa(first, '은', '는')} "
-                  f"가운데에서 왼쪽으로 {half}px, {second}{josa(second, '은', '는')} 오른쪽으로 {half}px(옆 {edge}{to} 들어오는 선은 "
-                  f"그대로 가운데를 향한다). 그렇게 그린 결과의 그 부모 자리 뒤에 \"{first} 향하는 점 x, y, {second} 향하는 점 x, "
-                  f"y\"로 덧붙는다. 자식마다 위 두 점의 [부모 가운데 x, y] 대신 [제 종류의 향하는 점 x, y]를 주어 종류마다 줄기를 따로 "
-                  f"모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 하나만 준다).",
+        shape_edge = "(모양 자리가 덧붙어 있으면 모양 자리의 변)" if outside else ""
+        away = f"(모양 밖 이름이 오른쪽에 있으면 왼쪽 {edge}{to})" if outside else ""
+        lines += [f"    - 같은 부모로 {first}·{second}{josa(second, '이', '가')} 함께 오면 종류마다 향하는 점이 정해진다 — "
+                  f"{first}{josa(first, '은', '는')} 가운데에서 왼쪽으로 {half}px, {second}{josa(second, '은', '는')} 오른쪽으로 "
+                  f"{half}px이고, 결과의 그 부모 자리 뒤에 \"{first} 향하는 점 x, y, {second} 향하는 점 x, y\"로 덧붙는다. 마지막 꺾는 "
+                  f"점을 제 종류의 그 점 바로 아래(x가 같게)에 둔 선은 그 점을 향해 아래 {edge}에 곧게 들어가 두 종류의 {head}{ga} "
+                  f"나란히 놓이고(부모가 아래에 있으면 바로 위), 그 밖의 선은 그대로 가운데를 향한다. 그러니 자식마다 위 두 점의 [부모 "
+                  f"가운데 x, y] 대신 [제 종류의 향하는 점 x, y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 "
+                  f"그 점 하나만 준다).",
                   f"    - {first} 자식이 모두 {first} 향하는 점보다 왼쪽(같은 x 포함)에, {second} 자식이 모두 {second} 향하는 점보다 "
                   f"오른쪽(같은 x 포함)에 있으면 두 줄기를 같은 높이 y에 둔다. 아니면 같은 높이에서 두 줄기가 포개지니, 한 종류의 줄기를 "
                   f"y + {TRUNK_SPLIT}(자식 쪽)에 둔다. 그 아래 줄기가 자식 {noun}들의 위 {edge}보다 {TRUNK_CLEAR}px 이상 위에 오게 "
                   f"부모와 자식 사이를 {TRUNK_ROOM}px 이상 띄우고 y를 가운데보다 아래로 내리지 않는다. 위 줄기 종류의 자식 가운데 x가 "
                   f"다른 종류의 향하는 점 x에서 {TRUNK_NEAR}px 안이면 세로 줄끼리 포개지니 그 자식을 옮긴다.",
                   f"    - 부모 아래 {edge}{josa(edge, '이', '가')} {narrow}px보다 좁아 {head} 둘이 나란히 들지 않으면 향하는 점이 "
-                  f"나뉘지 않는다(덧붙지 않는다). 그 부모로는 한 종류만 아래 {edge}에 모으고, 다른 종류는 줄기를 y + {TRUNK_SPLIT}에 "
-                  f"두고 마지막 꺾는 점을 부모 옆 {edge}에서 {TRUNK_SIDE}px 밖, 부모 가운데 높이에 두어 옆 {edge}{to} 들인다{away}. "
-                  f"그 세로 줄이 다른 {noun}·선에 걸리거나 그 줄에서 {TRUNK_NEAR}px 안에 아래 {edge}{to} 가는 자식의 가운데 x가 있으면 "
-                  f"반대쪽 옆 {edge}{to} 들인다."]
+                  f"정해지지 않는다(덧붙지 않는다). 그 부모로는 한 종류만 아래 {edge}에 모으고, 다른 종류는 줄기를 y + {TRUNK_SPLIT}에 "
+                  f"두고 마지막 꺾는 점을 부모 오른쪽 {edge}{shape_edge}에서 {TRUNK_SIDE}px 밖, 부모 가운데 높이에 두어 오른쪽 "
+                  f"{edge}{to} 들인다{away}. 그 세로 줄이 다른 {noun}에 걸리거나, 그 {edge}에 다른 선이 닿거나, 그 줄에서 "
+                  f"{TRUNK_NEAR}px 안에 아래 {edge}{to} 가는 자식의 가운데 x가 있으면 거울처럼 반대쪽 {edge}{to} 들인다."]
     return "\n".join(lines)
 
 
