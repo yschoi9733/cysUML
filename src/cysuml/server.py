@@ -39,6 +39,9 @@ from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPAN
 
 MAX_NAME_BYTES = 200  # 파일 이름(확장자 빼고) UTF-8 길이 상한. 파일 시스템 한도는 보통 255바이트
 MAX_RECORD_BYTES = 16 * 2**20  # 이보다 큰 같은 이름 .json은 읽지 않고 남의 파일로 본다. PNG로 그릴 수 있는 그림의 입력은 훨씬 작다
+# 그리기 도구 이름. 같은 이름 .json의 tool이 이 가운데 하나여야 cysUML이 저장한 파일로 본다(등록한 도구와 같은지는 test_server가 본다)
+TOOL_NAMES = ("draw_class_diagram", "draw_package_diagram", "draw_component_diagram", "draw_deployment_diagram",
+              "draw_use_case_diagram", "draw_state_diagram", "draw_activity_diagram", "draw_sequence_diagram")
 NAME_FORBIDDEN = set('/\\:*?"<>|')
 
 CLASS_TIPS = f"""클래스도 배치 요령:
@@ -191,17 +194,18 @@ def _shrink(img: Image.Image) -> Image.Image:
 
 
 def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
-    """입력 파일의 내용: 그린 도구, file_name, 그린 입력. 그대로 그 도구에 넣으면 같은 그림이 나온다(tool은 SDK가 모르는 인자로
-    버린다). out_dir은 넣지 않는다 — 문서와 함께 커밋되는 파일에 절대 경로가 남지 않고, 폴더를 옮겨도 쓸 수 있게."""
-    record = {"tool": tool, "file_name": name, **data, **({} if scale == SCALE else {"scale": scale})}
+    """입력 파일의 내용: 그린 도구, file_name, 그린 입력, scale. 그대로 그 도구에 넣으면 같은 그림이 나온다(tool은 SDK가 모르는
+    인자로 버린다). scale은 기본값이어도 넣어 기본값이 바뀌어도 같은 크기로 그린다. out_dir은 넣지 않는다 — 문서와 함께 커밋되는
+    파일에 절대 경로가 남지 않고, 폴더를 옮겨도 쓸 수 있게."""
+    record = {"tool": tool, "file_name": name, **data, "scale": scale}
     # 짝 없는 서로게이트는 parsing이 거르지만, 남더라도 \ud800 꼴 JSON 이스케이프로 쓴다
     return (json.dumps(record, ensure_ascii=False, indent=2) + "\n").encode("utf-8", "backslashreplace")
 
 
 def _not_ours(path: Path) -> Optional[str]:
-    """path에 cysUML이 저장한 입력 파일(tool·file_name이 든 JSON 객체)로 보이지 않는 것이 있으면 그 까닭을 돌려준다. 입력 파일
-    이름이 package.json 같은 남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 없거나 폴더면 None이다(폴더는 쓸 때 오류로
-    알린다)."""
+    """path에 cysUML이 저장한 입력 파일(tool이 cysUML 도구 이름이고 file_name이 든 JSON 객체)로 보이지 않는 것이 있으면 그 까닭을
+    돌려준다. 입력 파일 이름이 package.json 같은 남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 없거나 폴더면 None이다
+    (폴더는 쓸 때 오류로 알린다)."""
     try:
         st = os.stat(path)
     except FileNotFoundError:
@@ -218,8 +222,8 @@ def _not_ours(path: Path) -> Optional[str]:
         return f"읽을 수 없다({e.strerror or e})"
     except (ValueError, RecursionError):  # UnicodeDecodeError도 ValueError다
         return "JSON으로 읽을 수 없다"
-    if not (isinstance(v, dict) and isinstance(v.get("tool"), str) and isinstance(v.get("file_name"), str)):
-        return "tool·file_name이 든 JSON 객체가 아니다"
+    if not (isinstance(v, dict) and v.get("tool") in TOOL_NAMES and isinstance(v.get("file_name"), str)):
+        return "cysUML 도구 이름인 tool과 file_name이 든 JSON 객체가 아니다"
     return None
 
 

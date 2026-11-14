@@ -696,7 +696,7 @@ def test_the_saved_input_as_it_is_draws_the_same_picture_with_every_tool(tmp_pat
         tool, name = EXAMPLES[b["file_name"]], b["file_name"]
         run(server.mcp, (tool, {**b, "out_dir": str(first)}))
         record = saved_input(first, name)
-        assert record == {"tool": tool, **b}
+        assert record == {"tool": tool, **b, "scale": SCALE}
         without_tool = {k: v for k, v in record.items() if k != "tool"}
         (r, r2) = run(server.mcp, (record["tool"], {**record, "out_dir": str(again)}),
                       (record["tool"], {**without_tool, "out_dir": str(bare)}))[2]
@@ -714,7 +714,8 @@ def test_the_saved_input_keeps_what_was_given_and_nothing_about_the_folder(tmp_p
     assert "주문" in raw and raw.endswith("}\n")  # 한글을 이스케이프하지 않고, 끝에 줄바꿈
     assert str(tmp_path) not in raw
     draw_seq(file_name="seq", participants=PEOPLE, frames=None, out_dir=str(tmp_path), scale=SCALE)
-    assert saved_input(tmp_path, "seq") == {"tool": "draw_sequence_diagram", "file_name": "seq", "participants": PEOPLE}
+    assert saved_input(tmp_path, "seq") == {"tool": "draw_sequence_diagram", "file_name": "seq", "participants": PEOPLE,
+                                            "scale": SCALE}  # 기본값이어도 넣는다
 
 
 def test_nothing_is_saved_when_the_input_is_wrong_or_too_big(tmp_path):
@@ -733,7 +734,7 @@ def huge(path):
         f.truncate(server.MAX_RECORD_BYTES + 1)
 
 
-NOT_AN_OBJECT = "tool·file_name이 든 JSON 객체가 아니다"
+NOT_AN_OBJECT = "cysUML 도구 이름인 tool과 file_name이 든 JSON 객체가 아니다"
 NOT_JSON = "JSON으로 읽을 수 없다"
 
 
@@ -741,14 +742,17 @@ NOT_JSON = "JSON으로 읽을 수 없다"
     (lambda p: p.write_text('{"name": "my-app", "version": "1.0.0"}'), NOT_AN_OBJECT),  # package.json 꼴
     (lambda p: p.write_text('{"tool": "draw_class_diagram"}'), NOT_AN_OBJECT),  # file_name이 없다
     (lambda p: p.write_text('{"tool": 1, "file_name": "order"}'), NOT_AN_OBJECT),
+    (lambda p: p.write_text('{"tool": "eslint", "file_name": "order"}'), NOT_AN_OBJECT),  # 다른 도구의 파일
+    (lambda p: p.write_text('{"tool": ["draw_class_diagram"], "file_name": "order"}'), NOT_AN_OBJECT),
     (lambda p: p.write_text('[{"tool": "draw_class_diagram", "file_name": "order"}]'), NOT_AN_OBJECT),
     (lambda p: p.write_text('{"tool": "draw_class_diagram", "file_name": "order",}'), NOT_JSON),  # 손보다 남긴 쉼표
     (lambda p: p.write_text("메모"), NOT_JSON),
     (lambda p: p.write_bytes(b"\xff\xfe\x00"), NOT_JSON),
     (lambda p: p.write_text("[" * 100_000 + "]" * 100_000), NOT_JSON),  # 너무 깊어 파이썬이 읽지 못한다
-    (mkfifo, "보통 파일이 아니다"),
+    pytest.param(mkfifo, "보통 파일이 아니다", marks=pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO가 없다")),
     (huge, "16MiB보다 크다"),
-], ids=["package", "no-file-name", "tool-not-text", "list", "comma", "text", "bytes", "deep", "fifo", "huge"])
+], ids=["package", "no-file-name", "tool-not-text", "other-tool", "tool-list", "list", "comma", "text", "bytes", "deep", "fifo",
+        "huge"])
 def test_a_json_file_not_saved_by_cysuml_is_kept_and_nothing_is_written(tmp_path, make, why):
     kept = tmp_path / "order.json"
     make(kept)
@@ -770,7 +774,7 @@ def test_an_input_file_saved_by_hand_with_tool_and_file_name_is_overwritten(tmp_
     assert saved_input(tmp_path, "order")["classes"] == ORDER
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root는 권한이 없어도 읽는다")
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="Windows와 root는 권한을 빼도 읽는다")
 def test_an_input_file_that_cannot_be_read_is_kept(tmp_path):
     kept = tmp_path / "order.json"
     kept.write_text("{}")
@@ -856,6 +860,7 @@ def test_calls_saving_the_same_name_at_the_same_time_leave_a_matching_pair(tmp_p
 def test_every_tool_and_the_instructions_tell_about_the_input_file():
     instructions, tools, _ = run(server.mcp)
     assert instructions.count(guide.SAVED_INPUT) == 1
+    assert sorted(server.TOOL_NAMES) == sorted(tools)  # 입력 파일 주인 가리기에 쓰는 이름이 등록한 도구와 같다
     for name, tool in tools.items():
         assert tool.description.count(guide.INPUT_RESULT) == 1, name
         assert tool.description.count(guide.IMAGE_RESULT + "\n" + guide.INPUT_RESULT + "\n") == 1, name
