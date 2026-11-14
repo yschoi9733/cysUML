@@ -114,8 +114,18 @@ def test_the_overlap_hint_offers_in_only_for_elements_a_system_may_hold(kind, to
 def test_a_use_case_in_a_system_that_did_not_read_is_not_told_it_is_outside():
     # 경계가 다른 곳이 틀려 읽히지 않았으면 주체를 모르니 유즈케이스끼리 연관 규칙을 보지 않는다(경계의 문제만 알린다)
     found = problems([rel("association", "U1", "U2")],
-                     [el("system", "S", 0, 0, id="s", width=-5), inside("s", "use_case", "U1", 20, 40), el("use_case", "U2", 400, 0)])
+                     [el("system", "S", 0, 0, id="s", width=-5), inside("s", "use_case", "U1", 20, 40),
+                      el("use_case", "U2", 400, 0)])
     assert found == ("elements[0].width: 0~1000000 사이여야 한다(받은 값 -5)",)
+
+
+def test_an_in_pointing_at_an_element_that_holds_nothing_is_told_once():
+    # 품을 수 없는 요소를 가리킨 in은 엔진이 알린다 — 액터 규칙도, 유즈케이스끼리 연관 규칙도 덧붙이지 않는다
+    elements = [*BASE, inside("주문한다", "actor", "직원", 0, 300), inside("고객", "use_case", "문의한다", 0, 400),
+                el("use_case", "환불한다", 600, 300)]
+    found = problems([rel("association", "문의한다", "환불한다")], elements)
+    assert [p.split(":")[0] for p in found] == ["elements[5].in", "elements[6].in"]
+    assert all("안에 요소를 둘 수 없다" in p for p in found), found
 
 
 # ---------------------------------------------------------------- 일반화
@@ -282,6 +292,15 @@ def test_association_between_use_cases_joined_by_another_kind_is_told_to_become_
 def test_association_between_use_cases_already_included_may_only_extend():
     (p,) = problems([rel("dependency", "주문한다", "결제한다", stereotype="include"), rel("association", "주문한다", "결제한다")])
     assert p.endswith("«include»는 안 된다 — 같은 from·to의 dependency가 이미 있다), 아니면 이 연관을 지운다")
+    (p,) = problems([rel("dependency", "주문한다", "결제한다", stereotype="extend"), rel("association", "주문한다", "결제한다")])
+    assert p.endswith(f"{SAME_SYSTEM}. 포함이면 kind를 'dependency'로 바꾸고 stereotype을 'include'로 하고(«extend»는 안 된다 — 같은 "
+                      "from·to의 dependency가 이미 있다), 아니면 이 연관을 지운다")
+
+
+def test_the_same_use_case_association_twice_is_offered_a_dependency_once():
+    first, then = problems([rel("association", "주문한다", "결제한다"), rel("association", "주문한다", "결제한다")])
+    assert first.endswith("stereotype을 'include'나 'extend'로 하고, 아니면 이 연관을 지운다")
+    assert then.endswith(f"{SAME_SYSTEM}. 같은 from·to의 dependency가 생긴다(relations[0]의 고치는 법). 이 연관을 지운다")
 
 
 def test_association_between_use_cases_that_would_close_an_include_loop_may_only_extend():

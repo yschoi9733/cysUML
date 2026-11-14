@@ -189,25 +189,24 @@ class UseCaseRules(Rules):
     def check(self, r: Reader, spec: Spec, elements: list[tuple[str, Element]],
               relations: list[tuple[str, B.Relation]]) -> list[Notice]:
         kinds = {e.key: e.kind for _, e in elements}
+
+        def holds(key: str) -> bool:
+            """key가 읽힌 요소이고 안에 요소를 두는 종류인지 — 아니면 그 in은 엔진이 이미 알렸다."""
+            return key in kinds and spec.shapes[kinds[key]].holds
+
         for path, e in elements:
-            if e.parent is not None and e.parent in kinds and not self.nests(kinds[e.parent], e.kind):
+            if e.parent is not None and holds(e.parent) and not self.nests(kinds[e.parent], e.kind):
                 r.fail(_at(path, "in"), f"액터는 시스템 경계({_show(e.parent)}) 안에 둘 수 없다 — 액터는 시스템 밖의 사람이나 외부 "
                                         "시스템이다. in을 빼고 시스템 경계 밖(왼쪽이나 오른쪽)에 둔다")
         parent_of = {e.key: e.parent for _, e in elements}
 
         def subject(key: str) -> tuple[bool, Optional[str]]:
-            """(주체를 알 수 있는지, 주체 — 품은 가장 가까운 시스템 경계, 경계 밖이면 None). 품은 요소가 다른 곳이 틀려 읽히지
-            않았으면 알 수 없다."""
-            seen = {key}
-            up = parent_of.get(key)
-            while up is not None and up not in seen:
-                if up not in kinds:
-                    return False, None
-                if kinds[up] == "system":
-                    return True, up
-                seen.add(up)
-                up = parent_of.get(up)
-            return up is None, None
+            """(주체를 알 수 있는지, 주체 — 품은 가장 가까운 시스템 경계, 경계 밖이면 None). 품은 쪽의 in이 틀렸으면(읽히지 않은
+            요소·품을 수 없는 요소·고리 — 엔진이 이미 알렸다) 알 수 없다."""
+            chain = B.ancestors(parent_of, key)
+            if parent_of.get(chain[-1] if chain else key) is not None or not all(holds(k) for k in chain):
+                return False, None
+            return True, next((k for k in chain if kinds[k] == "system"), None)
 
         plan = _Plan()
         inherits: list[tuple[str, B.Relation]] = []
@@ -267,7 +266,9 @@ def _fault(rel: B.Relation, s: str, t: str, subject: Callable[[str], tuple[bool,
 def _graph(edge: Edge) -> Optional[str]:
     """고리를 보는 관계면 그 그래프 이름(일반화·«include»)."""
     kind, _, _, stereotype = edge
-    return "generalization" if kind == "generalization" else "include" if kind == "dependency" and stereotype == "include" else None
+    if kind == "generalization":
+        return kind
+    return "include" if kind == "dependency" and stereotype == "include" else None
 
 
 def _same(edge: Edge) -> tuple:
@@ -326,7 +327,7 @@ class _Plan:
 def _explain(plan: _Plan, path: str, rel: B.Relation, s: str, t: str, subject: Optional[str]) -> tuple[str, str]:
     """틀린 관계의 (오류 자리, 오류 글). subject는 from 쪽 유즈케이스의 주체(시스템 경계)다."""
     a, b, ends = rel.source, rel.target, _ends(rel, s, t)
-    if rel.kind == "dependency" and s == t == "use_case":  # 자기 자신을 포함하는 «include»(_fault)
+    if rel.kind == "dependency" and _stereo(rel) == "include" and a == b and s == t == "use_case":
         return path, "유즈케이스는 자기 자신을 포함할 수 없다(«include») — 이 관계를 지운다"
     if _step(rel):
         return _at(path, "stereotype"), (f"«include»·«extend»는 유즈케이스 사이의 dependency에만 단다(이 관계는 {rel.kind!r}, "
@@ -354,15 +355,20 @@ def _explain(plan: _Plan, path: str, rel: B.Relation, s: str, t: str, subject: O
     if a == b:
         return path, f"{problem}. 자기 자신과 잇는 연관은 지운다"
     inc, ext = ("dependency", a, b, "include"), ("dependency", a, b, "extend")
-    if (why := plan.clash(inc)) is None:  # «include»로 둘 수 있으면 «extend»도 된다(겹침은 같고 고리는 «include»만 본다)
-        plan.add(inc, path)
-        return path, (f"{problem}. 포함·확장이면 kind를 'dependency'로 바꾸고 stereotype을 'include'나 'extend'로 하고, 아니면 이 연관을 "
-                      "지운다")
-    if (other := plan.clash(ext)) is not None:
-        return path, f"{problem}. {other}. 이 연관을 지운다"
-    plan.add(ext, path)
-    return path, (f"{problem}. 확장이면 kind를 'dependency'로 바꾸고 stereotype을 'extend'로 하고(«include»는 안 된다 — {why}), "
-                  "아니면 이 연관을 지운다")
+    no_inc, no_ext = plan.clash(inc), plan.clash(ext)
+    for edge, why in ((inc, no_inc), (ext, no_ext)):
+        if why is None:
+            plan.add(edge, path)
+    change = "kind를 'dependency'로 바꾸고 stereotype을"
+    if no_inc is None and no_ext is None:
+        how = f"포함·확장이면 {change} 'include'나 'extend'로 하고"
+    elif no_inc is None:
+        how = f"포함이면 {change} 'include'로 하고(«extend»는 안 된다 — {no_ext})"
+    elif no_ext is None:
+        how = f"확장이면 {change} 'extend'로 하고(«include»는 안 된다 — {no_inc})"
+    else:
+        return path, f"{problem}. {no_ext}. 이 연관을 지운다"
+    return path, f"{problem}. {how}, 아니면 이 연관을 지운다"
 
 
 def _actors_fix(plan: _Plan, path: str, rel: B.Relation, what: str) -> str:
