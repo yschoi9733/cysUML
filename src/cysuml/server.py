@@ -1,7 +1,8 @@
 """MCP 서버: UML 그림을 그리는 도구를 stdio로 내놓는다(그림 목록은 README).
 
-도구는 그린 PNG를 파일로 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이 너무 커서 PNG로 못
-그리거나, 저장할 폴더에 쓸 수 없으면 저장하지 않고 오류 결과(isError)로 돌려준다 — AI가 읽고 고칠 수 있게 예외 대신 결과로 낸다.
+도구는 그린 PNG와 그 입력(같은 이름의 .json)을 파일로 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이
+너무 커서 PNG로 못 그리거나, 저장할 폴더에 쓸 수 없으면 저장하지 않고 오류 결과(isError)로 돌려준다 — AI가 읽고 고칠 수 있게 예외
+대신 결과로 낸다.
 새 그림의 도구 설명은 그 그림 모듈이 guide의 공용 조각으로 만든다(처음부터 있던 두 도구의 설명은 여기 있다). 상자 그림(공용 엔진
 boxdiagram이 그리는 그림) 도구는 _box_tool 하나로 등록한다.
 """
@@ -9,9 +10,12 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import errno
 import io
+import json
 import os
 import secrets
+import stat
 import threading
 import unicodedata
 from importlib.metadata import PackageNotFoundError, version
@@ -27,8 +31,8 @@ from pydantic import Field, WithJsonSchema
 from . import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, componentdiagram, deploymentdiagram,
                packagediagram, sequencecheck, sequencediagram, statediagram, usecasediagram)
 from .canvas import MIN_SCALE, SCALE
-from .guide import (COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, MAX_IMAGE_EDGE, MEMBERS, flow, relation_fields,
-                    spacing_tips)
+from .guide import (COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, INPUT_RESULT, MAX_IMAGE_EDGE, MEMBERS, SAVED_INPUT, flow,
+                    relation_fields, spacing_tips)
 from .parsing import InputError
 from .report import Report, fmt_num, fmt_rect
 from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
@@ -68,6 +72,7 @@ INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리
 - 액티비티도는 draw_activity_diagram으로 그린다. 배치는 부르는 AI가 한다. 시작·끝 점, 행동, 결정·합류 마름모를 흐름으로 잇는다.
 - 교류도는 draw_sequence_diagram으로 그린다. 배치는 cysUML이 하고, AI는 참여자·메시지·프레임의 차례만 준다.
 불합격 종류와 그림마다의 배치 요령은 각 도구 설명에 있다.
+{SAVED_INPUT}
 
 {flow()}
 
@@ -89,8 +94,9 @@ CLASS_TOOL = f"""클래스도를 그려 PNG 파일로 저장하고, 검사 결�
 {COMMON_INPUT}
 
 결과
-- 글: 검사 결과, 상자마다 그린 자리와 크기, 저장한 파일 경로와 픽셀 크기.
+- 글: 검사 결과, 상자마다 그린 자리와 크기, 저장한 그림·입력 파일 경로와 그림 픽셀 크기.
 {IMAGE_RESULT}
+{INPUT_RESULT}
 - classes·relations·file_name이 틀리면 그리지 않고 틀린 곳을 classes[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
 그림이 너무 커서 PNG로 그릴 수 없거나 저장할 폴더에 쓸 수 없을 때도 오류로 돌려준다.
 
@@ -126,9 +132,10 @@ last+1). 마지막 칸 조건은 흔히 "else"다.
 {COMMON_INPUT}
 
 결과
-- 글: 검사 결과, 저장한 파일 경로와 픽셀 크기. 검사 항목은 메시지·프레임·노트를 입력 안의 자리(messages[3]·frames[0]·notes[0])로, \
-참여자를 이름으로 가리킨다.
+- 글: 검사 결과, 저장한 그림·입력 파일 경로와 그림 픽셀 크기. 검사 항목은 메시지·프레임·노트를 입력 안의 자리(messages[3]·\
+frames[0]·notes[0])로, 참여자를 이름으로 가리킨다.
 {IMAGE_RESULT}
+{INPUT_RESULT}
 - 입력이 틀리면 그리지 않고 틀린 곳을 messages[2].to 꼴 자리와 함께 모두 모아 오류로 돌려준다. 그림이 너무 커서 PNG로 그릴 수 \
 없거나, 저장할 폴더에 쓸 수 없거나, 도구가 배치하지 못했을 때도 오류로 돌려준다.
 
@@ -144,6 +151,7 @@ def _version() -> str:
 
 mcp = MCPServer(name="cysUML", instructions=INSTRUCTIONS, version=_version())
 _drawing = threading.Lock()  # 동기 도구는 스레드에서 돈다. 글꼴 객체를 함께 쓰므로 그리기는 한 번에 하나씩
+_saving = threading.Lock()  # 같은 이름을 동시에 저장해도 그림과 입력 파일이 서로 다른 부름의 것으로 짝지어지지 않게
 
 
 def _error(text: str) -> CallToolResult:
@@ -181,21 +189,48 @@ def _shrink(img: Image.Image) -> Image.Image:
     return img.resize((max(1, round(w * k)), max(1, round(h * k))), Image.LANCZOS)
 
 
-def _write(path: Path, data: bytes) -> None:
-    """같은 폴더의 임시 파일에 다 쓴 뒤 바꿔 넣는다 — 쓰다 실패하거나 같은 이름으로 동시에 써도 깨진 파일이 남지 않는다."""
+def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
+    """입력 파일의 내용: 그린 도구, file_name, 그린 입력. 그대로 그 도구에 넣으면 같은 그림이 나온다(tool은 SDK가 모르는 인자로
+    버린다). out_dir은 넣지 않는다 — 문서와 함께 커밋되는 파일에 절대 경로가 남지 않고, 폴더를 옮겨도 쓸 수 있게."""
+    record = {"tool": tool, "file_name": name, **data, **({} if scale == SCALE else {"scale": scale})}
+    return (json.dumps(record, ensure_ascii=False, indent=2) + "\n").encode()
+
+
+def _foreign(path: Path) -> bool:
+    """path에 cysUML이 저장한 입력 파일(tool·file_name이 든 JSON 객체)이 아닌 것이 있는지. 입력 파일 이름이 package.json 같은
+    남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 폴더는 쓸 때 오류로 알리므로 여기서 치지 않는다."""
+    try:
+        mode = os.stat(path).st_mode
+    except FileNotFoundError:
+        return False
+    if stat.S_ISDIR(mode):
+        return False
+    if not stat.S_ISREG(mode):  # FIFO 등은 읽으면 멈출 수 있다
+        return True
+    try:
+        v = json.loads(path.read_bytes())
+    except (ValueError, RecursionError):  # JSON이 아니다(UnicodeDecodeError도 ValueError다)
+        return True
+    return not (isinstance(v, dict) and isinstance(v.get("tool"), str) and isinstance(v.get("file_name"), str))
+
+
+def _stage(path: Path, data: bytes) -> Path:
+    """path 옆 임시 파일에 data를 다 쓰고 그 경로를 돌려준다. 쓰다 실패하면 임시 파일을 지운다."""
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
     try:
         with open(tmp, "xb") as f:
             f.write(data)
-        os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
+    return tmp
 
 
-def _save(png: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[Path], Optional[str]]:
-    """(저장한 경로, 문제). 비었거나 공백뿐인 out_dir은 주지 않은 것으로 본다."""
+def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[tuple[Path, Path]], Optional[str]]:
+    """((저장한 그림 경로, 입력 파일 경로), 문제). 비었거나 공백뿐인 out_dir은 주지 않은 것으로 본다. 두 파일을 임시 파일에 다 쓴
+    뒤 바꿔 넣는다 — 쓰다 실패하거나 같은 이름으로 동시에 써도 깨진 파일이 남지 않는다. 입력 파일을 먼저 바꿔 넣어, 그림을 바꿔
+    넣다 실패해도 남은 입력 파일로 다시 그리면 둘이 맞는다."""
     given = (out_dir or "").strip()
     if given.startswith("~") and os.path.expanduser(given).startswith("~"):
         return None, f"out_dir {given!r}의 '~'를 홈 폴더로 풀 수 없다. 저장하지 않았다 — out_dir을 절대 경로로 준다."
@@ -203,16 +238,36 @@ def _save(png: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[Path]
         folder = Path(os.path.abspath(os.path.expanduser(given or DEFAULT_DIR)))
     except OSError as e:  # 서버 작업 폴더가 지워졌다
         return None, f"서버 작업 폴더를 알 수 없어 저장할 곳을 정하지 못했다({e.strerror or e}). out_dir에 절대 경로를 준다."
-    path = folder / f"{name}.png"
+    image, kept = folder / f"{name}.png", folder / f"{name}.json"
+    files = ((kept, record), (image, png))
+    where = f"out_dir {folder}" if given else f"기본 폴더 {folder}(서버 작업 폴더 아래 {DEFAULT_DIR}/)"
+    target, staged, done = image, [], []
     try:
-        folder.mkdir(parents=True, exist_ok=True)
-        _write(path, png)
+        with _saving:
+            folder.mkdir(parents=True, exist_ok=True)
+            target = kept
+            if _foreign(kept):
+                return None, (f"그림을 저장하지 않았다 — {where}에 같은 이름의 {kept.name}이 있는데 cysUML이 저장한 입력 파일"
+                              "(tool·file_name이 든 JSON 객체)이 아니라 덮어쓰지 않았다. 다른 file_name이나 out_dir을 준다.")
+            for target, _ in files:  # 한쪽만 바꿔 넣은 채 멈추지 않게 먼저 본다
+                if target.is_dir():
+                    raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR))
+            for target, data in files:
+                staged.append((_stage(target, data), target))
+            for tmp, target in staged:
+                os.replace(tmp, target)
+                done.append(target)
     except (OSError, ValueError) as e:  # ValueError: 경로에 NUL 글자
         reason = e.strerror if isinstance(e, OSError) and e.strerror else e
-        where = f"out_dir {folder}" if given else f"기본 폴더 {folder}(서버 작업 폴더 아래 {DEFAULT_DIR}/)"
-        return None, (f"그림을 저장하지 못했다 — {where}에 {path.name}을(를) 쓸 수 없다({reason}). "
+        wrote = f"{done[0].name}은(는) 썼지만 " if done else ""
+        return None, (f"그림을 저장하지 못했다 — {where}에 {wrote}{target.name}을(를) 쓸 수 없다({reason}). "
                       "쓸 수 있는 폴더를 out_dir에 절대 경로로 준다.")
-    return path, None
+    finally:
+        for tmp, target in staged:
+            if target not in done:
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
+    return (image, kept), None
 
 
 def _places(drawing: boxdiagram.Drawing) -> list[str]:
@@ -229,15 +284,16 @@ def _places(drawing: boxdiagram.Drawing) -> list[str]:
 D = TypeVar("D", boxdiagram.Drawing, sequencediagram.Drawing)
 
 
-def _draw(file_name: str, render: Callable[[], D], check: Callable[[D], Report], out_dir: Optional[str],
+def _draw(tool: str, file_name: str, data: dict, scale: float, render: Callable[[dict, float], D],
+          check: Callable[[D], Report], out_dir: Optional[str],
           extra_lines: Optional[Callable[[D], list[str]]] = None) -> CallToolResult:
-    """render()로 그려 check로 검사하고 저장해 돌려준다. extra_lines(그린 것)는 검사 결과 뒤에 붙이는 줄이다. file_name
-    문제는 그림 입력 오류와 함께 모아 알린다."""
+    """render(data, scale)로 그려 check로 검사하고, 그림과 입력 파일(그린 도구 tool과 data)을 저장해 돌려준다. extra_lines(그린
+    것)는 검사 결과 뒤에 붙이는 줄이다. file_name 문제는 그림 입력 오류와 함께 모아 알린다."""
     name, problem = _file_name(file_name)
     problems = [problem] if problem else []
     with _drawing:
         try:
-            drawing = render()
+            drawing = render(data, scale)
         except InputError as e:
             problems += e.problems
         except LayoutError as e:  # file_name 문제가 함께 있으면 그것부터 알린다
@@ -252,11 +308,12 @@ def _draw(file_name: str, render: Callable[[], D], check: Callable[[D], Report],
             return _error("\n".join(["그림이 너무 커서 PNG를 그리지 않았다(파일도 저장하지 않았다).", report.summary(), *extra]))
         img = drawing.canvas.to_image()
     full = _png(img)
-    path, problem = _save(full, out_dir, name)
+    saved, problem = _save(full, _record(tool, name, data, scale), out_dir, name)
     if problem:
         return _error("\n".join([problem, "", report.summary(), *extra]))
+    image_path, input_path = saved
     shown = _shrink(img)
-    lines = [report.summary(), *extra, f"저장한 파일: {path} ({img.width}×{img.height}px)"]
+    lines = [report.summary(), *extra, f"저장한 파일: {image_path} ({img.width}×{img.height}px), 입력 {input_path}"]
     if shown is not img:
         lines.append(f"돌려준 그림은 긴 변을 {MAX_IMAGE_EDGE}px로 줄였다({shown.width}×{shown.height}px). "
                      "원래 크기는 저장한 파일에 있다.")
@@ -277,7 +334,8 @@ def _relations(word: str) -> Any:
     return Annotated[Any, _listed(f"{word} 목록. 필드는 도구 설명에 있다.")]
 
 
-FileName = Annotated[str, Field(description="저장할 파일 이름(확장자 없이). 같은 이름이면 덮어쓴다.")]
+FileName = Annotated[str, Field(description="저장할 파일 이름(확장자 없이). 그림(.png)과 입력 파일(.json)에 쓰고, 같은 이름이면 "
+                                            "둘 다 덮어쓴다.")]
 Elements = Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")]
 Relations = _relations("관계")
 OutDir = Annotated[Optional[str], Field(description=f"저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/.")]
@@ -293,7 +351,7 @@ def draw_class_diagram(
         scale: Scale = SCALE,
 ) -> CallToolResult:
     data = {"classes": classes} if relations is None else {"classes": classes, "relations": relations}
-    return _draw(file_name, lambda: classdiagram.render(data, scale), classcheck.check, out_dir, _places)
+    return _draw("draw_class_diagram", file_name, data, scale, classdiagram.render, classcheck.check, out_dir, _places)
 
 
 def _box_tool(name: str, diagram: ModuleType, word: str = "관계") -> None:
@@ -301,7 +359,7 @@ def _box_tool(name: str, diagram: ModuleType, word: str = "관계") -> None:
     scale이다. word는 relations 인자 설명에 쓰는 말(관계·전이·흐름)이다."""
     def tool(file_name, elements, relations=None, out_dir=None, scale=SCALE):
         data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
-        return _draw(file_name, lambda: diagram.render(data, scale), boxcheck.check, out_dir, _places)
+        return _draw(name, file_name, data, scale, diagram.render, boxcheck.check, out_dir, _places)
 
     # SDK는 함수 이름으로 입력 스키마 이름(<이름>Arguments)을 짓고, 글자로 남은 주석을 그 함수의 모듈에서 풀어 relations 설명을
     # 바꿀 수 없다 — 이름은 도구 이름으로, 주석은 글자가 아닌 타입으로 준다
@@ -331,4 +389,4 @@ def draw_sequence_diagram(
 ) -> CallToolResult:
     given = {"messages": messages, "frames": frames, "notes": notes}
     data = {"participants": participants, **{k: v for k, v in given.items() if v is not None}}
-    return _draw(file_name, lambda: sequencediagram.render(data, scale), sequencecheck.check, out_dir)
+    return _draw("draw_sequence_diagram", file_name, data, scale, sequencediagram.render, sequencecheck.check, out_dir)

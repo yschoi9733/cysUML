@@ -1,8 +1,10 @@
 import base64
 import io
 import json
+import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import anyio
@@ -587,7 +589,7 @@ def test_draws_saves_and_returns_the_check_the_boxes_and_the_image(tmp_path):
     assert t.startswith("합격")
     assert "상자 자리(왼, 위, 폭×높이): Order(0, 0, 90×48), Customer(200, 0, 90×48)" in t
     with Image.open(saved) as f:
-        assert f"저장한 파일: {saved} ({f.width}×{f.height}px)" in t
+        assert t.splitlines()[-1] == f"저장한 파일: {saved} ({f.width}×{f.height}px), 입력 {tmp_path / 'order.json'}"
         assert image(r).size == f.size
 
 
@@ -609,14 +611,17 @@ def test_saves_under_diagrams_in_the_working_folder_by_default(tmp_path, monkeyp
 def test_relative_out_dir_is_under_the_working_folder_and_png_suffix_is_not_doubled(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     draw(file_name="주문 모델.png", classes=ORDER, out_dir="docs/img")
-    assert [p.name for p in (tmp_path / "docs" / "img").iterdir()] == ["주문 모델.png"]
+    folder = tmp_path / "docs" / "img"
+    assert sorted(p.name for p in folder.iterdir()) == ["주문 모델.json", "주문 모델.png"]
+    assert json.loads((folder / "주문 모델.json").read_text(encoding="utf-8"))["file_name"] == "주문 모델"
 
 
-def test_same_file_name_overwrites(tmp_path):
+def test_same_file_name_overwrites_the_picture_and_its_input(tmp_path):
     draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
-    first = (tmp_path / "order.png").read_bytes()
+    first = [(tmp_path / n).read_bytes() for n in ("order.png", "order.json")]
     draw(file_name="order", classes=ORDER, relations=PLACES, out_dir=str(tmp_path))
-    assert (tmp_path / "order.png").read_bytes() != first
+    assert [(tmp_path / n).read_bytes() for n in ("order.png", "order.json")] != first
+    assert json.loads((tmp_path / "order.json").read_text(encoding="utf-8"))["relations"] == PLACES
 
 
 def test_unwritable_folder_is_a_clear_error(tmp_path):
@@ -659,18 +664,166 @@ def test_blank_out_dir_means_the_default_folder(tmp_path, monkeypatch):
     assert (tmp_path / "diagrams" / "order.png").exists()
 
 
-def test_a_folder_in_the_way_of_the_file_is_an_error_and_leaves_no_temporary_file(tmp_path):
-    (tmp_path / "order.png").mkdir()
+@pytest.mark.parametrize("in_the_way", ["order.png", "order.json"])
+def test_a_folder_in_the_way_of_either_file_is_an_error_and_writes_nothing(tmp_path, in_the_way):
+    (tmp_path / in_the_way).mkdir()
     r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
     assert r.is_error
-    assert [p.name for p in tmp_path.iterdir()] == ["order.png"]
-    assert list((tmp_path / "order.png").iterdir()) == []
+    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {tmp_path}에 {in_the_way}을(를) 쓸 수 없다(")
+    assert [p.name for p in tmp_path.iterdir()] == [in_the_way]
+    assert list((tmp_path / in_the_way).iterdir()) == []
 
 
-def test_saving_leaves_only_the_png(tmp_path):
+def test_saving_leaves_only_the_png_and_its_input(tmp_path):
     draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
     draw(file_name="order", classes=ORDER, relations=PLACES, out_dir=str(tmp_path))
-    assert [p.name for p in tmp_path.iterdir()] == ["order.png"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["order.json", "order.png"]
+
+
+# ---------------------------------------------------------------- 입력 파일(그림 옆 .json)
+
+
+def saved_input(folder, name):
+    return json.loads((folder / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def test_the_saved_input_as_it_is_draws_the_same_picture_with_every_tool(tmp_path):
+    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
+    examples = [b for b in blocks if "file_name" in b]
+    assert {EXAMPLES[b["file_name"]] for b in examples} == {t[0] for t in TOOLS}
+    first, again, bare = tmp_path / "first", tmp_path / "again", tmp_path / "bare"
+    for b in examples:
+        tool, name = EXAMPLES[b["file_name"]], b["file_name"]
+        run(server.mcp, (tool, {**b, "out_dir": str(first)}))
+        record = saved_input(first, name)
+        assert record == {"tool": tool, **b}
+        without_tool = {k: v for k, v in record.items() if k != "tool"}
+        (r, r2) = run(server.mcp, (record["tool"], {**record, "out_dir": str(again)}),
+                      (record["tool"], {**without_tool, "out_dir": str(bare)}))[2]
+        assert not r.is_error and not r2.is_error
+        for ext in ("png", "json"):
+            assert (again / f"{name}.{ext}").read_bytes() == (first / f"{name}.{ext}").read_bytes(), (name, ext)
+            assert (bare / f"{name}.{ext}").read_bytes() == (first / f"{name}.{ext}").read_bytes(), (name, ext)
+
+
+def test_the_saved_input_keeps_what_was_given_and_nothing_about_the_folder(tmp_path):
+    names = [{"name": "주문", "left": 0, "top": 0}]
+    draw(file_name="한글", classes=json.dumps(names), out_dir=str(tmp_path), scale=2)
+    raw = (tmp_path / "한글.json").read_text(encoding="utf-8")
+    assert json.loads(raw) == {"tool": "draw_class_diagram", "file_name": "한글", "classes": names, "scale": 2}
+    assert "주문" in raw and raw.endswith("}\n")  # 한글을 이스케이프하지 않고, 끝에 줄바꿈
+    assert str(tmp_path) not in raw
+    draw_seq(file_name="seq", participants=PEOPLE, frames=None, out_dir=str(tmp_path), scale=SCALE)
+    assert saved_input(tmp_path, "seq") == {"tool": "draw_sequence_diagram", "file_name": "seq", "participants": PEOPLE}
+
+
+def test_nothing_is_saved_when_the_input_is_wrong_or_too_big(tmp_path):
+    draw(file_name="order", classes=[{"name": "A", "left": "x", "top": 0}], out_dir=str(tmp_path))
+    draw(file_name="far", classes=[{"name": "A", "left": 0, "top": 0}, {"name": "B", "left": 100_000, "top": 0}],
+         out_dir=str(tmp_path))
+    assert list(tmp_path.iterdir()) == []
+
+
+def mkfifo(path):
+    os.mkfifo(path)
+
+
+@pytest.mark.parametrize("make", [
+    lambda p: p.write_text('{"name": "my-app", "version": "1.0.0"}'),  # package.json 꼴
+    lambda p: p.write_text('{"tool": "draw_class_diagram"}'),  # file_name이 없다
+    lambda p: p.write_text('{"tool": 1, "file_name": "order"}'),
+    lambda p: p.write_text('[{"tool": "draw_class_diagram", "file_name": "order"}]'),
+    lambda p: p.write_text("메모"),
+    lambda p: p.write_bytes(b"\xff\xfe\x00"),
+    lambda p: p.write_text("[" * 100_000 + "]" * 100_000),  # 너무 깊어 파이썬이 읽지 못한다
+    mkfifo,
+], ids=["package", "no-file-name", "tool-not-text", "list", "text", "bytes", "deep", "fifo"])
+def test_a_json_file_not_saved_by_cysuml_is_kept_and_nothing_is_written(tmp_path, make):
+    kept = tmp_path / "order.json"
+    make(kept)
+    before = None if kept.is_fifo() else kept.read_bytes()
+    r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
+    assert r.is_error
+    assert text(r).startswith(f"그림을 저장하지 않았다 — out_dir {tmp_path}에 같은 이름의 order.json이 있는데 cysUML이 "
+                              "저장한 입력 파일(tool·file_name이 든 JSON 객체)이 아니라 덮어쓰지 않았다.")
+    assert "상자 자리(왼, 위, 폭×높이): Order(0, 0, 90×48)" in text(r)
+    assert [p.name for p in tmp_path.iterdir()] == ["order.json"]
+    assert kept.is_fifo() or kept.read_bytes() == before
+
+
+def test_an_input_file_saved_by_hand_with_tool_and_file_name_is_overwritten(tmp_path):
+    (tmp_path / "order.json").write_text('{"tool": "draw_sequence_diagram", "file_name": "old"}')
+    r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
+    assert not r.is_error
+    assert saved_input(tmp_path, "order")["classes"] == ORDER
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root는 권한이 없어도 읽는다")
+def test_an_input_file_that_cannot_be_read_is_a_clear_error(tmp_path):
+    kept = tmp_path / "order.json"
+    kept.write_text("{}")
+    kept.chmod(0)
+    try:
+        r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
+    finally:
+        kept.chmod(0o644)
+    assert r.is_error
+    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {tmp_path}에 order.json을(를) 쓸 수 없다(Permission denied)")
+    assert [p.name for p in tmp_path.iterdir()] == ["order.json"]
+
+
+def test_when_the_picture_cannot_be_put_in_place_the_error_says_the_input_was(tmp_path, monkeypatch):
+    real = os.replace
+
+    def replace(src, dst):
+        if str(dst).endswith(".png"):
+            raise PermissionError(1, "Operation not permitted")
+        real(src, dst)
+    monkeypatch.setattr(server.os, "replace", replace)
+    r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
+    assert r.is_error
+    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {tmp_path}에 order.json은(는) 썼지만 order.png을(를) 쓸 수 "
+                              "없다(Operation not permitted). ")
+    assert [p.name for p in tmp_path.iterdir()] == ["order.json"]  # 임시 파일도 남지 않는다
+
+
+def test_calls_saving_the_same_name_at_the_same_time_leave_a_matching_pair(tmp_path, monkeypatch):
+    # 첫 부름이 입력 파일을 바꿔 넣고 그림을 바꿔 넣기 전에 오래 멈춘다. 저장을 한 번에 하나씩 하지 않으면 그 사이 뒤 부름들이 두
+    # 파일을 다 바꿔 넣고, 마지막에 첫 부름의 그림이 뒤 부름의 입력 파일과 짝지어진다
+    real, held = os.replace, []
+
+    def replace(src, dst):
+        if str(dst).endswith(".png") and not held:
+            held.append(dst)
+            time.sleep(0.3)
+        real(src, dst)
+    monkeypatch.setattr(server.os, "replace", replace)
+
+    async def go():
+        async with Client(server.mcp) as c:
+            async def one(i):
+                await anyio.sleep(0.05 if i else 0)  # 첫 부름이 먼저 그린다
+                await c.call_tool("draw_class_diagram", {"file_name": "same", "classes": ORDER,
+                                                         "relations": [] if i else PLACES, "out_dir": str(tmp_path)})
+            async with anyio.create_task_group() as tg:
+                for i in range(8):
+                    tg.start_soon(one, i)
+    anyio.run(go)
+    monkeypatch.undo()
+    record = saved_input(tmp_path, "same")
+    again = tmp_path / "again"
+    run(server.mcp, ("draw_class_diagram", {**record, "out_dir": str(again)}))
+    assert (again / "same.png").read_bytes() == (tmp_path / "same.png").read_bytes()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["again", "same.json", "same.png"]
+
+
+def test_every_tool_and_the_instructions_tell_about_the_input_file():
+    instructions, tools, _ = run(server.mcp)
+    assert instructions.count(guide.SAVED_INPUT) == 1
+    for name, tool in tools.items():
+        assert tool.description.count(guide.INPUT_RESULT) == 1, name
+        assert tool.description.count(guide.IMAGE_RESULT + "\n" + guide.INPUT_RESULT + "\n") == 1, name
+        assert "같은 이름이면 둘 다 덮어쓴다" in tool.input_schema["properties"]["file_name"]["description"], name
 
 
 @pytest.mark.parametrize("name, problem", [
@@ -799,7 +952,8 @@ def test_command_serves_over_stdio(tmp_path):
     _, tools, results = run(params, CLASS, SEQUENCE)
     assert {"draw_class_diagram", "draw_sequence_diagram"} <= set(tools)
     assert not any(r.is_error for r in results)
-    assert sorted(p.name for p in (tmp_path / "diagrams").iterdir()) == ["checkout.png", "order.png"]
+    assert sorted(p.name for p in (tmp_path / "diagrams").iterdir()) == ["checkout.json", "checkout.png", "order.json",
+                                                                          "order.png"]
 
 
 # ---------------------------------------------------------------- 교류도
@@ -814,7 +968,7 @@ def test_draws_a_sequence_diagram_and_returns_the_check_and_the_image_without_bo
     assert lines[1].startswith("알림 — 그림 크기: 논리 좌표 ")
     saved = tmp_path / "checkout.png"
     with Image.open(saved) as f:
-        assert lines[2:] == [f"저장한 파일: {saved} ({f.width}×{f.height}px)"]
+        assert lines[2:] == [f"저장한 파일: {saved} ({f.width}×{f.height}px), 입력 {tmp_path / 'checkout.json'}"]
         assert image(r).size == f.size
 
 

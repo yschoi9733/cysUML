@@ -72,7 +72,7 @@ optional bend points:
 }
 ```
 
-It gets back the check result, the size and place of every box as drawn, the saved file path, and the picture.
+It gets back the check result, the size and place of every box as drawn, the saved file paths, and the picture.
 The check **fails** when boxes overlap, a line runs through a box, a label or another line's arrowhead, or labels
 overlap. Crossing lines and the picture size are reported but don't fail. Inheritance lines from several children to
 one parent may join into one trunk that shares a single triangle (realization lines too, but not mixed with
@@ -320,7 +320,7 @@ cysUML spaces the lifelines to fit the text and draws the activation bars:
 }
 ```
 
-It gets back the check result, the saved file path, and the picture. As cysUML does the layout, a failed check is a
+It gets back the check result, the saved file paths, and the picture. As cysUML does the layout, a failed check is a
 cysUML bug. Each finding still says what to change in the input to get around it: the order of participants or
 messages, the messages a frame covers, shorter text, or splitting the diagram.
 
@@ -329,6 +329,8 @@ messages, the messages a frame covers, shorter text, or splitting the diagram.
 - **Saved to** `out_dir`, or `diagrams/` under the server's working folder when `out_dir` is not given. The same
   `file_name` overwrites the file. Some clients start servers in a folder you can't write to (such as `/`); the tool
   then answers with an error, and the assistant should pass an `out_dir`.
+- **Input file** `<file_name>.json` is saved next to the picture: the tool name and the input that drew it. To change a
+  diagram later, the assistant reads that file, edits it, and draws it again; the file as it is draws the same picture.
 - **Returned picture** is shrunk to 1568 px on its long side when it is bigger. The saved file keeps its full size.
 
 The full input format is in the tool descriptions, which your client hands to the assistant.
@@ -436,6 +438,8 @@ uvx cysuml
 - 입력 형식 전체는 도구 설명에 있어 클라이언트가 어시스턴트에게 넘긴다.
 - 그림은 `out_dir`에, 없으면 서버 작업 폴더 아래 `diagrams/`에 저장한다. 같은 `file_name`이면 덮어쓴다. 쓸 수 없는 폴더(`/` 등)에서
   서버를 띄우는 클라이언트도 있는데, 그때는 도구가 오류로 알리므로 `out_dir`을 주면 된다.
+- 그림 옆에 그린 도구 이름과 입력을 `<file_name>.json`으로 함께 저장한다. 나중에 그림을 고칠 때는 어시스턴트가 그 파일을 읽어 고친
+  뒤 다시 그린다. 파일을 그대로 넣으면 같은 그림이 나온다.
 - 돌려주는 그림은 긴 변이 1568px를 넘으면 그 길이로 줄인다. 저장한 파일은 원래 크기다.
 
 ### 개발
