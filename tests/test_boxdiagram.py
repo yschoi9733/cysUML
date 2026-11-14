@@ -747,6 +747,17 @@ def test_a_line_follows_its_kinds_point_only_from_a_bend_right_under_it(dx, foll
     assert straight.layout.relations[0].aim is None
 
 
+def test_a_stem_of_bends_under_the_point_is_set_upright_without_a_zero_length_piece():
+    # 그 점(230)으로 곧게 올라가는 끝 꺾는 점들은 모두 x를 맞춰 세로 줄이 곧게 서고, 맞춰서 같아진 연달은 점은 하나로 줄인다
+    half = B.AIM_SPLIT / 2
+    for via, stem in [([[45, 150], [230.05, 150], [229.96, 110]], [(230, 150), (230, 110)]),
+                      ([[45, 150], [230, 150], [230, 110], [230.05, 110]], [(230, 150), (230, 110)])]:
+        d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200)],
+                 [rel("generalization", "A", "P", via=via), rel("realization", "B", "P", via=[[345, 120], [245 + half, 120]])])
+        assert d.layout.relations[0].points[1:] == ((45, 150), *stem, (245 - half, 48))
+        assert K.check(d).passed
+
+
 def test_lines_of_one_kind_within_the_rounding_share_one_triangle():
     # 두 자식이 결과 글의 반올림 안에서 조금씩 다른 x(230.04·229.97)를 주어도 같은 점으로 맞춰 삼각형 하나를 함께 쓴다
     d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "A2", -200, 200), el("class", "B", 300, 200)],

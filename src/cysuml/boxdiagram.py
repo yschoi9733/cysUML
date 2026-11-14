@@ -843,11 +843,10 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType, 
            aim: Optional[Point] = None) -> tuple[Optional[tuple[Point, ...]], list[str]]:
     """관계선의 점들(선 끝은 요소가 향하게 한 점(anchor — 보통 테두리 가운데. 도착 요소에서 종류마다 정한 점(aim, _aim이 고른다)을
     향하는 선은 그 점)에서 첫·마지막 꺾는 점으로, 꺾는 점이 없으면 다른 요소의 그 점으로 가는 선이 테두리와 만나는 곳)과, 그렇게 그을
-    수 없으면 그 까닭들. aim을 향하는 선은 마지막 꺾는 점의 x를 aim의 x로 맞춘다 — 결과 글의 반올림 안(AIM_EPS)에서 받은 점이라,
-    맞추면 끝 구간이 곧게 서고 같은 종류의 선들이 삼각형 하나를 함께 쓴다."""
+    수 없으면 그 까닭들. aim을 향하는 선은 끝 꺾는 점들의 x를 aim의 x로 맞춘다(_snap)."""
     ca, cb = a.anchor, aim or b.anchor
     assert ca is not None and cb is not None
-    via = r.via if aim is None else (*r.via[:-1], (aim[0], r.via[-1][1]))
+    via = r.via if aim is None else _snap(r.via, aim[0])
     if via:
         start, end = a.border.exit(ca, via[0]), b.border.exit(cb, via[-1])
         problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} {w.noun} {_show(p_.key)}({fmt_rect(p_.border.bounds)}) 안이나 "
@@ -901,6 +900,16 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType, 
     if sum(lengths) > MAX_LINE:
         problems.append(f"{path}: 선 길이 {fmt_num(sum(lengths))}가 {MAX_LINE}을 넘는다 — {w.noun}를 가까이 모은다")
     return (None if problems else _shorten(points, *gaps)), problems
+
+
+def _snap(via: tuple[Point, ...], x: float) -> tuple[Point, ...]:
+    """끝에서부터 x가 x에서 AIM_EPS 안인 꺾는 점들(종류마다 정한 점으로 곧게 올라가는 세로 줄)의 x를 x로 맞춘다 — 결과 글의 반올림
+    안에서 받은 점이라, 맞추면 그 세로 줄이 곧게 서고 같은 종류의 선들이 삼각형 하나를 함께 쓴다. 맞춰서 연달아 같아진 점은 하나로
+    줄인다(길이 0인 구간을 그리지 않게)."""
+    pts, i = list(via), len(via) - 1
+    while i >= 0 and abs(pts[i][0] - x) <= AIM_EPS:
+        pts[i], i = (x, pts[i][1]), i - 1
+    return tuple(p for j, p in enumerate(pts) if j == 0 or p != pts[j - 1])
 
 
 def _shorten(points: tuple[Point, ...], start_gap: float, end_gap: float) -> tuple[Point, ...]:
@@ -1016,7 +1025,8 @@ def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> 
 def _aim(r: Relation, b: PlacedBox) -> Optional[Point]:
     """도착 요소 b에서 선 r이 향하는 종류마다의 점(PlacedBox.aims) — 마지막 꺾는 점을 그 점 바로 아래나 위(x가 같게)에 준 선만 그
     점을 향하고, 그 밖의 선(꺾는 점이 없는 선도)은 None(anchor를 향한다). AI가 그 점을 쓰려고 준 선만 옮겨, 이미 그린 선이나 옆 변으로
-    들어오는 선을 기울이지 않는다. 결과 글은 점을 소수 한 자리로 적으니 x는 AIM_EPS 안이면 같다고 본다(_route가 맞춘다)."""
+    들어오는 선을 기울이지 않는다. 결과 글은 점을 소수 한 자리로 적으니 x는 AIM_EPS 안이면 같다고 본다(_snap이 맞춘다). 자기
+    자신으로 가는 관계는 따르지 않는다(자기 관계를 받는 공유 줄기 종류도 있다 — 유즈케이스도 일반화)."""
     point = dict(b.aims).get(r.kind)
     if point is None or not r.via or r.source == r.target or abs(r.via[-1][0] - point[0]) > AIM_EPS:
         return None
