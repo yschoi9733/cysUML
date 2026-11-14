@@ -119,7 +119,7 @@ def test_end_shape_hidden_under_its_own_box(width, b_left, b_top, passed):
     if not passed:
         (f,) = r.failures
         assert f.kind == "head_under_own_box" and f.elements == ("A->B", "A")
-        assert "선 끝 모양이 얹힌 끝 상자에 가려진다" in f.problem and "마름모" in f.problem
+        assert "선 끝 모양이 그 끝의 상자에 가려진다" in f.problem and "마름모" in f.problem
 
 
 def test_self_relation_loop_hugging_its_box_fails():
@@ -614,7 +614,7 @@ def test_line_crossing_itself_is_a_crossing():
     r = report([box("A", 0, 0), box("B", 400, 0)],
                [rel("association", "A", "B", via=[[200, 24], [200, 100], [150, 100], [150, -20], [250, -20]])])
     (f,) = r.crossings
-    assert f.elements == ("A->B",) and f.where == (150, 24, 150, 24) and "한 선이 스스로 엇갈린다" in f.problem
+    assert f.elements == ("A->B",) and f.where == (150, 24, 150, 24) and "한 선이 자기 자신과 엇갈린다" in f.problem
 
 
 @pytest.mark.parametrize("scale", [1.0, C.SCALE, 2.5])

@@ -38,7 +38,7 @@ KIND_NAMES = {  # 불합격 종류(boxcheck.KINDS)를 도구 설명에 쓰는 �
     "line_along_container": "선이 끝을 품은 요소의 테두리를 따라감",
     "line_along_own_box": "선이 자기 끝 요소 테두리에 붙어 감",
     "head_near_own_box": "선 끝 모양이 그 선의 다른 끝 요소 테두리에 붙음",
-    "head_under_own_box": "선 끝 모양이 얹힌 끝 요소 안으로 들어감",
+    "head_under_own_box": "선 끝 모양이 그 끝의 요소 안으로 들어감",
     "line_overlap": "선끼리 포개지거나 선이 왔던 길을 되짚음",
     "line_through_head": "선이 선 끝 모양에 닿음",
     "head_overlap": "선 끝 모양끼리 겹침",
