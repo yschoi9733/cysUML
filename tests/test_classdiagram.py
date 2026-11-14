@@ -417,6 +417,19 @@ def test_name_with_no_free_spot_along_the_line_stays_in_the_middle():
     assert [f.kind for f in K.check(d).failures] == ["text_on_box"]
 
 
+def test_label_faults_count_each_element_each_relation_line_and_each_label():
+    # 글자 하나가 요소 둘, 끝을 품은 요소의 테두리 선 둘, 관계 r1의 선분 둘과 r2의 선분 하나, 앞서 놓은 글자 하나에 걸리면 걸린 것은
+    # 요소 둘 + 테두리 하나 + 관계 둘 + 글자 하나 = 6이다(검사도 요소마다·관계마다·글자 쌍마다 하나씩 알린다)
+    spots = B._Spots([((-30, -2), (30, -2)), ((-30, 2), (30, 2)), ((0, -30), (0, 30))], ["r1", "r1", "r2"])
+    spots.labels.append((-5, -5, 5, 5))
+    avoid = B.Obstacles((G.RectBorder((-20, -20, -5, 20)), G.RectBorder((5, -20, 20, 20))),
+                        (((-40, -1), (40, -1)), ((-40, 1), (40, 1))))
+    best = spots._best(("abc",), [(0, 0)], avoid)
+    assert best[0][:2] == (False, False) and best[3] == 6
+    spots._keep(best)
+    assert spots.misses(0) == (6, 1)
+
+
 def span_in(inner, outer):
     return outer[0] <= inner[0] and outer[1] <= inner[1] and inner[2] <= outer[2] and inner[3] <= outer[3]
 

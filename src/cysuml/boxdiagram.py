@@ -788,7 +788,7 @@ def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[t
             continue
         ux, uy = (q[0] - p[0]) / ln, (q[1] - p[1]) / ln
         room = ln / 2 - max(abs(cx * ux + cy * uy) for cx in (box[0], box[2]) for cy in (box[1], box[3]))
-        if room < (NAME_STEP if n == 0 else 0):  # 이 구간에서 낼 자리가 없다
+        if room < 0:  # 이 구간에서 낼 자리가 없다
             continue
         band = grow(span((p, q)), 2 * far + NAME_GAP + LABEL_CLEAR)
         if n:
@@ -830,20 +830,20 @@ def obstacles(boxes: tuple[PlacedBox, ...], holders: frozenset[str] = frozenset(
     return Obstacles(tuple(solids), tuple(frames))
 
 
-_Pool = tuple[list[Border], list[Segment], list[tuple[Point, Point, T.Box]], list[T.Box]]  # _Spots._pool
+_Pool = tuple[list[Border], list[Segment], list[tuple[Point, Point, T.Box, object]], list[T.Box]]  # _Spots._pool
 _Best = tuple[tuple[bool, bool, float], Point, T.Box, int]  # _Spots._best: 점수, 자리, 글자 상자, 걸린 것의 수
 
 
 class _Spots:
     """선 글자의 자리를 고른다. 글자의 흰 바탕(글자 상자를 LABEL_CLEAR만큼 넓힌 것)이 피할 것(Obstacles)에 겹치지 않는 자리,
     그 가운데 관계선과 선 끝 모양(화살촉·삼각형·마름모)과 앞서 놓은 선 글자에 닿지 않는 자리, 그 가운데 피할 것에서 먼
-    (MULT_ENOUGH까지) 자리가 낫고, 같으면 후보 목록의 앞쪽이다. 놓은 글자마다 피할 것에 걸렸는지·선에 닿는지·앞서 놓은 글자에
-    겹치는지도 적어 둔다(misses)."""
+    (MULT_ENOUGH까지) 자리가 낫고, 같으면 후보 목록의 앞쪽이다. 놓은 글자마다 걸린 것의 수도 적어 둔다(misses) — 피할 것은
+    하나하나(끝을 품은 요소의 테두리 선은 모아 하나), 선은 그린 관계(owners)마다, 앞서 놓은 글자는 하나하나 센다."""
 
-    def __init__(self, segments: list[Segment]):
-        self.segments = [(p, q, span((p, q))) for p, q in segments]
+    def __init__(self, segments: list[Segment], owners: Optional[list[str]] = None):
+        self.segments = [(p, q, span((p, q)), owners[i] if owners else i) for i, (p, q) in enumerate(segments)]
         self.labels: list[T.Box] = []
-        self.marks: list[tuple[int, int]] = []  # 글자마다 (걸린 것의 수 — 피할 것·선·앞서 놓은 글자, 피할 것에 걸렸다)
+        self.marks: list[tuple[int, int]] = []  # 글자마다 (걸린 것의 수, 피할 것에 걸렸다)
 
     def _keep(self, best: _Best) -> Point:
         (room, _, _), p, box, faults = best
@@ -862,8 +862,8 @@ class _Spots:
         self.marks += tail[1]
 
     def misses(self, start: int) -> tuple[int, int]:
-        """start번째부터 놓은 글자들이 (걸린 것 — 피할 것·선·앞서 놓은 글자 — 을 모두 센 수, 피할 것에 걸린 글자 수). 작을수록
-        낫고, 앞의 수가 검사 불합격 수에 가깝다."""
+        """start번째부터 놓은 글자들이 (걸린 것을 모두 센 수, 피할 것에 걸린 글자 수). 작을수록 낫고, 앞의 수가 검사 불합격 수에
+        가깝다."""
         return sum(f for f, _ in self.marks[start:]), sum(b for _, b in self.marks[start:])
 
     def _pool(self, region: T.Box, avoid: Obstacles, within: Optional[_Pool] = None) -> _Pool:
@@ -883,13 +883,15 @@ class _Spots:
         near_solids, near_frames, near_segments, near_labels = self._pool(region, avoid, pool)
         best = None
         for p, box, wide in zip(candidates, boxes, wides):
-            room = min([b.gap(wide) for b in near_solids] + [segment_gap(wide, s) for s in near_frames],
-                       default=MULT_ENOUGH)
-            on_line = any(hits(a, b, wide) for a, b, _ in near_segments)
-            on_label = not all(gap(wide, x) >= 0 for x in near_labels)
-            score = (room >= 0, not (on_line or on_label), min(room, MULT_ENOUGH))
+            solid_gaps = [b.gap(wide) for b in near_solids]
+            frame_gaps = [segment_gap(wide, s) for s in near_frames]
+            room = min(solid_gaps + frame_gaps, default=MULT_ENOUGH)
+            on_lines = {owner for a, b, _, owner in near_segments if hits(a, b, wide)}
+            on_labels = sum(gap(wide, x) < 0 for x in near_labels)
+            score = (room >= 0, not (on_lines or on_labels), min(room, MULT_ENOUGH))
             if best is None or score > best[0]:
-                best = score, p, box, (room < 0) + on_line + on_label
+                faults = sum(g < 0 for g in solid_gaps) + any(g < 0 for g in frame_gaps) + len(on_lines) + on_labels
+                best = score, p, box, faults
         assert best is not None
         return best
 
@@ -1083,7 +1085,8 @@ def layout(diagram: Diagram) -> Layout:
     sketch = Canvas()  # 선 끝 모양을 그림판과 똑같이 얻으려고 선만 한 번 그려 본다
     for p in bare:
         _draw_relation(sketch, p, spec.relations[p.relation.kind], by_key)
-    spots = _Spots(outline(sketch.records))
+    lined = [(s, rec.owner) for rec in sketch.records for s in outline([rec])]
+    spots = _Spots([s for s, _ in lined], [owner for _, owner in lined])
     avoids: dict[frozenset[str], Obstacles] = {}  # 끝을 품은 요소들마다 한 번만 만든다
     out = []
     for p in bare:

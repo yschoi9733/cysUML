@@ -1,4 +1,6 @@
 """배치도(deployment diagram): 노드 안에 두기, 통신 경로(화살촉 없는 연관), «deploy», 노드 안의 노드, 자리 잡기 요령의 수치."""
+import string
+
 import pytest
 
 from cysuml import boxcheck as K
@@ -230,9 +232,40 @@ def basic_gap(side):
     return VERTICAL_GAP if side == "below" else SIDE_GAP
 
 
-def label_room(side, lines):
-    """요령의 간격: 옆이면 가장 긴 줄의 글자 폭 + 15, 아래·위면 줄 수 × 15 + 가장 긴 줄의 글자 폭 ÷ 4 + 25."""
-    w = max(text_width(s) for s in lines)
+def estimate(s):
+    """요령의 선 글자 폭 어림: 영문·숫자·ASCII 기호 한 글자 11px(W·@·%는 14px), 한글 12px, 그 밖의 글자 14px."""
+    def one(c):
+        if c.isascii():
+            return 14 if c in "W@%" else 11
+        return 12 if "가" <= c <= "힣" else 14
+    return sum(one(c) for c in s)
+
+
+def drawable(c):
+    try:
+        text_width(c)
+    except ValueError:  # 함께 넣은 글꼴에 없는 글자 — 도구는 입력 오류로 돌려준다
+        return False
+    return True
+
+
+def test_label_width_estimate_of_the_tip_is_an_upper_bound_for_every_character():
+    # 글자마다 상한이라 어떤 선 글자든 어림이 실제 폭 이상이다(대문자 프로토콜 이름 AMQP·MQTT·CORBA·WWW 등과 한자·가나·화살표도).
+    # 함께 넣은 글꼴에 없는 글자는 도구가 입력 오류로 돌려주므로 보지 않는다
+    others = [chr(c) for r in ((0xA0, 0x100), (0x2010, 0x2060), (0x2190, 0x2200), (0x3041, 0x30FF), (0x4E00, 0x9FFF),
+                               (0xFF01, 0xFF5F)) for c in range(*r)]
+    chars = ([c for c in string.printable if c.isprintable()] + ["«", "»"] + [chr(c) for c in range(0xAC00, 0xD7A4)]
+             + [c for c in others if c.isprintable() and drawable(c)])
+    assert [c for c in chars if text_width(c) > estimate(c)] == []
+    for label in ("«deploy»", "«internet»", "HTTPS", "AMQP", "MQTT", "SMTP", "SOAP", "CORBA", "WWW", "user@host",
+                  "100%", "port 443", "웹 소켓", "애플리케이션", "gRPC → 日本 キュー"):
+        assert text_width(label) <= estimate(label), label
+    assert "영문·숫자·ASCII 기호 한 글자 11px(W·@·%는 14px), 한글 12px, 그 밖의 글자 14px로 넉넉히 어림하고" in guide.LABEL_ROOM
+
+
+def label_room(side, lines, measure=text_width):
+    """요령의 간격: 옆이면 가장 긴 줄의 글자 폭(measure로 잰다) + 15, 아래·위면 줄 수 × 15 + 가장 긴 줄의 글자 폭 ÷ 4 + 25."""
+    w = max(measure(s) for s in lines)
     return w + 15 if side in ("left", "right") else 15 * len(lines) + w / 4 + 25
 
 
@@ -350,8 +383,9 @@ def test_sender_with_room_for_the_label_passes_and_a_long_label_needs_more_than_
     end = placed(draw(outer), "Tomcat").rect
     edge = end[3] - end[1] if side != "below" else end[2] - end[0]
     for offset in range(0, int(edge) + 1, 30):
-        r = sent_from(outer, sender, side, label_room(side, lines), make, offset=offset)
-        assert r.passed, (offset, r.summary())
+        for measure in (text_width, estimate):  # 그리기 전에 어림한 폭으로 띄워도(더 넓다) 합격한다
+            r = sent_from(outer, sender, side, label_room(side, lines, measure), make, offset=offset)
+            assert r.passed, (offset, measure.__name__, r.summary())
     if label in LONG and side != "below":
         assert set(kinds(sent_from(outer, sender, side, SIDE_GAP, make))) == {"text_on_box"}
 
@@ -407,10 +441,10 @@ def test_sender_above_beside_the_name_follows_the_tip_with_one_bend(outer, left,
 
 
 @pytest.mark.parametrize("outer, left", [(OUTER, -50), (OUTER, 190), (CLUSTER, -140), (CLUSTER, 280)])
-@pytest.mark.parametrize("label", LONG)
-def test_long_label_above_with_the_bend_passes_with_room_for_it(outer, left, label):
-    # 위에 둘 때도 요령의 간격(줄 수 × 15 + 글자 폭 ÷ 4 + 25px)이면 80px보다 넓은 글자가 합격한다
-    make, lines = LONG[label]
+@pytest.mark.parametrize("label", [*LABELS, *LONG])
+def test_label_above_with_the_bend_passes_with_room_for_it(outer, left, label):
+    # 위에 둘 때도 요령의 간격(줄 수 × 15 + 글자 폭 ÷ 4 + 25px)이면 세 줄 글자와 80px보다 넓은 글자도 합격한다
+    make, lines = {**LABELS, **LONG}[label]
     sender = above(outer, el("artifact", "order.war", 0, 0), left, label_room("above", lines))
     r = report([sender, *outer], [make("order.war", "Tomcat", via=tip_bend(outer, sender))])
     assert r.passed, r.summary()

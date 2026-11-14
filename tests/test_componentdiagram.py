@@ -157,23 +157,23 @@ def test_element_or_label_on_the_name_of_an_interface_fails(monkeypatch):
 
 @pytest.mark.parametrize("stereotype, name", [("manifest", None), ("executionEnvironment", None), (None, ["주문 서버 배포 경로"]),
                                               ("internet", ["HTTPS", "port 443"])])
-@pytest.mark.parametrize("side", ["left", "right", "below"])
+@pytest.mark.parametrize("side", ["left", "right", "below", "above"])
 @pytest.mark.parametrize("outward", [False, True], ids=["in", "out"])
 def test_element_outside_a_package_with_room_for_the_label_passes_either_way(stereotype, name, side, outward):
     # 두 겹 패키지 안의 Svc와 밖의 jar를 요령의 간격(guide.LABEL_ROOM)만큼 띄우면, 선 방향(밖→안, 안→밖)과 jar를 Svc 변의 어디에
-    # 두든 합격한다
-    elements = [el("package", "orders", 0, 0), el("package", "core", 20, 44, **{"in": "orders"}),
-                el("component", "Svc", 40, 88, **{"in": "core"})]
+    # 두든 합격한다. 위에서는 Svc를 이름 탭 오른쪽에 두어 선이 탭을 지나지 않게 한다
+    elements = [el("package", "orders", 0, 0), el("package", "core", 100, 44, **{"in": "orders"}),
+                el("component", "Svc", 120, 88, **{"in": "core"})]
     d = draw(elements)
     pkg, svc = placed(d, "orders").rect, placed(d, "Svc").rect
     lines = ([f"«{stereotype}»"] if stereotype else []) + (name or [])
     w = max(text_width(s) for s in lines)
-    gap = w + 15 if side != "below" else LABEL_LINE * len(lines) + w / 4 + 25
-    edge = svc[3] - svc[1] if side != "below" else svc[2] - svc[0]
+    gap = w + 15 if side in ("left", "right") else LABEL_LINE * len(lines) + w / 4 + 25
+    edge = svc[3] - svc[1] if side in ("left", "right") else svc[2] - svc[0]
     more = {k: v for k, v in (("stereotype", stereotype), ("name", name)) if v}
     for offset in range(0, int(edge) + 1, 30):
         left, top = {"left": (pkg[0] - gap - 90, svc[1] + offset), "right": (pkg[2] + gap, svc[1] + offset),
-                     "below": (svc[0] + offset, pkg[3] + gap)}[side]
+                     "below": (svc[0] + offset, pkg[3] + gap), "above": (svc[0] + offset, pkg[1] - gap - 48)}[side]
         ends = ("Svc", "jar") if outward else ("jar", "Svc")
         r = report([*elements, el("artifact", "jar", left, top)], [rel("dependency", *ends, **more)])
         assert r.passed, (offset, r.summary())
