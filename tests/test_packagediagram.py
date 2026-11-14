@@ -537,7 +537,7 @@ def test_dependency_bent_beside_its_own_arrowhead(end, passed):
     if not passed:
         (f,) = r.failures
         assert f.kind == "line_through_head" and f.elements == ("A->B",)
-        assert "선이 제 선 끝 모양에 닿는다" in f.problem and "화살촉" in f.problem
+        assert "선이 같은 관계의 선 끝 모양에 닿는다" in f.problem and "화살촉" in f.problem
         assert K.bend_away(P.SPEC.words) in f.hint
 
 
@@ -582,7 +582,7 @@ def test_hint_leaves_out_the_bend_distance_when_a_far_segment_meets_its_arrowhea
                [rel("dependency", "A", "B", via=[[-9, -60], [-9, 100], [-60, 100], [-60, 24]])])
     assert "line_through_head" in kinds(r)
     (f,) = [f for f in r.failures if f.kind == "line_through_head"]
-    assert "선이 제 선 끝 모양에 닿는다" in f.problem
+    assert "선이 같은 관계의 선 끝 모양에 닿는다" in f.problem
     assert K.bend_away(P.SPEC.words) not in f.hint
 
 

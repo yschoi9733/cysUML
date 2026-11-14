@@ -461,14 +461,14 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box], w: Words
         b, rels, vias = hit.box, hit.rels, {r.via for r in hit.rels}
         if hit.own and hit.along:
             yield Finding("line_along_own_box", (*_owners(rels), b.name), hit.where,
-                          f"선이 제 끝 {w.noun}에 {BOX_CLEARANCE}px 안으로 붙어 간다: {_titles(rels)}, {b.title}.",
+                          f"선이 그 선의 끝 {w.noun}에 {BOX_CLEARANCE}px 안으로 붙어 간다: {_titles(rels)}, {b.title}.",
                           f"선이 {w.noun} 테두리에 붙어 보인다({w.edge}{josa(w.edge, '을', '를')} 따라가면 테두리가 두 겹으로 "
                           f"보인다) — 꺾는 점(via)을 고쳐 그 {w.noun}에서 {BOX_CLEARANCE}px 넘게 띄운다.")
         elif hit.own:
             fix = (f"두 {w.noun}를 더 떼어 놓는다" if vias == {False}
                    else f"꺾는 점(via)을 고치거나 두 {w.noun}를 더 떼어 놓는다")
             yield Finding("head_near_own_box", (*_owners(rels), b.name), hit.where,
-                          f"선 끝 모양이 제 끝 {w.noun} {w.edge}에 {BOX_CLEARANCE}px 안으로 붙는다: {_titles(rels)}, {b.title}.",
+                          f"선 끝 모양이 그 선의 다른 끝 {w.noun} {w.edge}에 {BOX_CLEARANCE}px 안으로 붙는다: {_titles(rels)}, {b.title}.",
                           f"반대쪽 끝의 선 끝 모양이 이 {w.noun} {w.edge}에 닿아 보인다 — {fix}.")
         else:
             what = (f"선이 {w.noun}를 지난다" if hit.inside
@@ -556,7 +556,7 @@ def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box], w: Words
                           f"{w.edge}에 곧게 닿게 한다.")
         else:
             yield Finding("head_under_own_box", (*_owners(rels), b.name), span(h.points),
-                          f"선 끝 모양이 제 끝 {w.noun}에 가려진다: {at}",
+                          f"선 끝 모양이 그 선의 끝 {w.noun}에 가려진다: {at}",
                           f"선이 {w.noun} {w.edge}{josa(w.edge, '을', '를')} 너무 비스듬히 나간다 — {w.noun}를 옮기거나 꺾는 "
                           f"점(via)을 주어 {w.edge}에서 곧게 나가게 한다.")
 
@@ -644,8 +644,8 @@ def _lines_through_heads(relations: list[_Relation], pairs: Pairs, near: dict[fr
     for (_, _, hit), (own, h, passers, owners) in found.items:
         where = span(h.points)
         if own:
-            problem = f"선이 제 선 끝 모양에 닿는다: {_titles(passers)}, {h.name}(자리 {fmt_rect(where)})."
-            hint = "꺾는 점(via)을 고쳐 선이 제 선 끝 모양을 비켜 가게 한다" + (
+            problem = f"선이 같은 관계의 선 끝 모양에 닿는다: {_titles(passers)}, {h.name}(자리 {fmt_rect(where)})."
+            hint = "꺾는 점(via)을 고쳐 선이 그 모양을 비켜 가게 한다" + (
                 f" — {bend_away(w)}." if any(r.bent_beside(h, hit) for r in passers) else ".")
         else:
             whose = "·".join(f"관계 {o.name}" for o in sorted(owners, key=_index))
@@ -700,8 +700,8 @@ def _lines_through_labels(relations: list[_Relation], labels: list[_Label], w: W
                 _add(found.get((k, where), lambda: (lab, where, []))[2], r)
     for lab, where, rels in found.values():
         own = rels == [lab.relation]
-        hint = (label_hint(w) if own else "선 글자 자리는 도구가 제 선 둘레의 빈 곳에서 고른다 — 지나가는 선에 꺾는 점(via)을 "
-                f"주어 글자를 비켜 가게 하거나, {w.noun}를 옮겨 두 관계를 떼어 놓는다.")
+        hint = (label_hint(w) if own else "선 글자 자리는 도구가 그 글자가 붙은 선 둘레의 빈 곳에서 고른다 — 지나가는 선에 꺾는 "
+                f"점(via)을 주어 글자를 비켜 가게 하거나, {w.noun}를 옮겨 두 관계를 떼어 놓는다.")
         yield Finding("line_through_text", _owners(rels, [lab.relation]), where,
                       f"선이 글자를 지난다: {_titles(rels)}, {lab.title}.", hint)
 
@@ -749,6 +749,6 @@ def _crossings(relations: list[_Relation], pairs: Pairs, w: Words) -> Iterator[F
         for x, y in crossings(r.points, None if o is r else o.points, LINE_EPS):
             _add(found.get((x, y), lambda: ((x, y, x, y), []))[1], r, o)
     for where, rels in found.values():
-        who = (f"선이 제 선을 엇갈린다: {rels[0].title}" if len(rels) == 1 else f"선끼리 엇갈린다: {_titles(rels)}")
+        who = (f"한 선이 스스로 엇갈린다: {rels[0].title}" if len(rels) == 1 else f"선끼리 엇갈린다: {_titles(rels)}")
         yield Finding("crossing", _owners(rels), where, f"{who}, 자리 ({fmt_num(where[0])}, {fmt_num(where[1])}).",
                       crossing_hint(w))
