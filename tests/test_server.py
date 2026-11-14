@@ -727,6 +727,32 @@ def test_nothing_is_saved_when_the_input_is_wrong_or_too_big(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_the_input_file_puts_one_item_on_a_line_like_the_readme(tmp_path):
+    bent = [{**PLACES[0], "via": [[120, 40], [120, 200]]}]
+    draw(file_name="order", classes=ORDER, relations=bent, out_dir=str(tmp_path))
+    assert (tmp_path / "order.json").read_text(encoding="utf-8") == (
+        '{\n'
+        '  "tool": "draw_class_diagram",\n'
+        '  "file_name": "order",\n'
+        '  "classes": [\n'
+        '    {"name": "Order", "left": 0, "top": 0},\n'
+        '    {"name": "Customer", "left": 200, "top": 0}\n'
+        '  ],\n'
+        '  "relations": [\n'
+        '    {"kind": "association", "from": "Order", "to": "Customer", "name": "places", "via": [[120, 40], [120, 200]]}\n'
+        '  ],\n'
+        f'  "scale": {SCALE}\n'
+        '}\n')
+    draw(file_name="order", classes=ORDER, relations=[], out_dir=str(tmp_path))
+    assert '  "relations": [],\n' in (tmp_path / "order.json").read_text(encoding="utf-8")
+
+
+def test_a_file_name_ending_in_json_names_the_same_pair(tmp_path):
+    draw(file_name="order.json", classes=ORDER, out_dir=str(tmp_path))
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["order.json", "order.png"]
+    assert saved_input(tmp_path, "order")["file_name"] == "order"
+
+
 def mkfifo(path):
     os.mkfifo(path)
 
@@ -769,9 +795,18 @@ def test_a_json_file_not_saved_by_cysuml_is_kept_and_nothing_is_written(tmp_path
 
 
 def kept_message(folder, why):
+    """덮어쓰지 않은 오류의 첫 줄. 자기 파일을 고치는 법은 내용 문제(JSON·키)와 읽기 문제에만 붙는다."""
+    own = ("읽을 수 있는 JSON 객체(tool·file_name 포함)로 되돌리고" if why in (NOT_JSON, NOT_AN_OBJECT)
+           else "읽을 수 있게 하고" if why.startswith("읽을 수 없다") else "")
+    fix = f"앞서 cysUML이 저장한 파일이면 {own}, 아니면 " if own else ""
     return (f"그림을 저장하지 않았다 — out_dir {folder}에 같은 이름의 order.json이 있는데 {why}. cysUML이 저장한 입력 파일로 "
-            "보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일이면 읽을 수 있는 JSON 객체(tool·file_name 포함)로 되돌리고, "
-            "아니면 다른 file_name이나 out_dir을 준다.\n")
+            f"보이지 않아 덮어쓰지 않았다. {fix}다른 file_name이나 out_dir을 준다.\n")
+
+
+def test_only_content_and_read_problems_tell_how_to_fix_an_own_file():
+    assert "되돌리고, 아니면 다른" in kept_message("d", NOT_JSON)
+    assert "읽을 수 있게 하고, 아니면 다른" in kept_message("d", "읽을 수 없다(Permission denied)")
+    assert "않았다. 다른 file_name" in kept_message("d", "심볼릭 링크다")
 
 
 @pytest.mark.parametrize("target", ["missing.json", "real.json"], ids=["dangling", "to-a-record"])
@@ -808,7 +843,7 @@ def test_a_file_that_turns_into_a_fifo_after_it_is_looked_at_does_not_hang_the_s
             pass
         worker.join(5)
     assert not hung
-    assert found == ["보통 파일이 아니다"]
+    assert found == [("보통 파일이 아니다", "")]
 
 
 def test_an_input_file_saved_by_hand_with_tool_and_file_name_is_overwritten(tmp_path):
@@ -828,8 +863,7 @@ def test_an_input_file_that_cannot_be_read_is_kept(tmp_path):
     finally:
         kept.chmod(0o644)
     assert r.is_error
-    assert text(r).startswith(f"그림을 저장하지 않았다 — out_dir {tmp_path}에 같은 이름의 order.json이 있는데 읽을 수 "
-                              "없다(Permission denied). ")
+    assert text(r).startswith(kept_message(tmp_path, "읽을 수 없다(Permission denied)"))
     assert [p.name for p in tmp_path.iterdir()] == ["order.json"]
 
 

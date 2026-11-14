@@ -50,10 +50,10 @@ def _named(name: str) -> str:
 
 
 def _is_dir(path: Path) -> bool:
-    """없으면 False, 폴더를 탐색하지 못하는 등의 오류는 올린다 — Path.is_dir은 파이썬 버전마다 오류를 삼키는 범위가 달라 쓰지
-    않는다(3.14는 모두 삼킨다)."""
+    """path 자리 자체가 폴더인지(링크는 따라가지 않는다 — 바꿔 넣으면 링크가 바뀐다). 없으면 False, 폴더를 탐색하지 못하는 등의 오류는
+    올린다 — Path.is_dir은 파이썬 버전마다 오류를 삼키는 범위가 달라 쓰지 않는다(3.14는 모두 삼킨다)."""
     try:
-        return stat.S_ISDIR(os.stat(path).st_mode)
+        return stat.S_ISDIR(os.lstat(path).st_mode)
     except FileNotFoundError:
         return False
 
@@ -176,10 +176,13 @@ def _error(text: str) -> CallToolResult:
 
 
 def _file_name(raw: str) -> tuple[Optional[str], Optional[str]]:
-    """(쓸 이름, 문제). 끝의 .png는 떼고, 경로를 가리키거나 파일 이름으로 못 쓰는 글자가 들면 문제를 돌려준다."""
+    """(쓸 이름, 문제). 끝의 .png나 .json(입력 파일 이름을 그대로 줬을 때)은 떼고, 경로를 가리키거나 파일 이름으로 못 쓰는 글자가
+    들면 문제를 돌려준다."""
     name = unicodedata.normalize("NFC", raw.strip())
-    if name.lower().endswith(".png"):
-        name = name[:-4].rstrip()
+    for suffix in (".png", ".json"):
+        if name.lower().endswith(suffix):
+            name = name[:-len(suffix)].rstrip()
+            break
     if not name:
         return None, "file_name이 비어 있다"
     bad = sorted({c for c in name if c in NAME_FORBIDDEN or unicodedata.category(c).startswith("C")})
@@ -211,19 +214,27 @@ def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
     인자로 버린다). scale은 기본값이어도 넣어 기본값이 바뀌어도 같은 크기로 그린다. out_dir은 넣지 않는다 — 문서와 함께 커밋되는
     파일에 절대 경로가 남지 않고, 폴더를 옮겨도 쓸 수 있게."""
     record = {"tool": tool, "file_name": name, **data, "scale": scale}
+
+    def one(v: Any) -> str:
+        return json.dumps(v, ensure_ascii=False)
+    # README 예시처럼 목록의 항목 하나를 한 줄에 쓴다 — 읽기 쉽고, 커밋하면 고친 항목만 diff에 나온다
+    fields = [f"  {one(k)}: [\n" + ",\n".join(f"    {one(x)}" for x in v) + "\n  ]" if isinstance(v, list) and v
+              else f"  {one(k)}: {one(v)}" for k, v in record.items()]
     # 짝 없는 서로게이트는 parsing이 거르지만, 남더라도 \ud800 꼴 JSON 이스케이프로 쓴다
-    return (json.dumps(record, ensure_ascii=False, indent=2) + "\n").encode("utf-8", "backslashreplace")
+    return ("{\n" + ",\n".join(fields) + "\n}\n").encode("utf-8", "backslashreplace")
 
 
-def _not_ours(path: Path) -> Optional[str]:
-    """path에 cysUML이 저장한 입력 파일(tool이 cysUML 도구 이름이고 file_name이 든 JSON 객체)로 보이지 않는 것이 있으면 그 까닭을
-    돌려준다. 입력 파일 이름이 package.json 같은 남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 없으면 None이다. 폴더는
+def _not_ours(path: Path) -> Optional[tuple[str, str]]:
+    """path에 cysUML이 저장한 입력 파일(tool이 cysUML 도구 이름이고 file_name이 든 JSON 객체)로 보이지 않는 것이 있으면 (그 까닭,
+    앞서 cysUML이 저장한 파일일 때 고치는 법 — 없으면 빈 글)을 돌려준다. 입력 파일 이름이 package.json 같은 남의 파일과 겹칠 수 있어
+    그런 파일은 덮어쓰지 않는다. 없으면 None이다. 폴더는
     부르는 쪽(_save)이 먼저 거른다. 있는지 보다 난 오류(폴더 탐색 권한 등)는 그대로 올려 쓰기 오류로 알린다. 심볼릭 링크는 끊겼든
     아니든 덮어쓰지 않는다 — 바꿔 넣으면 링크 대상이 아니라 링크가 보통 파일로 바뀐다. 종류와 크기는 연 핸들로 본다 — 보고 나서 여는
     사이에 FIFO로 바뀌어도 읽다 멈추지 않게(이 함수는 저장 잠금 안에서 돈다)."""
+    unreadable, restore = "읽을 수 있게 하고", "읽을 수 있는 JSON 객체(tool·file_name 포함)로 되돌리고"
     try:
         if stat.S_ISLNK(os.lstat(path).st_mode):
-            return "심볼릭 링크다"
+            return "심볼릭 링크다", ""
     except FileNotFoundError:
         return None
     try:
@@ -232,23 +243,23 @@ def _not_ours(path: Path) -> Optional[str]:
     except FileNotFoundError:
         return None
     except OSError as e:
-        return f"읽을 수 없다({e.strerror or e})"
+        return f"읽을 수 없다({e.strerror or e})", unreadable
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode):
-            return "보통 파일이 아니다"
+            return "보통 파일이 아니다", ""
         if st.st_size > MAX_RECORD_BYTES:
-            return f"{MAX_RECORD_BYTES // 2**20}MiB보다 크다"
+            return f"{MAX_RECORD_BYTES // 2**20}MiB보다 크다", ""
         try:
             raw = f.read()
         except OSError as e:
-            return f"읽을 수 없다({e.strerror or e})"
+            return f"읽을 수 없다({e.strerror or e})", unreadable
     try:
         v = json.loads(raw)
     except (ValueError, RecursionError):  # UnicodeDecodeError도 ValueError다
-        return "JSON으로 읽을 수 없다"
+        return "JSON으로 읽을 수 없다", restore
     if not (isinstance(v, dict) and v.get("tool") in TOOL_NAMES and isinstance(v.get("file_name"), str)):
-        return "cysUML 도구 이름인 tool과 file_name이 든 JSON 객체가 아니다"
+        return "cysUML 도구 이름인 tool과 file_name이 든 JSON 객체가 아니다", restore
     return None
 
 
@@ -292,10 +303,11 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
                 if _is_dir(path):
                     raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR))
             at = kept
-            if why := _not_ours(kept):
+            if found := _not_ours(kept):
+                why, own = found
+                fix = f"앞서 cysUML이 저장한 파일이면 {own}, 아니면 " if own else ""
                 return None, (f"그림을 저장하지 않았다 — {where}에 같은 이름의 {kept.name}이 있는데 {why}. cysUML이 저장한 입력 "
-                              "파일로 보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일이면 읽을 수 있는 JSON 객체(tool·"
-                              "file_name 포함)로 되돌리고, 아니면 다른 file_name이나 out_dir을 준다.")
+                              f"파일로 보이지 않아 덮어쓰지 않았다. {fix}다른 file_name이나 out_dir을 준다.")
             for path, data in files:
                 at = path
                 staged.append((_stage(path, data), path))
