@@ -63,7 +63,7 @@ ISSUE_CASES = [  # (요소, 관계, 오류, 고치는 법대로 고친 요소, �
      BASE, [rel("association", "고객", "주문한다")]),
     (BASE, [rel("association", "고객", "sys")],
      "relations[0]: 연관이 시스템 경계에 닿는다(to 'sys': 'system') — 연관은 액터와 유즈케이스 사이에 긋는다. 시스템 경계 쪽 끝을 "
-     "그 액터가 쓰는 유즈케이스로 고친다",
+     f"그 액터가 쓰는 유즈케이스로 고치고{U.PICK}, 아니면 이 연관을 지운다",
      BASE, [rel("association", "고객", "주문한다")]),
     (BASE, [rel("association", "주문한다", "결제한다", stereotype="include")],
      f"relations[0].stereotype: {INCLUDE_ONLY}(이 관계는 'association', from '주문한다': 'use_case', to '결제한다': "
@@ -81,6 +81,15 @@ def test_the_inputs_the_issue_lists_are_input_errors_that_say_where_and_how_to_f
                                                                                    fixed_elements, fixed_relations):
     assert problems(relations, elements) == (error,)
     reads(fixed_relations, fixed_elements)
+
+
+def test_rule_errors_come_in_input_order():
+    # 고리는 따로 보지만 오류는 입력 차례(요소 다음 관계)로 나온다
+    found = problems([rel("dependency", "주문한다", "결제한다", stereotype="include"), rel("association", "고객", "은행"),
+                      rel("dependency", "결제한다", "주문한다", stereotype="include"),
+                      rel("dependency", "주문한다", "주문한다", stereotype="extend", via=LOOP)], ACTOR_INSIDE[:3] + [
+                         ACTOR_INSIDE[3], BANK])
+    assert [p.split(":")[0] for p in found] == ["elements[3].in", "relations[0]", "relations[1]", "relations[3]"]
 
 
 def test_rule_errors_come_together_with_other_input_errors():
@@ -150,7 +159,7 @@ def test_a_system_is_never_an_end_of_a_generalization(source, target, fix, fixed
 
 def test_generalization_between_systems_is_an_input_error():
     (p,) = problems([rel("generalization", "pay", "sys")], [*BASE, OTHER_SYSTEM])
-    assert p == ("relations[0]: 시스템 경계('pay')는 일반화의 끝이 될 수 없다 — 일반화는 액터끼리, 유즈케이스끼리 긋는다. "
+    assert p == ("relations[0]: 시스템 경계('pay', 'sys')는 일반화의 끝이 될 수 없다 — 일반화는 액터끼리, 유즈케이스끼리 긋는다. "
                  f"from·to를 둘 다 액터나 둘 다 유즈케이스로 고치고{PICK}, 아니면 이 일반화를 지운다")
 
 
@@ -184,9 +193,9 @@ def test_generalization_between_actors_or_between_use_cases_reads():
 def test_association_touching_a_system_names_the_system_ends():
     assert problems([rel("association", "sys", "pay")], [*BASE, OTHER_SYSTEM]) == (
         "relations[0]: 연관이 시스템 경계에 닿는다(from 'sys': 'system', to 'pay': 'system') — 연관은 액터와 유즈케이스 사이에 "
-        "긋는다. from·to를 액터와 유즈케이스로 고친다",)
+        f"긋는다. from·to를 액터와 유즈케이스로 고치고{PICK}, 아니면 이 연관을 지운다",)
     (p,) = problems([rel("association", "문의한다", "sys")], [*BASE, OUTSIDE])
-    assert p.endswith("시스템 경계 쪽 끝을 그 유즈케이스를 쓰는 액터로 고친다")
+    assert p.endswith(f"시스템 경계 쪽 끝을 그 유즈케이스를 쓰는 액터로 고치고{PICK}, 아니면 이 연관을 지운다")
     reads([rel("association", "문의한다", "고객")], [*BASE, OUTSIDE])
 
 
@@ -220,7 +229,8 @@ LOOP_BACK = "일반화로 두면 고리가 된다('은행' → '고객' → '은
 @pytest.mark.parametrize("second, fix", [
     (rel("association", "은행", "고객"), f"{LOOP_BACK}. 이 연관을 지운다"),
     # 액터 사이 의존은 받으니 stereotype만 빼라고 하고, 일반화는 고리가 되어 권하지 않는다
-    (rel("dependency", "은행", "고객", stereotype="include"), "의존을 뜻했으면 stereotype을 빼고, 아니면 이 관계를 지운다"),
+    (rel("dependency", "은행", "고객", stereotype="include"),
+     f"의존을 뜻했으면 stereotype을 빼고(일반화는 안 된다 — {LOOP_BACK}), 아니면 이 관계를 지운다"),
     (rel("generalization", "은행", "고객", stereotype="include"), f"{LOOP_BACK}. 이 관계를 지운다"),
 ])
 def test_a_later_error_is_not_told_to_close_a_loop_with_the_fix_of_an_earlier_one(second, fix):
@@ -256,7 +266,8 @@ def test_two_use_case_generalizations_with_extend_the_other_way_round_get_one_fi
     first, then = problems([rel("generalization", "주문한다", "결제한다", stereotype="extend"),
                             rel("generalization", "결제한다", "주문한다", stereotype="extend")])
     assert first.endswith(") — 확장이면 kind를 'dependency'로 바꾸고, 일반화를 뜻했으면 stereotype을 빼고, 아니면 이 관계를 지운다")
-    assert then.endswith(") — 확장이면 kind를 'dependency'로 바꾸고, 아니면 이 관계를 지운다")  # 일반화는 앞 것과 고리가 된다
+    assert then.endswith(") — 확장이면 kind를 'dependency'로 바꾸고(일반화는 안 된다 — 일반화로 두면 고리가 된다('결제한다' → "
+                         "'주문한다' → '결제한다' — relations[0]의 고치는 법을 따르면)), 아니면 이 관계를 지운다")
 
 
 def test_two_use_case_associations_the_other_way_round_do_not_become_includes_of_each_other():
@@ -345,7 +356,8 @@ REFUND = inside("sys", "use_case", "환불한다", 480, 160)
     # 일반화로 두면 고리가 된다
     ([rel("generalization", "결제한다", "환불한다"), rel("generalization", "환불한다", "주문한다"),
       rel("generalization", "주문한다", "결제한다", stereotype="extend")],
-     "확장이면 kind를 'dependency'로 바꾸고, 아니면 이 관계를 지운다"),
+     "확장이면 kind를 'dependency'로 바꾸고(일반화는 안 된다 — 일반화로 두면 고리가 된다('주문한다' → '결제한다' → '환불한다' → "
+     "'주문한다')), 아니면 이 관계를 지운다"),
     # 막힌 까닭을 모두 적는다
     ([rel("generalization", "결제한다", "주문한다"), rel("dependency", "주문한다", "결제한다", stereotype="include"),
       rel("generalization", "주문한다", "결제한다", stereotype="include")],
@@ -363,10 +375,13 @@ REFUND = inside("sys", "use_case", "환불한다", 480, 160)
     ([rel("association", "고객", "주문한다"), rel("dependency", "고객", "주문한다", stereotype="include")],
      "액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 두 끝을 잇는 association이 이미 있다. 이 관계를 지운다"),
     ([rel("dependency", "고객", "sys", stereotype="include")],
-     "액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 고치고 kind를 "
-     "'association'으로 바꾸고 stereotype을 뺀다"),
+     "액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 고치고"
+     f"{PICK} kind를 'association'으로 바꾸고 stereotype을 빼고, 아니면 이 관계를 지운다"),
     ([rel("association", "sys", "은행", stereotype="extend")],
-     "액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 고치고 stereotype을 뺀다"),
+     f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 고치고{PICK} stereotype을 "
+     "빼고, 아니면 이 관계를 지운다"),
+    # 액터의 자기 의존은 받으니 stereotype만 빼도 된다
+    ([rel("dependency", "고객", "고객", stereotype="include", via=LOOP)], "의존을 뜻했으면 stereotype을 빼고, 아니면 이 관계를 지운다"),
     ([rel("generalization", "고객", "은행", stereotype="include")], "액터 사이 일반화를 뜻했으면 stereotype을 빼고, 아니면 이 관계를 지운다"),
     ([rel("generalization", "은행", "고객"), rel("generalization", "고객", "은행", stereotype="include")],
      "일반화로 두면 고리가 된다('고객' → '은행' → '고객'). 이 관계를 지운다"),
@@ -413,7 +428,8 @@ def test_include_loops_are_input_errors():
     (rel("dependency", "pay", "sys", stereotype="extend"), f"from·to를 유즈케이스로 고치고{PICK}, 아니면 이 관계를 지운다",
      rel("dependency", "문의한다", "주문한다", stereotype="extend")),
     (rel("association", "고객", "sys", stereotype="include"),
-     "액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 고치고 stereotype을 뺀다",
+     f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 고치고{PICK} stereotype을 "
+     "빼고, 아니면 이 관계를 지운다",
      rel("association", "고객", "주문한다")),
 ])
 def test_include_touching_a_system_is_fixed_by_the_kind_of_the_other_end(relation, fix, fixed):

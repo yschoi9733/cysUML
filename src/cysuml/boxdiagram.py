@@ -251,6 +251,47 @@ class Rules:
 NO_RULES = Rules()  # 짜임을 보지 않는 그림의 규칙(Spec.rules 기본값)
 
 
+def end_of(side: str, key: str, kind: str) -> str:
+    """오류·알림 글에서 관계의 한 끝: from 'Circle': 'class'. 이름 바로 뒤에 조사를 붙이지 않는다(영어 이름은 받침을 알 수 없다)."""
+    return f"{side} {_show(key)}: {kind!r}"
+
+
+def parent_path(parents: dict[str, list[str]], start: str, goal: str) -> Optional[list[str]]:
+    """parents(자식 → 부모들)의 상속을 따라 start에서 goal로 가는 가장 짧은 길(양 끝 포함). 없으면 None."""
+    came: dict[str, Optional[str]] = {start: None}
+    queue = [start]
+    for key in queue:
+        if key == goal:
+            path = [key]
+            while (up := came[path[-1]]) is not None:
+                path.append(up)
+            return path[::-1]
+        for parent in parents.get(key, ()):
+            if parent not in came:
+                came[parent] = key
+                queue.append(parent)
+    return None
+
+
+def fail_loops(r: Reader, inherits: list[tuple[str, Relation]], parents: dict[str, list[str]], label: str,
+               why: str) -> None:
+    """고리를 이루는 상속(label — 상속·일반화 등)을 입력 오류로 알린다. inherits는 오류 없는 상속의 (입력 안의 자리, 관계), parents는
+    그 상속(자식 → 부모들)이고, why는 고리가 왜 틀렸는지다. 두 관계가 서로 거꾸로 가는 고리는 하나를 지우라고만 한다 — 뒤집으면
+    같은 관계가 둘이 되어 선이 포개진다. 고리(그 고리를 이루는 상속들)마다 입력에서 먼저 나온 상속에서 한 번 알린다."""
+    loops: set[frozenset[tuple[str, str]]] = set()
+    for path, rel in inherits:
+        back = parent_path(parents, rel.target, rel.source)
+        if back is None:
+            continue
+        ring = [rel.source, *back]
+        edges = frozenset(zip(ring, ring[1:]))
+        if edges in loops:
+            continue
+        loops.add(edges)
+        fix = "둘 가운데 하나를 지운다" if len(ring) == 3 else f"고리 안의 {label} 하나를 지우거나 from·to를 바꾼다"
+        r.fail(path, f"{label}{josa(label, '이', '가')} 고리를 이룬다({' → '.join(_show(k) for k in ring)}) — {why}. {fix}")
+
+
 @dataclass(frozen=True, eq=False)
 class Spec:
     """도구 하나가 받는 것. shapes는 요소 종류 → 모양, relations는 관계 종류 → 정의다. navigable은 방향을 받는 관계(연관·집합·
