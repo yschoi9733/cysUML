@@ -29,7 +29,8 @@ DEFAULT_DIR = "diagrams"
 TRUNK_SPLIT = 20  # 한 종류의 줄기를 다른 종류의 줄기보다 이만큼 아래(자식 쪽)에 둔다
 TRUNK_CLEAR = 10  # 아래 줄기가 자식 위 변에서 떨어져야 하는 거리(실측 5px까지 합격 — 붙어 감 판정은 4px)
 TRUNK_ROOM = 60  # 부모와 자식 사이 간격. 위 줄기를 가운데에 두면 아래 줄기가 자식 위 변에서 TRUNK_CLEAR 떨어진다
-TRUNK_NEAR = 4  # 위 줄기 종류 자식의 세로 줄이 아래 줄기 종류가 향하는 점의 x에서 이만큼 안이면 포개진다(boxcheck.OVERLAP_GAP 2 + 여유)
+TRUNK_NEAR = 4  # 위 줄기 종류 자식의 세로 줄이 아래 줄기의 마지막 세로 줄에서 이만큼 안이면 포개진다(boxcheck.OVERLAP_GAP 2 + 여유)
+TRUNK_SIDE = 30  # 좁은 부모로 한 종류를 옆 변으로 들일 때 마지막 꺾는 점을 그 변에서 떼는 거리. 끝 구간이 끝 모양 길이보다 길어야 한다
 
 KIND_NAMES = {  # 불합격 종류(boxcheck.KINDS)를 도구 설명에 쓰는 말. "요소"는 도구의 말(클래스도는 상자)로 바꿔 쓴다(kind_names)
     "box_overlap": "요소끼리 겹치거나 붙음",
@@ -112,10 +113,11 @@ def trunk_aims(spec: Spec) -> str:
     types = _trunk_types(spec)
     if len(types) < 2:
         return ""
-    noun, labels = spec.words.noun, _joined(t.label for t in types)
+    noun, edge, labels = spec.words.noun, spec.words.edge, _joined(t.label for t in types)
     shown = ", ".join(f"{t.label} 향하는 점 x, y" for t in types)
-    return (f"  같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오는 {noun}는 그 뒤에 종류마다 그 종류의 선이 향하는 점을 "
-            f"\"{shown}\"로 덧붙인다(공유 줄기를 종류마다 그 점으로 모을 때 쓴다).")
+    return (f"  아래(위) {edge}{josa(edge, '으로', '로')} {labels}{josa(labels, '이', '가')} 함께 들어오는 {noun}는 그 뒤에 그 "
+            f"{edge}{josa(edge, '으로', '로')} 들어오는 선이 종류마다 향하는 점을 \"{shown}\"로 덧붙인다(공유 줄기를 종류마다 그 점으로 "
+            "모을 때 쓴다).")
 
 
 def places_result(spec: Spec) -> str:
@@ -231,8 +233,7 @@ def relation_fields(spec: Spec) -> str:
     lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "
                  f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 "
                  f"한다{never_self}." + (f" {arrow_bend(spec.words)}" if arrows else ""))
-    trunks = [t for t in types.values() if t.trunk]
-    if trunks:
+    if trunks := _trunk_types(spec):
         lines.append(_trunk(trunks, spec))
     if rules := spec.rules.guide(spec):
         lines.append(rules)
@@ -264,21 +265,25 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
     if len(types) > 1:
         assert len(types) == 2, "향하는 점을 세 종류 이상으로 나누는 요령은 없다"
         (first, second), half = (t.label for t in types), fmt_num(AIM_SPLIT / 2)
-        narrow = fmt_num(AIM_SPLIT + 2 * TRIANGLE[1])  # boxdiagram._split_aims가 나누는 가장 좁은 모양(가운데를 향할 때)
-        away = f"(모양 밖 이름이 옆에 있으면 이름 반대쪽 {edge}{josa(edge, '으로', '로')})" if outside else ""
-        lines += [f"    - 같은 부모로 {first}·{second}{josa(second, '이', '가')} 함께 오면 그 부모에서 선이 향하는 점이 종류마다 "
-                  f"갈려 두 종류의 {head}{ga} 아래 {edge}에 나란히 놓인다 — {first}{josa(first, '은', '는')} 가운데에서 왼쪽으로 "
-                  f"{half}px, {second}{josa(second, '은', '는')} 오른쪽으로 {half}px. 결과의 그 부모 자리 뒤에 \"{first} 향하는 점 "
-                  f"x, y, {second} 향하는 점 x, y\"로 덧붙으니, 자식마다 위 두 점의 [부모 가운데 x, y] 대신 [제 종류의 향하는 점 x, "
-                  f"y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 하나만 준다).",
+        narrow = fmt_num(AIM_SPLIT + 2 * TRIANGLE[1])  # boxdiagram._split_aims가 나누는 가장 좁은 변(가운데를 향할 때)
+        to = josa(edge, "으로", "로")
+        away = f"(모양 밖 이름이 옆에 있으면 이름 반대쪽 {edge}{to})" if outside else ""
+        lines += [f"    - 같은 부모의 아래 {edge}{to} {first}·{second}{josa(second, '이', '가')} 함께 들어오면 그 {edge}{to} "
+                  f"들어오는 선이 향하는 점이 종류마다 갈려 두 종류의 {head}{ga} 나란히 놓인다 — {first}{josa(first, '은', '는')} "
+                  f"가운데에서 왼쪽으로 {half}px, {second}{josa(second, '은', '는')} 오른쪽으로 {half}px(옆 {edge}{to} 들어오는 선은 "
+                  f"그대로 가운데를 향한다). 그렇게 그린 결과의 그 부모 자리 뒤에 \"{first} 향하는 점 x, y, {second} 향하는 점 x, "
+                  f"y\"로 덧붙는다. 자식마다 위 두 점의 [부모 가운데 x, y] 대신 [제 종류의 향하는 점 x, y]를 주어 종류마다 줄기를 따로 "
+                  f"모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 하나만 준다).",
                   f"    - {first} 자식이 모두 {first} 향하는 점보다 왼쪽(같은 x 포함)에, {second} 자식이 모두 {second} 향하는 점보다 "
                   f"오른쪽(같은 x 포함)에 있으면 두 줄기를 같은 높이 y에 둔다. 아니면 같은 높이에서 두 줄기가 포개지니, 한 종류의 줄기를 "
                   f"y + {TRUNK_SPLIT}(자식 쪽)에 둔다. 그 아래 줄기가 자식 {noun}들의 위 {edge}보다 {TRUNK_CLEAR}px 이상 위에 오게 "
                   f"부모와 자식 사이를 {TRUNK_ROOM}px 이상 띄우고 y를 가운데보다 아래로 내리지 않는다. 위 줄기 종류의 자식 가운데 x가 "
                   f"다른 종류의 향하는 점 x에서 {TRUNK_NEAR}px 안이면 세로 줄끼리 포개지니 그 자식을 옮긴다.",
-                  f"    - 부모 모양 폭이 {narrow}px보다 좁아 {head} 둘이 나란히 들지 않으면 향하는 점이 나뉘지 않는다(덧붙지 않는다). "
-                  f"그 부모로는 한 종류만 아래 {edge}에 모으고, 다른 종류는 줄기를 y + {TRUNK_SPLIT}에 두고 마지막 꺾는 점을 부모 옆 "
-                  f"{edge} 밖, 부모 가운데 높이에 두어 옆 {edge}{josa(edge, '으로', '로')} 들인다{away}."]
+                  f"    - 부모 아래 {edge}{josa(edge, '이', '가')} {narrow}px보다 좁아 {head} 둘이 나란히 들지 않으면 향하는 점이 "
+                  f"나뉘지 않는다(덧붙지 않는다). 그 부모로는 한 종류만 아래 {edge}에 모으고, 다른 종류는 줄기를 y + {TRUNK_SPLIT}에 "
+                  f"두고 마지막 꺾는 점을 부모 옆 {edge}에서 {TRUNK_SIDE}px 밖, 부모 가운데 높이에 두어 옆 {edge}{to} 들인다{away}. "
+                  f"그 세로 줄이 다른 {noun}·선에 걸리거나 그 줄에서 {TRUNK_NEAR}px 안에 아래 {edge}{to} 가는 자식의 가운데 x가 있으면 "
+                  f"반대쪽 옆 {edge}{to} 들인다."]
     return "\n".join(lines)
 
 

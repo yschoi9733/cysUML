@@ -703,12 +703,51 @@ def two_kinds_to(parent, *relations, more=(), spec=SPEC):
 
 
 def test_two_trunk_kinds_aim_either_side_of_the_parent_in_the_tools_order():
-    # 입력 차례와 상관없이 도구가 받는 관계 차례(상속, 실체화)로 왼쪽부터, 가운데(245, 24)에서 AIM_SPLIT/2씩
-    p = two_kinds_to(el("class", "P", 200, 0)).layout.by_key["P"]
-    half = B.AIM_SPLIT / 2
+    # 두 선 모두 아래 변으로 들어온다 — 입력 차례와 상관없이 도구가 받는 관계 차례(상속, 실체화)로 왼쪽부터, 가운데(245, 24)에서
+    # AIM_SPLIT/2씩
+    d = two_kinds_to(el("class", "P", 200, 0))
+    p, half = d.layout.by_key["P"], B.AIM_SPLIT / 2
     assert p.anchor == (245, 24)
     assert p.aims == (("generalization", (245 - half, 24)), ("realization", (245 + half, 24)))
-    assert p.aim("generalization") == (245 - half, 24) and p.aim("association") == p.anchor
+    assert [r.aim for r in d.layout.relations] == [(245 + half, 24), (245 - half, 24)]
+
+
+def test_kinds_coming_in_through_different_edges_keep_the_middle():
+    # 실체화하는 C는 P 바로 아래에서 곧게, 상속하는 J는 P 옆에서 들어온다 — 같은 변으로 함께 들어오지 않으니 나누지 않아 C->P가
+    # 곧은 세로 선으로 남는다
+    d = draw([el("interface", "P", 200, 0), el("class", "C", 200, 200), el("interface", "J", -100, 0)],
+             [rel("realization", "C", "P"), rel("generalization", "J", "P")])
+    assert d.layout.by_key["P"].aims == ()
+    assert [r.points for r in d.layout.relations][0] == ((245, 200), (245, 42))
+
+
+def test_lines_given_the_side_edge_recipe_are_drawn_as_before():
+    # 한 종류는 아래 변 가운데로, 다른 종류는 오른쪽 변으로 들인 그림(옛 요령)은 아래 변으로 함께 들어오는 종류가 하나라 그대로다
+    elements = [el("interface", "P", 200, 0, width=140), el("interface", "A", 0, 102, width=140),
+                el("class", "B", 400, 102, width=140)]
+    relations = [rel("generalization", "A", "P", via=[[70, 72], [270, 72]]),
+                 rel("realization", "B", "P", via=[[470, 92], [370, 92], [370, 21]])]
+    d = draw(elements, relations)
+    assert d.layout.by_key["P"].aims == ()
+    assert [r.points[-1] for r in d.layout.relations] == [(270, 42), (340, 21)] and K.check(d).passed
+
+
+def test_only_lines_through_the_shared_edge_aim_at_the_split_points():
+    # 아래 변으로 상속·실체화가 함께 들어오고, 실체화 하나는 오른쪽 변으로 가로로 들어온다 — 그 선은 가운데 높이 그대로 오른쪽 변에
+    # 닿고, 나눈 점을 향하지 않는다
+    half = B.AIM_SPLIT / 2
+    d = two_kinds_to(el("class", "P", 200, 0), rel("realization", "Q", "P"), more=[el("class", "Q", 500, 0)])
+    q = next(r for r in d.layout.relations if r.relation.source == "Q")
+    assert q.aim is None and q.points[-1] == (290, 24)
+    assert d.layout.by_key["P"].aims == (("generalization", (245 - half, 24)), ("realization", (245 + half, 24)))
+
+
+def test_two_kinds_coming_in_through_the_top_edge_are_split_too():
+    half = B.AIM_SPLIT / 2
+    d = draw([el("class", "P", 200, 300), el("class", "A", 0, 100), el("class", "B", 300, 100)],
+             [rel("generalization", "A", "P", via=[[45, 250], [245 - half, 250]]),
+              rel("realization", "B", "P", via=[[345, 250], [245 + half, 250]])])
+    assert [r.points[-1] for r in d.layout.relations] == [(245 - half, 300), (245 + half, 300)] and K.check(d).passed
 
 
 def test_one_trunk_kind_or_other_kinds_keep_the_middle():

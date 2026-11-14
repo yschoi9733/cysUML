@@ -271,13 +271,14 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
                    "자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다"):
         assert phrase in text, phrase
     half, narrow = boxdiagram.AIM_SPLIT // 2, boxdiagram.AIM_SPLIT + 2 * boxdiagram.TRIANGLE[1]
-    to_side = f"옆 {edge}" + ("으로" if edge == "변" else "로")
-    away = f"(모양 밖 이름이 옆에 있으면 이름 반대쪽 {edge}" + ("으로" if edge == "변" else "로") + ")" if outside else ""
-    two = (f"    - 같은 부모로 상속·실체화가 함께 오면 그 부모에서 선이 향하는 점이 종류마다 갈려 두 종류의 삼각형이 아래 {edge}에 "
-           f"나란히 놓인다 — 상속은 가운데에서 왼쪽으로 {half}px, 실체화는 오른쪽으로 {half}px.",
-           '결과의 그 부모 자리 뒤에 "상속 향하는 점 x, y, 실체화 향하는 점 x, y"로 덧붙으니, 자식마다 위 두 점의 [부모 가운데 '
-           "x, y] 대신 [제 종류의 향하는 점 x, y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 하나만 "
-           "준다).",
+    to = "으로" if edge == "변" else "로"
+    away = f"(모양 밖 이름이 옆에 있으면 이름 반대쪽 {edge}{to})" if outside else ""
+    two = (f"    - 같은 부모의 아래 {edge}{to} 상속·실체화가 함께 들어오면 그 {edge}{to} 들어오는 선이 향하는 점이 종류마다 갈려 두 "
+           f"종류의 삼각형이 나란히 놓인다 — 상속은 가운데에서 왼쪽으로 {half}px, 실체화는 오른쪽으로 {half}px(옆 {edge}{to} "
+           "들어오는 선은 그대로 가운데를 향한다).",
+           '그렇게 그린 결과의 그 부모 자리 뒤에 "상속 향하는 점 x, y, 실체화 향하는 점 x, y"로 덧붙는다. 자식마다 위 두 점의 [부모 '
+           "가운데 x, y] 대신 [제 종류의 향하는 점 x, y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 "
+           "하나만 준다).",
            "    - 상속 자식이 모두 상속 향하는 점보다 왼쪽(같은 x 포함)에, 실체화 자식이 모두 실체화 향하는 점보다 오른쪽(같은 x "
            "포함)에 있으면 두 줄기를 같은 높이 y에 둔다.",
            f"아니면 같은 높이에서 두 줄기가 포개지니, 한 종류의 줄기를 y + {guide.TRUNK_SPLIT}(자식 쪽)에 둔다.",
@@ -285,9 +286,12 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
            f"{guide.TRUNK_ROOM}px 이상 띄우고 y를 가운데보다 아래로 내리지 않는다.",
            f"위 줄기 종류의 자식 가운데 x가 다른 종류의 향하는 점 x에서 {guide.TRUNK_NEAR}px 안이면 세로 줄끼리 포개지니 그 자식을 "
            "옮긴다.",
-           f"    - 부모 모양 폭이 {narrow}px보다 좁아 삼각형 둘이 나란히 들지 않으면 향하는 점이 나뉘지 않는다(덧붙지 않는다).",
-           f"다른 종류는 줄기를 y + {guide.TRUNK_SPLIT}에 두고 마지막 꺾는 점을 부모 옆 {edge} 밖, 부모 가운데 높이에 두어 "
-           f"{to_side} 들인다{away}.")
+           f"    - 부모 아래 {edge}" + ("이" if edge == "변" else "가") + f" {narrow}px보다 좁아 삼각형 둘이 나란히 들지 않으면 "
+           "향하는 점이 나뉘지 않는다(덧붙지 않는다).",
+           f"다른 종류는 줄기를 y + {guide.TRUNK_SPLIT}에 두고 마지막 꺾는 점을 부모 옆 {edge}에서 {guide.TRUNK_SIDE}px 밖, 부모 "
+           f"가운데 높이에 두어 옆 {edge}{to} 들인다{away}.",
+           f"그 세로 줄이 다른 {noun}·선에 걸리거나 그 줄에서 {guide.TRUNK_NEAR}px 안에 아래 {edge}{to} 가는 자식의 가운데 x가 "
+           f"있으면 반대쪽 옆 {edge}{to} 들인다.")
     for phrase in two:  # 줄기 종류가 하나인 도구(유즈케이스도)에는 종류마다 향하는 점이 없다
         assert (phrase in text) == (len(trunks) > 1), phrase
     # 가운데는 그 도구의 결과에 덧붙는 것으로 셈한다 — 패키지를 받는 도구는 향하는 점, 모양 밖 이름이 있는 도구(유즈케이스도의
@@ -305,6 +309,7 @@ def test_trunk_numbers_fit_together():
         spec = PLACED_TOOLS[name][2]
         longest = max(t.end.length for t in spec.relations.values() if t.trunk and t.end is not None)
         assert guide.TRUNK_ROOM / 2 - longest > boxcheck.OVERLAP_GAP
+        assert guide.TRUNK_SIDE > longest  # 좁은 부모의 옆 변으로 들이는 끝 구간이 끝 모양보다 길다(짧으면 입력 오류)
     # 그때 아래 줄기가 자식 위 변에서 TRUNK_CLEAR 떨어지고, 그 거리는 붙어 감 판정(BOX_CLEARANCE)보다 넉넉하다
     assert guide.TRUNK_ROOM / 2 - guide.TRUNK_SPLIT >= guide.TRUNK_CLEAR > boxcheck.BOX_CLEARANCE
     assert guide.TRUNK_NEAR > boxcheck.OVERLAP_GAP
@@ -320,18 +325,24 @@ INNER = {"kind": "class", "name": "Inner", "in": "P", "left": 300, "top": 44}  #
 
 
 def middles(name, field, args):
-    """도구를 불러 결과 글의 자리에서 요소마다 (자리, 가운데 x, 가운데 y, 향하는 점이 붙었는지, {관계 이름: 종류마다 향하는 점})를
-    설명대로 읽는다 — 모양 자리가 덧붙어 있으면 자리는 모양 자리이고, 향하는 점이 덧붙어 있으면 그 점이 가운데다."""
+    """도구를 불러 결과 글의 자리를 읽는다(read_places)."""
     (r,) = run(server.mcp, (name, args))[2]
+    out = read_places(text(r))
+    assert set(out) == {b.get("id", b.get("name")) for b in args[field]}, text(r)
+    return out
+
+
+def read_places(result):
+    """결과 글의 자리에서 요소마다 (자리, 가운데 x, 가운데 y, 향하는 점이 붙었는지, {관계 이름: 종류마다 향하는 점})를 설명대로
+    읽는다 — 모양 자리가 덧붙어 있으면 자리는 모양 자리이고, 향하는 점이 덧붙어 있으면 그 점이 가운데다."""
     out = {}
-    places = next(line for line in text(r).splitlines() if " 자리(왼, 위, 폭×높이): " in line)  # 검사 항목의 자리는 읽지 않는다
+    places = next(line for line in result.splitlines() if " 자리(왼, 위, 폭×높이): " in line)  # 검사 항목의 자리는 읽지 않는다
     for m in PLACE.finditer(places.split(": ", 1)[1]):
         key, nums = m.group(1), m.groups()[1:11]
         left, top, width, height = map(float, nums[4:8] if nums[4] else nums[:4])
         aim = tuple(map(float, nums[8:])) if nums[8] else (left + width / 2, top + height / 2)
         kinds = {label: (float(x), float(y)) for label, x, y in KIND_AIM.findall(m.group(12))}
         out[key] = ((left, top, width, height), *aim, bool(nums[8]), kinds)
-    assert set(out) == {b.get("id", b.get("name")) for b in args[field]}, text(r)
     return out
 
 
@@ -400,10 +411,10 @@ LEFTS = (0, 200, 400, 600)
 
 def two_kinds(tmp_path, name, field, kinds, lefts=LEFTS, room=guide.TRUNK_ROOM, upper=None, together=False, more=(),
               others=()):
-    """인터페이스 P(왼 200, 폭 140) 아래 room 띄운 줄에 자식(kinds[i])을 두고, 결과에 덧붙는 종류마다의 향하는 점을 읽어 설명대로
-    꺾는 점을 준다. 줄기 높이 y는 부모와 자식 사이 가운데 — upper를 주면 그 종류는 y에, 다른 종류는 y + TRUNK_SPLIT에 두고, 주지
-    않으면 둘 다 y에 둔다. together면 두 종류를 부모 가운데 한 점으로 모은다. more·others는 더 둘 요소·관계. (결과 글, 종류마다
-    향하는 점)."""
+    """인터페이스 P(왼 200, 폭 140) 아래 room 띄운 줄에 자식(kinds[i])을 두고, 설명대로 종류마다 향하는 점(상속은 가운데에서
+    왼쪽으로, 실체화는 오른쪽으로 AIM_SPLIT/2)으로 꺾는 점을 준다. 줄기 높이 y는 부모와 자식 사이 가운데 — upper를 주면 그 종류는
+    y에, 다른 종류는 y + TRUNK_SPLIT에 두고, 주지 않으면 둘 다 y에 둔다. together면 두 종류를 부모 가운데 한 점으로 모은다.
+    more·others는 더 둘 요소·관계. (결과 글, 그 결과의 P 자리 뒤에 덧붙은 종류마다 향하는 점)."""
     parent = {"kind": "interface", "name": "P", "left": 200, "top": 0, "width": 140}
     (left, top, width, height), px, py, *_ = middles(name, field, {"file_name": "trunk", field: [parent],
                                                                    "out_dir": str(tmp_path)})["P"]
@@ -411,19 +422,18 @@ def two_kinds(tmp_path, name, field, kinds, lefts=LEFTS, room=guide.TRUNK_ROOM, 
     boxes = [parent, *more] + [{"kind": CHILD[k], "name": f"C{i}", "left": x, "top": child_top, "width": 140}
                                for i, (k, x) in enumerate(zip(kinds, lefts))]
     args = {"file_name": "trunk", field: boxes, "out_dir": str(tmp_path)}
-    straight = [{"kind": k, "from": f"C{i}", "to": "P"} for i, k in enumerate(kinds)]  # 먼저 꺾는 점 없이 그려 결과를 읽는다
-    m = middles(name, field, {**args, "relations": straight})
+    m = middles(name, field, args)
     assert m["P"][:3] == ((left, top, width, height), px, py)
-    aims = m["P"][4]
+    half = boxdiagram.AIM_SPLIT / 2
     y = (top + height + child_top) / 2
     relations = list(others)
     for i, k in enumerate(kinds):
         cx = m[f"C{i}"][1]
-        ax = px if together else aims[LABEL[k]][0]
+        ax = px if together else px - half if k == G else px + half
         yk = y + guide.TRUNK_SPLIT if upper is not None and k != upper else y
         relations.append({"kind": k, "from": f"C{i}", "to": "P", "via": [[ax, yk]] if cx == ax else [[cx, yk], [ax, yk]]})
     (r,) = run(server.mcp, (name, {**args, "relations": relations}))[2]
-    return text(r), aims
+    return text(r), read_places(text(r))["P"][4]
 
 
 @pytest.mark.parametrize("name, field", [("draw_class_diagram", "classes"), ("draw_package_diagram", "elements")])
@@ -561,10 +571,11 @@ def test_new_tools_tell_what_the_result_adds_to_the_places_of_their_shapes():
             assert guide.places_result(spec) in tools[name].description, name
     assert guide.places_result(packagediagram.SPEC).startswith(guide.PLACES_RESULT + "\n" + guide.OUTSIDE_PLACES + "\n" + aim)
     # 상속·실체화를 함께 받는 도구는 종류마다 향하는 점을 덧붙인다고 끝에 적는다 — 클래스도 결과 설명도 같은 글을 쓴다
-    kinds = ('  같은 부모로 상속·실체화가 함께 오는 {}는 그 뒤에 종류마다 그 종류의 선이 향하는 점을 "상속 향하는 점 x, y, 실체화 '
-             '향하는 점 x, y"로 덧붙인다(공유 줄기를 종류마다 그 점으로 모을 때 쓴다).')
-    assert guide.places_result(packagediagram.SPEC).endswith("\n" + kinds.format("요소"))
-    assert guide.trunk_aims(classdiagram.SPEC) == kinds.format("상자") and kinds.format("상자") in server.CLASS_TOOL
+    kinds = ('  아래(위) {0} 상속·실체화가 함께 들어오는 {1}는 그 뒤에 그 {0} 들어오는 선이 종류마다 향하는 점을 "상속 향하는 '
+             '점 x, y, 실체화 향하는 점 x, y"로 덧붙인다(공유 줄기를 종류마다 그 점으로 모을 때 쓴다).')
+    assert guide.places_result(packagediagram.SPEC).endswith("\n" + kinds.format("테두리로", "요소"))
+    class_aims = kinds.format("변으로", "상자")
+    assert guide.trunk_aims(classdiagram.SPEC) == class_aims and class_aims in server.CLASS_TOOL
     # 유즈케이스도: 액터의 모양 자리는 붙고, 액터·유즈케이스가 향하는 점은 가운데를 정수로 내린 점이라 붙이지 않는다. 공유 줄기는
     # 일반화 하나뿐이라 종류마다 향하는 점도 없다
     assert guide.places_result(usecasediagram.SPEC) == guide.PLACES_RESULT + "\n" + guide.OUTSIDE_PLACES
