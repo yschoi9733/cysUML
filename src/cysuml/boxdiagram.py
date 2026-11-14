@@ -812,6 +812,17 @@ class Obstacles:
     solid_keys: tuple[str, ...] = ()
     frame_keys: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        for things, keys in ((self.solids, self.solid_keys), (self.frames, self.frame_keys)):
+            if keys and len(keys) != len(things):
+                raise ValueError("요소 열쇠는 피할 것마다 하나씩이거나 없어야 한다")
+
+    @cached_property
+    def keyed(self) -> tuple[list[tuple[Border, object]], list[tuple[Segment, object]]]:
+        """(피할 것, 요소 열쇠)·(테두리 선, 요소 열쇠) 짝. 열쇠가 없으면 하나하나 다른 열쇠다."""
+        return (list(zip(self.solids, self.solid_keys or [("solid", i) for i in range(len(self.solids))])),
+                list(zip(self.frames, self.frame_keys or [("frame", i) for i in range(len(self.frames))])))
+
 
 def obstacles(boxes: tuple[PlacedBox, ...], holders: frozenset[str] = frozenset()) -> Obstacles:
     """관계 하나의 선 글자가 피할 것. 끝을 품은 요소(holders)는 안에 글자를 둘 수 있지만 테두리 선과 이름 칸은 피한다. 그 밖의
@@ -900,9 +911,7 @@ class _Spots:
         """흰 바탕이 region 안인 후보들이 닿을 수 있는 피할 것·선·앞서 놓은 글자(within이 있으면 그 가운데서 거른다). 피할 것은
         MULT_ENOUGH 밖이면 점수가 같아 거리를 잴 필요가 없다."""
         if within is None:
-            within = (list(zip(avoid.solids, avoid.solid_keys or [("solid", i) for i in range(len(avoid.solids))])),
-                      list(zip(avoid.frames, avoid.frame_keys or [("frame", i) for i in range(len(avoid.frames))])),
-                      self.segments, self.labels)
+            within = (*avoid.keyed, self.segments, self.labels)
         solids, frames, segments, labels = within
         reach = grow(region, MULT_ENOUGH)
         return ([b for b in solids if meets(b[0].bounds, reach)], [f for f in frames if meets(span(f[0]), reach)],
@@ -920,15 +929,16 @@ class _Spots:
             solid_gaps = [b.gap(wide) for b, _ in near_solids]
             frame_gaps = [segment_gap(wide, s) for s, _ in near_frames]
             room = min(solid_gaps + frame_gaps, default=MULT_ENOUGH)
-            parts: dict[object, list[Point]] = {}  # 그린 관계마다 글자의 흰 바탕 안에 든 선의 점들
-            for a, b, _, owner in near_segments:
-                if (c := clip(a, b, wide)) is not None:
-                    parts.setdefault(owner, []).extend(c)
-            on_labels = sum(gap(wide, x) < 0 for x in near_labels)
-            score = (room >= 0, not (parts or on_labels), min(room, MULT_ENOUGH))
-            if best is None or score > best.score:
+            clear = not any(hits(a, b, wide) for a, b, _, _ in near_segments) and all(gap(wide, x) >= 0 for x in near_labels)
+            score = (room >= 0, clear, min(room, MULT_ENOUGH))
+            if best is None or score > best.score:  # 걸린 것은 고른 후보만 센다
                 hit = ({k for (_, k), g in zip(near_solids, solid_gaps) if g < 0}
                        | {k for (_, k), g in zip(near_frames, frame_gaps) if g < 0})
+                parts: dict[object, list[Point]] = {}  # 그린 관계마다 글자의 흰 바탕 안에 든 선의 점들
+                for a, b, _, owner in near_segments:
+                    if (c := clip(a, b, wide)) is not None:
+                        parts.setdefault(owner, []).extend(c)
+                on_labels = sum(gap(wide, x) < 0 for x in near_labels)
                 best = _Best(score, p, box, len(hit) + _places(span(pts) for pts in parts.values()) + on_labels)
         assert best is not None
         return best
@@ -1135,8 +1145,8 @@ def layout(diagram: Diagram) -> Layout:
         start = len(spots.labels)
         labels, moved = _relation_labels(spots, r, points, avoid, slide=True)
         if moved and (missed := spots.misses(start)) != (0, 0):
-            # 옮긴 이름이 피할 것만 비켰거나, 그 이름 때문에 같은 관계의 다중도가 빈 자리를 못 찾았을 수 있다. 이름을 가운데에 둔 것과
-            # 견주어 걸린 것이 더 적을 때(같으면 피할 것에 걸린 글자가 더 적을 때)만 옮긴 쪽을 쓴다
+            # 옮긴 이름(빈 자리다) 때문에 같은 관계의 다중도가 빈 자리를 못 찾았을 수 있다. 이름을 가운데에 둔 것과 견주어 걸린 것이
+            # 더 적을 때(같으면 피할 것에 걸린 글자가 더 적을 때)만 옮긴 쪽을 쓰고, 둘 다 같으면 가운데에 둔다
             slid, tail = labels, spots.cut(start)
             labels, _ = _relation_labels(spots, r, points, avoid, slide=False)
             if spots.misses(start) > missed:

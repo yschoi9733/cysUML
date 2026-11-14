@@ -438,6 +438,13 @@ def test_label_faults_count_an_element_once_and_lines_through_one_place_once():
     assert spots._best(("abc",), [(0, 0)], avoid).faults == 2 + 1
 
 
+def test_obstacle_keys_are_one_per_obstacle_or_none():
+    # 열쇠가 모자라면 짝을 지을 때 열쇠 없는 피할 것이 빠져 글자가 그 위에 놓일 수 있으니 만들 때 막는다
+    with pytest.raises(ValueError, match="요소 열쇠"):
+        B.Obstacles((G.RectBorder((0, 0, 1, 1)), G.RectBorder((2, 2, 3, 3))), (), ("A",))
+    assert len(B.Obstacles((G.RectBorder((0, 0, 1, 1)), G.RectBorder((2, 2, 3, 3)))).keyed[0]) == 2
+
+
 def span_in(inner, outer):
     return outer[0] <= inner[0] and outer[1] <= inner[1] and inner[2] <= outer[2] and inner[3] <= outer[3]
 
