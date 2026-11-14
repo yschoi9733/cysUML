@@ -242,8 +242,9 @@ class Rules:
         return ""
 
     def nests(self, outer: str, inner: str) -> bool:
-        """inner 종류 요소를 안에 요소를 두는 outer 종류 요소 안에 둘 수 있는지. 둘 수 없는 짜임은 check가 입력 오류로 알리고, 요소가
-        겹쳤을 때의 안내(boxcheck)는 in을 권하지 않는다. 기본은 모두 된다."""
+        """inner 종류 요소를 안에 요소를 두는 outer 종류 요소 안에 둘 수 있는지. 요소가 겹쳤을 때의 안내(boxcheck)는 둘 수 없으면
+        in을 권하지 않는다. 엔진은 이것으로 입력을 막지 않는다 — 막는 것은 그림 모듈이 이어받은 check가 제 오류 글로 한다. 기본은
+        모두 된다."""
         return True
 
 

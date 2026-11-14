@@ -183,8 +183,9 @@ class UseCaseRules(Rules):
     유즈케이스끼리 잇는 연관(UseCase 제약: 같은 주체를 가리키는 유즈케이스끼리는 연관을 맺지 않는다 — 주체는 유즈케이스를 품은
     가장 가까운 시스템 경계이고, 둘 다 경계 밖이면 같은 주체로 친다)은 틀렸다. 일반화는 액터끼리, 유즈케이스끼리 긋고 고리를 이루지
     않는다(자기 자신으로 가는 일반화는 관계 종류가 막는다 — RELATIONS의 reflexive). «include»·«extend»는 유즈케이스 사이의 의존에만
-    단다. 유즈케이스는 자기 자신을 포함하지 않고, «include»는 고리를 이루지 않는다(UseCase 제약: 저를 바로나 거쳐서 포함하는
-    유즈케이스를 포함할 수 없다). 관계 하나에는 오류를 하나만 알린다(«include»·«extend»를 먼저 본다). 고치는 법은 _Plan이 고른다."""
+    단다. 유즈케이스는 자기 자신을 포함·확장하지 않고, «include»는 고리를 이루지 않는다(UseCase 제약: 저를 바로나 거쳐서 포함하는
+    유즈케이스를 포함할 수 없다). «extend»의 고리는 막지 않는다 — 명세에 그런 제약이 없다. 관계 하나에는 오류를 하나만
+    알린다(«include»·«extend»를 먼저 본다). 고치는 법은 _Plan이 고른다."""
 
     def check(self, r: Reader, spec: Spec, elements: list[tuple[str, Element]],
               relations: list[tuple[str, B.Relation]]) -> list[Notice]:
@@ -244,8 +245,8 @@ class UseCaseRules(Rules):
             "  - 규칙: 일반화는 액터끼리, 유즈케이스끼리 긋는다. 종류가 다른 일반화, 시스템 경계가 끝인 일반화, 고리를 이루는 일반화(A의 "
             "부모가 B이고 B의 부모가 다시 A인 것 — 여러 단계도)는 입력 오류다.",
             '  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — 다른 '
-            "관계에 달면 입력 오류다. 다른 스테레오타입은 어느 관계에든 단다. 자기 자신을 포함하는 «include»와 고리를 이루는 "
-            "«include»(A가 B를, B가 다시 A를 포함하는 것 — 여러 단계도)도 입력 오류다."])
+            "관계에 달면 입력 오류다. 다른 스테레오타입은 어느 관계에든 단다. 자기 자신을 포함하거나 확장하는 관계와 고리를 이루는 "
+            "«include»(A가 B를, B가 다시 A를 포함하는 것 — 여러 단계도)도 입력 오류다(«extend»의 고리는 받는다)."])
 
 
 def _fault(rel: B.Relation, s: str, t: str, subject: Callable[[str], tuple[bool, Optional[str]]]) -> Optional[str]:
@@ -253,7 +254,7 @@ def _fault(rel: B.Relation, s: str, t: str, subject: Callable[[str], tuple[bool,
     본다. 주체를 알 수 없는 유즈케이스끼리의 연관은 보지 않는다(품은 요소의 문제는 이미 알렸다)."""
     if _step(rel):
         if rel.kind == "dependency" and s == t == "use_case":
-            return "self_include" if _stereo(rel) == "include" and rel.source == rel.target else None
+            return "self_step" if rel.source == rel.target else None
         return "step"
     if rel.kind == "generalization":
         return "system_generalization" if "system" in (s, t) else "mixed_generalization" if s != t else None
@@ -312,7 +313,12 @@ class _Plan:
         graph = _graph(edge)
         if graph is not None and (back := parent_path(self.graphs[graph], b, a)) is not None:
             label = "일반화" if graph == "generalization" else "«include»"
-            return f"{label}로 두면 고리가 된다({' → '.join(_show(k) for k in [a, *back])})"
+            keys = [("generalization", x, y) if graph == "generalization" else ("dependency", x, y, "include")
+                    for x, y in zip(back, back[1:])]
+            # 고리의 관계 가운데 다른 오류의 고치는 법이 만들 것이 있으면 밝힌다 — 입력에 있는 고리로 읽히지 않게
+            origins = list(dict.fromkeys(o for key in keys if (o := self.edges.get(key)) is not None))
+            how = f" — {'·'.join(origins)}의 고치는 법을 따르면" if origins else ""
+            return f"{label}로 두면 고리가 된다({' → '.join(_show(k) for k in [a, *back])}{how})"
         return None
 
     def offer(self, path: str, what: str, options: list[tuple[str, str, Edge]], maybe: bool) -> str:
@@ -338,8 +344,9 @@ def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str
              subject: Optional[str]) -> tuple[str, str]:
     """틀린 관계(fault — _fault가 낸 규칙 이름)의 (오류 자리, 오류 글). subject는 from 쪽 유즈케이스의 주체(시스템 경계)다."""
     a, b, ends = rel.source, rel.target, _ends(rel, s, t)
-    if fault == "self_include":
-        return path, "유즈케이스는 자기 자신을 포함할 수 없다(«include») — 이 관계를 지운다"
+    if fault == "self_step":
+        what = "포함" if _stereo(rel) == "include" else "확장"
+        return path, f"유즈케이스는 자기 자신을 {what}할 수 없다(«{_stereo(rel)}») — 이 관계를 지운다"
     if fault == "step":
         return _at(path, "stereotype"), (f"«include»·«extend»는 유즈케이스 사이의 dependency에만 단다(이 관계는 {rel.kind!r}, "
                                          f"{ends}) — {_step_fix(plan, path, rel, s, t)}")
