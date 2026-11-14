@@ -44,7 +44,6 @@ TOOL_NAMES: list[str] = []  # 등록한 그리기 도구 이름(_named가 모은
 
 
 def _named(name: str) -> str:
-    """도구를 등록하는 자리에서 부른다."""
     TOOL_NAMES.append(name)
     return name
 
@@ -264,8 +263,7 @@ def _not_ours(path: Path) -> Optional[tuple[str, str]]:
 
 
 def _stage(path: Path, data: bytes) -> Path:
-    """path 옆 임시 파일에 data를 다 쓰고 그 경로를 돌려준다. 쓰다 실패하면 임시 파일을 지운다."""
-    tmp = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+    tmp =path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
     try:
         with open(tmp, "xb") as f:
             f.write(data)
