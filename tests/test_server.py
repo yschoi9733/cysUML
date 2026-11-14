@@ -762,8 +762,8 @@ def test_a_json_file_not_saved_by_cysuml_is_kept_and_nothing_is_written(tmp_path
     r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
     assert r.is_error
     assert text(r).startswith(f"그림을 저장하지 않았다 — out_dir {tmp_path}에 같은 이름의 order.json이 있는데 {why}. cysUML이 "
-                              "저장한 입력 파일로 보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일을 손봤다면 JSON 문법과 "
-                              "tool·file_name을 되살리고, 아니면 다른 file_name이나 out_dir을 준다.\n")
+                              "저장한 입력 파일로 보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일이면 읽을 수 있는 JSON "
+                              "객체(tool·file_name 포함)로 되돌리고, 아니면 다른 file_name이나 out_dir을 준다.\n")
     assert "상자 자리(왼, 위, 폭×높이): Order(0, 0, 90×48)" in text(r)
     assert [p.name for p in tmp_path.iterdir()] == ["order.json"]
     assert (None if kept.is_fifo() else kept.stat().st_size, kept.stat().st_mtime_ns) == before
@@ -824,7 +824,7 @@ def test_a_folder_that_cannot_be_searched_is_a_write_error_not_a_file_that_is_th
     finally:
         folder.chmod(0o755)
     assert r.is_error
-    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {folder}에 order.json을(를) 쓸 수 없다(Permission denied). ")
+    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {folder}에 order.png을(를) 쓸 수 없다(Permission denied). ")
     assert list(folder.iterdir()) == []
 
 

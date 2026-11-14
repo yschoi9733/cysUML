@@ -208,12 +208,11 @@ def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
 
 def _not_ours(path: Path) -> Optional[str]:
     """path에 cysUML이 저장한 입력 파일(tool이 cysUML 도구 이름이고 file_name이 든 JSON 객체)로 보이지 않는 것이 있으면 그 까닭을
-    돌려준다. 입력 파일 이름이 package.json 같은 남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 없거나 폴더면 None이다
-    (폴더는 쓸 때 오류로 알린다). 있는지 보다 난 오류(폴더 탐색 권한 등)는 그대로 올려 쓰기 오류로 알린다. 종류와 크기는 연 핸들로
-    본다 — 보고 나서 여는 사이에 FIFO로 바뀌어도 읽다 멈추지 않게(이 함수는 저장 잠금 안에서 돈다)."""
+    돌려준다. 입력 파일 이름이 package.json 같은 남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 없으면 None이다. 폴더는
+    부르는 쪽(_save)이 먼저 거른다. 있는지 보다 난 오류(폴더 탐색 권한 등)는 그대로 올려 쓰기 오류로 알린다. 종류와 크기는 연
+    핸들로 본다 — 보고 나서 여는 사이에 FIFO로 바뀌어도 읽다 멈추지 않게(이 함수는 저장 잠금 안에서 돈다)."""
     try:
-        if stat.S_ISDIR(os.stat(path).st_mode):
-            return None
+        os.stat(path)
     except FileNotFoundError:
         return None
     try:
@@ -277,15 +276,15 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
     try:
         with _saving:
             folder.mkdir(parents=True, exist_ok=True)
+            for path, _ in files:  # 한쪽만 바꿔 넣은 채 멈추지 않게 먼저 본다(폴더를 탐색하지 못하면 is_dir이 오류를 낸다)
+                at = path
+                if path.is_dir():
+                    raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR))
             at = kept
             if why := _not_ours(kept):
                 return None, (f"그림을 저장하지 않았다 — {where}에 같은 이름의 {kept.name}이 있는데 {why}. cysUML이 저장한 입력 "
-                              "파일로 보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일을 손봤다면 JSON 문법과 tool·file_name을 "
-                              "되살리고, 아니면 다른 file_name이나 out_dir을 준다.")
-            for path, _ in files:  # 한쪽만 바꿔 넣은 채 멈추지 않게 먼저 본다
-                if path.is_dir():
-                    at = path
-                    raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR))
+                              "파일로 보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일이면 읽을 수 있는 JSON 객체(tool·"
+                              "file_name 포함)로 되돌리고, 아니면 다른 file_name이나 out_dir을 준다.")
             for path, data in files:
                 at = path
                 staged.append((_stage(path, data), path))
