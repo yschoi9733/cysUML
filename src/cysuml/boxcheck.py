@@ -556,7 +556,7 @@ def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box], w: Words
                           f"{w.edge}에 곧게 닿게 한다.")
         else:
             yield Finding("head_under_own_box", (*_owners(rels), b.name), span(h.points),
-                          f"선 끝 모양이 그 선의 끝 {w.noun}에 가려진다: {at}",
+                          f"선 끝 모양이 얹힌 끝 {w.noun}에 가려진다: {at}",
                           f"선이 {w.noun} {w.edge}{josa(w.edge, '을', '를')} 너무 비스듬히 나간다 — {w.noun}를 옮기거나 꺾는 "
                           f"점(via)을 주어 {w.edge}에서 곧게 나가게 한다.")
 

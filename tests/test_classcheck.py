@@ -119,7 +119,7 @@ def test_end_shape_hidden_under_its_own_box(width, b_left, b_top, passed):
     if not passed:
         (f,) = r.failures
         assert f.kind == "head_under_own_box" and f.elements == ("A->B", "A")
-        assert "선 끝 모양이 그 선의 끝 상자에 가려진다" in f.problem and "마름모" in f.problem
+        assert "선 끝 모양이 얹힌 끝 상자에 가려진다" in f.problem and "마름모" in f.problem
 
 
 def test_self_relation_loop_hugging_its_box_fails():
