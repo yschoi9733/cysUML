@@ -606,7 +606,7 @@ def test_new_tools_tell_what_the_result_adds_to_the_places_of_their_shapes():
     # 상속·실체화를 함께 받는 도구는 종류마다 향하는 점을 덧붙인다고 끝에 적는다 — 클래스도 결과 설명도 같은 글을 쓴다
     kinds = ('  같은 부모로 상속·실체화가 함께 오는 {}는 그 뒤에 종류마다 향하는 점을 "상속 향하는 점 x, y, 실체화 향하는 점 x, '
              'y"로 덧붙인다(마지막 꺾는 점을 그 점 바로 아래나 위에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 종류마다 그 점으로 '
-             "모을 때 쓴다).")
+             "모을 때 쓴다. 모양이 좁아 두 종류의 삼각형이 나란히 들지 않으면 덧붙지 않는다).")
     assert guide.places_result(packagediagram.SPEC).endswith("\n" + kinds.format("요소"))
     class_aims = kinds.format("상자")
     assert guide.trunk_aims(classdiagram.SPEC) == class_aims and class_aims in server.CLASS_TOOL

@@ -107,18 +107,22 @@ def _trunk_types(spec: Spec) -> list[RelationType]:
     return [t for t in spec.relations.values() if t.trunk]
 
 
+def kind_aim(label: str, x: str, y: str) -> str:
+    """결과 글의 자리 뒤에 덧붙는 종류마다 향하는 점 하나("상속 향하는 점 x, y") — 결과 글(server)과 그 설명(trunk_aims)이 함께 쓴다."""
+    return f"{label} 향하는 점 {x}, {y}"
+
+
 def trunk_aims(spec: Spec) -> str:
-    """결과 글의 자리 뒤에 덧붙는 종류마다의 향하는 점(boxdiagram._split_aims) 설명. 공유 줄기를 받는 관계 종류가 하나뿐인 도구는
-    빈 글."""
+    """결과 글의 자리 뒤에 덧붙는 종류마다의 향하는 점(boxdiagram._split_aims) 설명. 공유 줄기를 받는 관계 종류가 둘이 아닌 도구는
+    빈 글(엔진이 나누지 않는다)."""
     types = _trunk_types(spec)
-    if len(types) < 2:
+    if len(types) != 2:
         return ""
-    noun, edge, labels = spec.words.noun, spec.words.edge, _joined(t.label for t in types)
-    shown = ", ".join(f"{t.label} 향하는 점 x, y" for t in types)
+    noun, labels = spec.words.noun, _joined(t.label for t in types)
+    shown = ", ".join(kind_aim(t.label, "x", "y") for t in types)
     return (f"  같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오는 {noun}{josa(noun, '은', '는')} 그 뒤에 종류마다 향하는 "
-            f"점을 \"{shown}\"로 "
-            f"덧붙인다(마지막 꺾는 점을 그 점 바로 아래나 위에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 종류마다 그 점으로 모을 때 "
-            "쓴다).")
+            f"점을 \"{shown}\"로 덧붙인다(마지막 꺾는 점을 그 점 바로 아래나 위에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 "
+            f"종류마다 그 점으로 모을 때 쓴다. 모양이 좁아 두 종류의 삼각형이 나란히 들지 않으면 덧붙지 않는다).")
 
 
 def places_result(spec: Spec) -> str:
@@ -263,8 +267,7 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
              f"정한다. 부모 아래 {edge}에서 {head} 길이 {fmt_num(longest)}px보다 가까우면 입력 오류다.",
              f"    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다. 마지막 점이 모두 같아 {head}{ga} 한 자리에 "
              f"그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다."]
-    if len(types) > 1:
-        assert len(types) == 2, "향하는 점을 세 종류 이상으로 나누는 요령은 없다"
+    if len(types) == 2:  # 엔진도 두 종류일 때만 나눈다(boxdiagram._split_aims)
         (first, second), half = (t.label for t in types), fmt_num(AIM_SPLIT / 2)
         narrow = fmt_num(AIM_EDGE)
         to = josa(edge, "으로", "로")

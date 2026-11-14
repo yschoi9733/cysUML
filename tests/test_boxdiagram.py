@@ -758,6 +758,16 @@ def test_a_stem_of_bends_under_the_point_is_set_upright_without_a_zero_length_pi
         assert K.check(d).passed
 
 
+def test_three_trunk_kinds_are_not_split_and_the_description_says_nothing_of_points():
+    # 세 종류를 나누는 요령은 도구 설명에 없으니 엔진도 나누지 않고(이 PR 전처럼 가운데), 설명을 만들다 멈추지도 않는다
+    spec = B.Spec(SHAPES, {**RELATIONS, "extends": B.RelationType("확장", end=B.TRIANGLE_HEAD, trunk=True, role="자식")})
+    d = draw([el("class", "P", 200, 0, width=300), el("class", "A", 0, 200), el("class", "B", 200, 200),
+              el("class", "C", 400, 200)],
+             [rel("generalization", "A", "P"), rel("realization", "B", "P"), rel("extends", "C", "P")], spec)
+    assert d.layout.by_key["P"].aims == ()
+    assert "종류마다 향하는 점" not in guide.relation_fields(spec) and guide.trunk_aims(spec) == ""
+
+
 def test_lines_of_one_kind_within_the_rounding_share_one_triangle():
     # 두 자식이 결과 글의 반올림 안에서 조금씩 다른 x(230.04·229.97)를 주어도 같은 점으로 맞춰 삼각형 하나를 함께 쓴다
     d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "A2", -200, 200), el("class", "B", 300, 200)],

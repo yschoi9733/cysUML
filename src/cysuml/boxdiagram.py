@@ -44,7 +44,9 @@ ARROW_BEND = 20
 # 양쪽으로 반씩). 삼각형 폭 18보다 넉넉해 변에 나란히 놓인 두 삼각형 사이가 12px 남는다
 AIM_SPLIT = 30
 AIM_EDGE = AIM_SPLIT + 2 * TRIANGLE[1]  # 두 종류의 점을 정하는 가장 좁은 아래·위 변(가운데를 향하는 모양에서). 도구 설명이 알린다
-AIM_EPS = 0.1      # 마지막 꺾는 점이 종류마다 향하는 점 바로 아래·위인지 볼 때의 여유 — 결과 글이 그 점을 소수 한 자리로 적는다
+# 마지막 꺾는 점이 종류마다 향하는 점 바로 아래·위인지 볼 때의 여유 — 결과 글이 그 점을 소수 한 자리로 적고, 반 픽셀 가운데에서 셈한
+# 점을 정수로 옮겨 적기도 한다. 맞춘 세로 줄(_snap)이 이만큼 움직여도 눈에 띄지 않는다
+AIM_EPS = 0.5
 SIDE_EPS = 1e-6     # 선이 아래·위 변에 닿는지 볼 때의 여유
 MAX_LINE = 200_000  # 관계선 하나의 길이 상한 — 그림판 점선 칸 수 상한(MAX_DASHES × 무늬)보다 넉넉히 작게
 EDGE_SLACK = 0.5    # 선이 끝 요소 안을 지나는지 볼 때 테두리에서 이만큼 안쪽부터 "안"으로 친다(테두리를 따라 가는 선은 괜찮다)
@@ -1000,10 +1002,10 @@ def _flat(p: PlacedBox, x: float, side: int) -> bool:
 
 
 def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> tuple[PlacedBox, ...]:
-    """같은 부모로 공유 줄기를 받는 관계 종류가 둘 이상 오면 종류마다 향하는 점(PlacedBox.aims)을 정한다 — 요소가 향하게 한
-    점(anchor)을 가운데로 가로로 AIM_SPLIT씩 떨어뜨려, 도구가 받는 관계 차례(클래스도는 상속, 실체화)대로 왼쪽부터 늘어놓는다. 그
-    점을 향하는 선은 _aim이 고른다. 끝 삼각형들이 아래 변과 위 변의 곧은 부분에 나란히 들지 않는 좁은 모양에는 정하지 않는다 —
-    정한 점은 어느 쪽에서 오는 선이든 쓸 수 있다."""
+    """같은 부모로 공유 줄기를 받는 관계 종류가 둘 오면 종류마다 향하는 점(PlacedBox.aims)을 정한다 — 요소가 향하게 한 점(anchor)에서
+    가로로 AIM_SPLIT/2씩 양쪽에, 도구가 받는 관계 차례(클래스도는 상속, 실체화)대로 왼쪽부터 둔다. 그 점을 향하는 선은 _aim이
+    고른다. 끝 삼각형들이 아래 변과 위 변의 곧은 부분에 나란히 들지 않는 좁은 모양에는 정하지 않는다 — 정한 점은 어느 쪽에서 오는
+    선이든 쓸 수 있다. 세 종류 이상은 나누지 않는다(그 요령을 도구 설명에 쓰지 않았다 — guide._trunk)."""
     kinds: dict[str, set[str]] = {}
     for r in diagram.relations:
         if spec.relations[r.kind].trunk and r.source != r.target:
@@ -1012,10 +1014,10 @@ def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> 
     out = []
     for p in placed:
         found = sorted(kinds.get(p.key, ()), key=order.index)
-        if len(found) > 1:
+        if len(found) == 2:
             assert p.anchor is not None
             x, y = p.anchor
-            points = tuple((k, (x + (i - (len(found) - 1) / 2) * AIM_SPLIT, y)) for i, k in enumerate(found))
+            points = tuple((k, (x + d * AIM_SPLIT / 2, y)) for k, d in zip(found, (-1, 1)))
             if all(_flat(p, ax, side) for _, (ax, _) in points for side in (1, -1)):
                 p = replace(p, aims=points)
         out.append(p)
