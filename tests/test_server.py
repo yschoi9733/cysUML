@@ -728,27 +728,39 @@ def mkfifo(path):
     os.mkfifo(path)
 
 
-@pytest.mark.parametrize("make", [
-    lambda p: p.write_text('{"name": "my-app", "version": "1.0.0"}'),  # package.json 꼴
-    lambda p: p.write_text('{"tool": "draw_class_diagram"}'),  # file_name이 없다
-    lambda p: p.write_text('{"tool": 1, "file_name": "order"}'),
-    lambda p: p.write_text('[{"tool": "draw_class_diagram", "file_name": "order"}]'),
-    lambda p: p.write_text("메모"),
-    lambda p: p.write_bytes(b"\xff\xfe\x00"),
-    lambda p: p.write_text("[" * 100_000 + "]" * 100_000),  # 너무 깊어 파이썬이 읽지 못한다
-    mkfifo,
-], ids=["package", "no-file-name", "tool-not-text", "list", "text", "bytes", "deep", "fifo"])
-def test_a_json_file_not_saved_by_cysuml_is_kept_and_nothing_is_written(tmp_path, make):
+def huge(path):
+    with open(path, "wb") as f:
+        f.truncate(server.MAX_RECORD_BYTES + 1)
+
+
+NOT_AN_OBJECT = "tool·file_name이 든 JSON 객체가 아니다"
+NOT_JSON = "JSON으로 읽을 수 없다"
+
+
+@pytest.mark.parametrize("make, why", [
+    (lambda p: p.write_text('{"name": "my-app", "version": "1.0.0"}'), NOT_AN_OBJECT),  # package.json 꼴
+    (lambda p: p.write_text('{"tool": "draw_class_diagram"}'), NOT_AN_OBJECT),  # file_name이 없다
+    (lambda p: p.write_text('{"tool": 1, "file_name": "order"}'), NOT_AN_OBJECT),
+    (lambda p: p.write_text('[{"tool": "draw_class_diagram", "file_name": "order"}]'), NOT_AN_OBJECT),
+    (lambda p: p.write_text('{"tool": "draw_class_diagram", "file_name": "order",}'), NOT_JSON),  # 손보다 남긴 쉼표
+    (lambda p: p.write_text("메모"), NOT_JSON),
+    (lambda p: p.write_bytes(b"\xff\xfe\x00"), NOT_JSON),
+    (lambda p: p.write_text("[" * 100_000 + "]" * 100_000), NOT_JSON),  # 너무 깊어 파이썬이 읽지 못한다
+    (mkfifo, "보통 파일이 아니다"),
+    (huge, "16MiB보다 크다"),
+], ids=["package", "no-file-name", "tool-not-text", "list", "comma", "text", "bytes", "deep", "fifo", "huge"])
+def test_a_json_file_not_saved_by_cysuml_is_kept_and_nothing_is_written(tmp_path, make, why):
     kept = tmp_path / "order.json"
     make(kept)
-    before = None if kept.is_fifo() else kept.read_bytes()
+    before = None if kept.is_fifo() else kept.stat().st_size, kept.stat().st_mtime_ns
     r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
     assert r.is_error
-    assert text(r).startswith(f"그림을 저장하지 않았다 — out_dir {tmp_path}에 같은 이름의 order.json이 있는데 cysUML이 "
-                              "저장한 입력 파일(tool·file_name이 든 JSON 객체)이 아니라 덮어쓰지 않았다.")
+    assert text(r).startswith(f"그림을 저장하지 않았다 — out_dir {tmp_path}에 같은 이름의 order.json이 있는데 {why}. cysUML이 "
+                              "저장한 입력 파일로 보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일을 손봤다면 JSON 문법과 "
+                              "tool·file_name을 되살리고, 아니면 다른 file_name이나 out_dir을 준다.\n")
     assert "상자 자리(왼, 위, 폭×높이): Order(0, 0, 90×48)" in text(r)
     assert [p.name for p in tmp_path.iterdir()] == ["order.json"]
-    assert kept.is_fifo() or kept.read_bytes() == before
+    assert (None if kept.is_fifo() else kept.stat().st_size, kept.stat().st_mtime_ns) == before
 
 
 def test_an_input_file_saved_by_hand_with_tool_and_file_name_is_overwritten(tmp_path):
@@ -759,7 +771,7 @@ def test_an_input_file_saved_by_hand_with_tool_and_file_name_is_overwritten(tmp_
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root는 권한이 없어도 읽는다")
-def test_an_input_file_that_cannot_be_read_is_a_clear_error(tmp_path):
+def test_an_input_file_that_cannot_be_read_is_kept(tmp_path):
     kept = tmp_path / "order.json"
     kept.write_text("{}")
     kept.chmod(0)
@@ -768,32 +780,56 @@ def test_an_input_file_that_cannot_be_read_is_a_clear_error(tmp_path):
     finally:
         kept.chmod(0o644)
     assert r.is_error
-    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {tmp_path}에 order.json을(를) 쓸 수 없다(Permission denied)")
+    assert text(r).startswith(f"그림을 저장하지 않았다 — out_dir {tmp_path}에 같은 이름의 order.json이 있는데 읽을 수 "
+                              "없다(Permission denied). ")
     assert [p.name for p in tmp_path.iterdir()] == ["order.json"]
 
 
-def test_when_the_picture_cannot_be_put_in_place_the_error_says_the_input_was(tmp_path, monkeypatch):
+def failing_replace(monkeypatch, suffix):
     real = os.replace
 
     def replace(src, dst):
-        if str(dst).endswith(".png"):
+        if str(dst).endswith(suffix):
             raise PermissionError(1, "Operation not permitted")
         real(src, dst)
     monkeypatch.setattr(server.os, "replace", replace)
+
+
+def test_a_picture_that_cannot_be_put_in_place_leaves_both_files_as_they_were(tmp_path, monkeypatch):
+    draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
+    before = [(tmp_path / n).read_bytes() for n in ("order.png", "order.json")]
+    failing_replace(monkeypatch, ".png")  # Windows에서 뷰어가 PNG를 잡고 있을 때
+    r = draw(file_name="order", classes=ORDER, relations=PLACES, out_dir=str(tmp_path))
+    assert r.is_error
+    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {tmp_path}에 order.png을(를) 쓸 수 없다(Operation not "
+                              "permitted). ")
+    assert [(tmp_path / n).read_bytes() for n in ("order.png", "order.json")] == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["order.json", "order.png"]  # 임시 파일도 남지 않는다
+
+
+def test_when_only_the_picture_is_put_in_place_the_error_says_the_input_file_is_not_its_input(tmp_path, monkeypatch):
+    failing_replace(monkeypatch, ".json")
     r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
     assert r.is_error
-    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {tmp_path}에 order.json은(는) 썼지만 order.png을(를) 쓸 수 "
-                              "없다(Operation not permitted). ")
-    assert [p.name for p in tmp_path.iterdir()] == ["order.json"]  # 임시 파일도 남지 않는다
+    assert text(r).startswith(f"입력 파일을 저장하지 못했다 — out_dir {tmp_path}에 그림 order.png은(는) 새로 썼지만 order.json을(를) "
+                              "쓸 수 없다(Operation not permitted). 지금 order.json은 이 그림의 입력이 아니다(앞서 저장한 것이거나 "
+                              "없다). 막은 것을 풀고 같은 입력으로 다시 그린다.\n")
+    assert [p.name for p in tmp_path.iterdir()] == ["order.png"]  # 임시 파일도 남지 않는다
+
+
+def test_an_input_that_cannot_be_encoded_is_still_valid_json():
+    raw = server._record("draw_class_diagram", "a", {"classes": [{"name": "A\ud800"}]}, SCALE)
+    assert b"\\ud800" in raw
+    assert json.loads(raw)["classes"][0]["name"] == "A\ud800"
 
 
 def test_calls_saving_the_same_name_at_the_same_time_leave_a_matching_pair(tmp_path, monkeypatch):
-    # 첫 부름이 입력 파일을 바꿔 넣고 그림을 바꿔 넣기 전에 오래 멈춘다. 저장을 한 번에 하나씩 하지 않으면 그 사이 뒤 부름들이 두
-    # 파일을 다 바꿔 넣고, 마지막에 첫 부름의 그림이 뒤 부름의 입력 파일과 짝지어진다
+    # 첫 부름이 그림을 바꿔 넣고 입력 파일을 바꿔 넣기 전에 오래 멈춘다. 저장을 한 번에 하나씩 하지 않으면 그 사이 뒤 부름들이 두
+    # 파일을 다 바꿔 넣고, 마지막에 첫 부름의 입력 파일이 뒤 부름의 그림과 짝지어진다
     real, held = os.replace, []
 
     def replace(src, dst):
-        if str(dst).endswith(".png") and not held:
+        if str(dst).endswith(".json") and not held:
             held.append(dst)
             time.sleep(0.3)
         real(src, dst)

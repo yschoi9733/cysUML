@@ -38,6 +38,7 @@ from .report import Report, fmt_num, fmt_rect
 from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
 
 MAX_NAME_BYTES = 200  # 파일 이름(확장자 빼고) UTF-8 길이 상한. 파일 시스템 한도는 보통 255바이트
+MAX_RECORD_BYTES = 16 * 2**20  # 이보다 큰 같은 이름 .json은 읽지 않고 남의 파일로 본다. PNG로 그릴 수 있는 그림의 입력은 훨씬 작다
 NAME_FORBIDDEN = set('/\\:*?"<>|')
 
 CLASS_TIPS = f"""클래스도 배치 요령:
@@ -193,25 +194,33 @@ def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
     """입력 파일의 내용: 그린 도구, file_name, 그린 입력. 그대로 그 도구에 넣으면 같은 그림이 나온다(tool은 SDK가 모르는 인자로
     버린다). out_dir은 넣지 않는다 — 문서와 함께 커밋되는 파일에 절대 경로가 남지 않고, 폴더를 옮겨도 쓸 수 있게."""
     record = {"tool": tool, "file_name": name, **data, **({} if scale == SCALE else {"scale": scale})}
-    return (json.dumps(record, ensure_ascii=False, indent=2) + "\n").encode()
+    # 짝 없는 서로게이트는 parsing이 거르지만, 남더라도 \ud800 꼴 JSON 이스케이프로 쓴다
+    return (json.dumps(record, ensure_ascii=False, indent=2) + "\n").encode("utf-8", "backslashreplace")
 
 
-def _foreign(path: Path) -> bool:
-    """path에 cysUML이 저장한 입력 파일(tool·file_name이 든 JSON 객체)이 아닌 것이 있는지. 입력 파일 이름이 package.json 같은
-    남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 폴더는 쓸 때 오류로 알리므로 여기서 치지 않는다."""
+def _not_ours(path: Path) -> Optional[str]:
+    """path에 cysUML이 저장한 입력 파일(tool·file_name이 든 JSON 객체)로 보이지 않는 것이 있으면 그 까닭을 돌려준다. 입력 파일
+    이름이 package.json 같은 남의 파일과 겹칠 수 있어 그런 파일은 덮어쓰지 않는다. 없거나 폴더면 None이다(폴더는 쓸 때 오류로
+    알린다)."""
     try:
-        mode = os.stat(path).st_mode
+        st = os.stat(path)
     except FileNotFoundError:
-        return False
-    if stat.S_ISDIR(mode):
-        return False
-    if not stat.S_ISREG(mode):  # FIFO 등은 읽으면 멈출 수 있다
-        return True
+        return None
+    if stat.S_ISDIR(st.st_mode):
+        return None
+    if not stat.S_ISREG(st.st_mode):  # FIFO 등은 읽으면 멈출 수 있다
+        return "보통 파일이 아니다"
+    if st.st_size > MAX_RECORD_BYTES:
+        return f"{MAX_RECORD_BYTES // 2**20}MiB보다 크다"
     try:
         v = json.loads(path.read_bytes())
-    except (ValueError, RecursionError):  # JSON이 아니다(UnicodeDecodeError도 ValueError다)
-        return True
-    return not (isinstance(v, dict) and isinstance(v.get("tool"), str) and isinstance(v.get("file_name"), str))
+    except OSError as e:
+        return f"읽을 수 없다({e.strerror or e})"
+    except (ValueError, RecursionError):  # UnicodeDecodeError도 ValueError다
+        return "JSON으로 읽을 수 없다"
+    if not (isinstance(v, dict) and isinstance(v.get("tool"), str) and isinstance(v.get("file_name"), str)):
+        return "tool·file_name이 든 JSON 객체가 아니다"
+    return None
 
 
 def _stage(path: Path, data: bytes) -> Path:
@@ -229,8 +238,8 @@ def _stage(path: Path, data: bytes) -> Path:
 
 def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple[Optional[tuple[Path, Path]], Optional[str]]:
     """((저장한 그림 경로, 입력 파일 경로), 문제). 비었거나 공백뿐인 out_dir은 주지 않은 것으로 본다. 두 파일을 임시 파일에 다 쓴
-    뒤 바꿔 넣는다 — 쓰다 실패하거나 같은 이름으로 동시에 써도 깨진 파일이 남지 않는다. 입력 파일을 먼저 바꿔 넣어, 그림을 바꿔
-    넣다 실패해도 남은 입력 파일로 다시 그리면 둘이 맞는다."""
+    뒤 바꿔 넣는다 — 쓰다 실패하거나 같은 이름으로 동시에 써도 깨진 파일이 남지 않는다. 그림을 먼저 바꿔 넣는다: 흔한 실패(Windows
+    에서 뷰어가 PNG를 잡고 있다)에는 둘 다 그대로 두고, 그림만 바뀐 채 멈추면 입력 파일이 그 그림의 것이 아니라고 알린다."""
     given = (out_dir or "").strip()
     if given.startswith("~") and os.path.expanduser(given).startswith("~"):
         return None, f"out_dir {given!r}의 '~'를 홈 폴더로 풀 수 없다. 저장하지 않았다 — out_dir을 절대 경로로 준다."
@@ -239,16 +248,17 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
     except OSError as e:  # 서버 작업 폴더가 지워졌다
         return None, f"서버 작업 폴더를 알 수 없어 저장할 곳을 정하지 못했다({e.strerror or e}). out_dir에 절대 경로를 준다."
     image, kept = folder / f"{name}.png", folder / f"{name}.json"
-    files = ((kept, record), (image, png))
+    files = ((image, png), (kept, record))
     where = f"out_dir {folder}" if given else f"기본 폴더 {folder}(서버 작업 폴더 아래 {DEFAULT_DIR}/)"
-    target, staged, done = image, [], []
+    target, staged, done = image, [], []  # target: 지금 다루는 자리 — 실패하면 오류 글에 쓴다
     try:
         with _saving:
             folder.mkdir(parents=True, exist_ok=True)
             target = kept
-            if _foreign(kept):
-                return None, (f"그림을 저장하지 않았다 — {where}에 같은 이름의 {kept.name}이 있는데 cysUML이 저장한 입력 파일"
-                              "(tool·file_name이 든 JSON 객체)이 아니라 덮어쓰지 않았다. 다른 file_name이나 out_dir을 준다.")
+            if why := _not_ours(kept):
+                return None, (f"그림을 저장하지 않았다 — {where}에 같은 이름의 {kept.name}이 있는데 {why}. cysUML이 저장한 입력 "
+                              "파일로 보이지 않아 덮어쓰지 않았다. 앞서 cysUML이 저장한 파일을 손봤다면 JSON 문법과 tool·file_name을 "
+                              "되살리고, 아니면 다른 file_name이나 out_dir을 준다.")
             for target, _ in files:  # 한쪽만 바꿔 넣은 채 멈추지 않게 먼저 본다
                 if target.is_dir():
                     raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR))
@@ -259,8 +269,11 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
                 done.append(target)
     except (OSError, ValueError) as e:  # ValueError: 경로에 NUL 글자
         reason = e.strerror if isinstance(e, OSError) and e.strerror else e
-        wrote = f"{done[0].name}은(는) 썼지만 " if done else ""
-        return None, (f"그림을 저장하지 못했다 — {where}에 {wrote}{target.name}을(를) 쓸 수 없다({reason}). "
+        if done:
+            return None, (f"입력 파일을 저장하지 못했다 — {where}에 그림 {image.name}은(는) 새로 썼지만 {kept.name}을(를) 쓸 수 "
+                          f"없다({reason}). 지금 {kept.name}은 이 그림의 입력이 아니다(앞서 저장한 것이거나 없다). 막은 것을 풀고 "
+                          "같은 입력으로 다시 그린다.")
+        return None, (f"그림을 저장하지 못했다 — {where}에 {target.name}을(를) 쓸 수 없다({reason}). "
                       "쓸 수 있는 폴더를 out_dir에 절대 경로로 준다.")
     finally:
         for tmp, target in staged:
