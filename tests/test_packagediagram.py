@@ -308,9 +308,14 @@ def test_label_of_a_line_leaving_a_node_upward_keeps_off_the_band():
     assert not any(G.hits(p, q, G.grow(chosen, B.LABEL_CLEAR)) for p, q in band)
 
 
-def test_label_on_the_band_and_line_along_the_front_top_edge_fail():
-    # 선 가운데가 띠 높이(y=8)라 이름 자리 둘 다 띠에 걸린다
-    r = report([*SERVER, el("class", "T", 20, -84)], [rel("association", "Api", "T", name="uses")])
+def test_label_on_the_band_and_line_along_the_front_top_edge_fail(monkeypatch):
+    # 선 가운데가 띠 높이(y=8)라 이름 자리 둘 다 띠에 걸린다. 선을 따라 노드 위 빈 곳으로 옮겨 합격하고, 가운데에만 두면(옮길
+    # 자리가 없을 때) 띠에 걸려 불합격이다
+    scene = ([*SERVER, el("class", "T", 20, -84)], [rel("association", "Api", "T", name="uses")])
+    assert report(*scene).passed
+    with monkeypatch.context() as m:
+        m.setattr(B, "slide_spots", lambda points, lines: iter(()))
+        r = report(*scene)
     assert kinds(r) == ["text_on_box"] and r.failures[0].elements == ("Api->T", "서버")
     # 앞면 윗변(y=8) 3px 아래를 따라 왼쪽으로 가다 위로 나간다
     r = report([*SERVER, el("class", "T", -33, -200)],
@@ -442,13 +447,16 @@ def test_line_through_a_part_of_a_component_icon_fails_and_is_not_called_a_name_
     assert f.kind == "line_through_name" and "부품 네모(0, 6, 16×6)" in f.problem and "이름 칸" not in f.problem + f.hint
 
 
-def test_element_or_label_on_a_part_of_a_component_icon_fails():
+def test_element_or_label_on_a_part_of_a_component_icon_fails(monkeypatch):
     # A는 상자(x 8부터)에는 닿지 않고 튀어나온 부품 네모(x 0~16)에만 걸친다
     assert kinds(report([el("component_icon", "C", 0, 0), el("class", "A", -88, 0)])) == ["box_overlap"]
-    # 세로선 T→U(x −30)의 가운데가 위쪽 부품 네모(0, 6, 16×6) 높이에 온다. 이름 자리 둘 가운데 왼쪽은 상자 D가 막아 오른쪽(네모 위)에 놓인다
-    r = report([el("component_icon", "C", 0, 0), el("class", "T", -75, -246), el("class", "U", -75, 206),
-                el("class", "D", -135, -20)], [rel("association", "T", "U", name="uses")])
-    (f,) = r.failures
+    # 세로선 T→U(x −30)의 가운데가 위쪽 부품 네모(0, 6, 16×6) 높이에 온다. 이름 자리 둘 가운데 왼쪽은 상자 D가 막아 오른쪽(네모 위)에
+    # 놓인다. 선을 따라 옮기면 빈 곳이 있어 합격하고, 가운데에만 두면(옮길 자리가 없을 때) 네모에 겹쳐 불합격이다
+    scene = ([el("component_icon", "C", 0, 0), el("class", "T", -75, -246), el("class", "U", -75, 206),
+              el("class", "D", -135, -20)], [rel("association", "T", "U", name="uses")])
+    assert report(*scene).passed
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    (f,) = report(*scene).failures
     assert f.kind == "text_on_box" and f.elements == ("T->U", "C")
 
 

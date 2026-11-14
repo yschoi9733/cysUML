@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from cysuml import boxcheck as K
+from cysuml import boxdiagram as B
 from cysuml import componentdiagram as C
 from cysuml import geom as G
 from cysuml import server
@@ -141,13 +142,31 @@ def test_line_through_the_name_of_an_interface_fails():
     assert kinds(own) == ["line_through_name"] and own.failures[0].elements == ("C->Api", "Api")
 
 
-def test_element_or_label_on_the_name_of_an_interface_fails():
+def test_element_or_label_on_the_name_of_an_interface_fails(monkeypatch):
     assert kinds(report([el("lollipop", "Api", 0, 0), el("class", "A", 0, 34)])) == ["box_overlap"]
-    # 관계 이름 자리 둘(선 가운데 위아래) 가운데 아래는 상자 C가 막고, 위에는 Api 이름이 있다
-    r = report([el("lollipop", "Api", 172, -28), el("class", "A", 0, 0), el("class", "B", 300, 0),
-                el("class", "C", 150, 29)], [rel("association", "A", "B", name="has")])
-    (f,) = r.failures
+    # 관계 이름 자리 둘(선 가운데 위아래) 가운데 아래는 상자 C가 막고, 위에는 Api 이름이 있다. 선을 따라 옮기면 빈 곳이 있어
+    # 합격하고, 가운데에만 두면(옮길 자리가 없을 때) Api 이름에 겹쳐 불합격이다
+    scene = ([el("lollipop", "Api", 172, -28), el("class", "A", 0, 0), el("class", "B", 300, 0), el("class", "C", 150, 29)],
+             [rel("association", "A", "B", name="has")])
+    assert report(*scene).passed
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    (f,) = report(*scene).failures
     assert f.kind == "text_on_box" and f.elements == ("A->B", "Api")
+
+
+def test_label_from_outside_a_package_moves_off_its_border_at_the_basic_spacing():
+    # 패키지 안 컴포넌트로 «manifest»를 긋는 아티팩트를 패키지 오른쪽에 기본 간격(80px)만큼 띄워 두면, 선 가운데의 이름 자리는
+    # 패키지 테두리에 걸린다. 도구가 선을 따라 빈 자리로 옮겨 합격한다
+    elements = [el("package", "orders", 0, 0), el("component", "OrderService", 20, 52, **{"in": "orders"})]
+    d = draw(elements)
+    pkg, svc = placed(d, "orders").rect, placed(d, "OrderService").rect
+    jar = el("artifact", "order.jar", pkg[2] + 80, svc[1] + 10)
+    d = draw([*elements, jar], [rel("dependency", "order.jar", "OrderService", stereotype="manifest")])
+    assert K.check(d).passed, K.check(d).summary()
+    (r,) = d.layout.relations
+    (label,) = r.labels
+    assert (label.x, label.y) not in B.name_spots(r.points, label.lines)
+    assert "넉넉히 떼어 놓는다" not in C.TIPS
 
 
 @pytest.mark.parametrize("gap, passed", [(20, False), (30, False), (40, True), (90, True)])

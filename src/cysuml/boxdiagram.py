@@ -17,7 +17,7 @@ import math
 import numbers
 from dataclasses import dataclass, field, replace
 from functools import cached_property
-from typing import Any, Callable, Mapping, Optional, Union
+from typing import Any, Callable, Iterator, Mapping, Optional, Union
 
 from . import text as T
 from .canvas import BG_MARGIN, SCALE, Canvas, Line, Point, Polygon, Text
@@ -49,6 +49,7 @@ LABEL_LINE = 15     # 여러 줄 선 글자·모양 밖 이름의 줄 간격(줄
 MULT_ANGLES = (math.pi / 8, math.pi / 6, math.pi / 4, math.pi / 3)
 MULT_DISTANCES = (20, 25, 30, 35, 40, 50)
 MULT_ENOUGH = 20    # 요소와 이만큼 떨어지면 더 멀리 두지 않고 선 끝에 가까운 자리를 고른다
+NAME_STEP = 5       # 이름 글자의 가운데 후보가 다 걸릴 때 선을 따라 옮겨 보는 간격
 
 NEST_PAD = 20       # 바깥 요소를 늘릴 때 안의 요소 둘레에 두는 여백. 검사도 안의 요소가 칸 테두리에서 이만큼 떨어졌는지 본다
 NAME_SEP = 4        # 모양과 모양 밖 이름 사이
@@ -741,21 +742,55 @@ def line_ys(y: float, n: int) -> list[float]:
     return [y + (i - (n - 1) / 2) * LABEL_LINE for i in range(n)]
 
 
-def name_spots(points: tuple[Point, ...], lines: Union[str, tuple[str, ...]]) -> list[Point]:
-    """이름 글자 가운데의 후보: 가장 긴 구간(길이가 같으면 앞 구간)의 가운데에서, 진행 방향의 왼쪽(오른쪽으로 가는
-    가로선이면 위)과 오른쪽으로 글자 상자가 선과 NAME_GAP만큼 떨어지는 자리. 꺾는 점에서 먼 곳이라 다른 구간에 덜 걸린다."""
-    if isinstance(lines, str):
-        lines = (lines,)
-    k = max(range(len(points) - 1), key=lambda j: (math.dist(points[j], points[j + 1]), -j))
-    (x1, y1), (x2, y2) = points[k], points[k + 1]
-    ln = math.dist(points[k], points[k + 1])
+def _segments_by_length(points: tuple[Point, ...]) -> list[int]:
+    """구간 번호를 긴 것부터(길이가 같으면 앞 구간부터)."""
+    return sorted(range(len(points) - 1), key=lambda j: (-math.dist(points[j], points[j + 1]), j))
+
+
+def _beside(p: Point, q: Point, box: T.Box, along: float = 0.0) -> list[Point]:
+    """구간 pq의 가운데에서 p→q 쪽으로 along만큼 간 점에서, 진행 방향의 왼쪽(오른쪽으로 가는 가로선이면 위)과 오른쪽으로
+    글자 상자(box — 가운데가 원점)가 선과 NAME_GAP만큼 떨어지는 두 자리."""
+    (x1, y1), (x2, y2) = p, q
+    ln = math.dist(p, q)
     ux, uy = (x2 - x1) / ln, (y2 - y1) / ln
-    b = lines_box(0, 0, lines)
+    mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+    if along:
+        mx, my = mx + ux * along, my + uy * along
     out = []
     for nx, ny in ((uy, -ux), (-uy, ux)):
-        reach = max(-(cx * nx + cy * ny) for cx in (b[0], b[2]) for cy in (b[1], b[3]))  # 선을 마주 보는 쪽 끝까지
-        out.append(((x1 + x2) / 2 + nx * (reach + NAME_GAP), (y1 + y2) / 2 + ny * (reach + NAME_GAP)))
+        reach = max(-(cx * nx + cy * ny) for cx in (box[0], box[2]) for cy in (box[1], box[3]))  # 선을 마주 보는 쪽 끝까지
+        out.append((mx + nx * (reach + NAME_GAP), my + ny * (reach + NAME_GAP)))
     return out
+
+
+def name_spots(points: tuple[Point, ...], lines: Union[str, tuple[str, ...]]) -> list[Point]:
+    """이름 글자 가운데의 후보: 가장 긴 구간(길이가 같으면 앞 구간)의 가운데에서 선 양옆의 두 자리(_beside). 꺾는 점에서 먼
+    곳이라 다른 구간에 덜 걸린다."""
+    if isinstance(lines, str):
+        lines = (lines,)
+    k = _segments_by_length(points)[0]
+    return _beside(points[k], points[k + 1], lines_box(0, 0, lines))
+
+
+def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[list[Point]]:
+    """가운데 후보(name_spots) 둘이 다 피할 것에 걸릴 때 더 볼 이름 글자 자리를, 구간마다 가운데에서 가까운 것부터 묶음으로
+    낸다. 가장 긴 구간을 따라 가운데에서 양쪽으로 NAME_STEP씩 옮긴 자리마다 선 양옆 둘(진행 방향 앞쪽·뒤쪽 차례로 네 자리가 한
+    묶음), 그다음 구간도 길이 차례로 그 가운데(두 자리)부터 같게 낸다. 글자는 제 구간 옆을 벗어나지 않는다 — 글자 상자를
+    구간 방향으로 비춘 폭이 구간 안에 드는 자리만 낸다."""
+    box = lines_box(0, 0, lines)
+    for n, k in enumerate(_segments_by_length(points)):
+        p, q = points[k], points[k + 1]
+        ln = math.dist(p, q)
+        if ln == 0:
+            continue
+        ux, uy = (q[0] - p[0]) / ln, (q[1] - p[1]) / ln
+        room = ln / 2 - max(abs(cx * ux + cy * uy) for cx in (box[0], box[2]) for cy in (box[1], box[3]))
+        if n and room >= 0:
+            yield _beside(p, q, box)
+        i = 1
+        while i * NAME_STEP <= room:
+            yield _beside(p, q, box, i * NAME_STEP) + _beside(p, q, box, -i * NAME_STEP)
+            i += 1
 
 
 def multiplicity_spots(end: Point, toward: Point) -> list[Point]:
@@ -792,13 +827,32 @@ def obstacles(boxes: tuple[PlacedBox, ...], holders: frozenset[str] = frozenset(
 class _Spots:
     """선 글자의 자리를 고른다. 글자의 흰 바탕(글자 상자를 LABEL_CLEAR만큼 넓힌 것)이 피할 것(Obstacles)에 겹치지 않는 자리,
     그 가운데 관계선과 선 끝 모양(화살촉·삼각형·마름모)과 앞서 놓은 선 글자에 닿지 않는 자리, 그 가운데 피할 것에서 먼
-    (MULT_ENOUGH까지) 자리가 낫고, 같으면 후보 목록의 앞쪽이다."""
+    (MULT_ENOUGH까지) 자리가 낫고, 같으면 후보 목록의 앞쪽이다. 놓은 글자마다 빈 자리(앞의 두 조건을 다 채운 자리)였는지도
+    적어 둔다(misses)."""
 
     def __init__(self, segments: list[Segment]):
         self.segments = [(p, q, span((p, q))) for p, q in segments]
         self.labels: list[T.Box] = []
+        self.clean: list[bool] = []
 
-    def pick(self, lines: tuple[str, ...], candidates: list[Point], avoid: Obstacles) -> Point:
+    def _keep(self, best: tuple[tuple[bool, bool, float], Point, T.Box]) -> Point:
+        (room, clear, _), p, box = best
+        self.labels.append(box)
+        self.clean.append(room and clear)
+        return p
+
+    def state(self) -> tuple[tuple[T.Box, ...], tuple[bool, ...]]:
+        return tuple(self.labels), tuple(self.clean)
+
+    def restore(self, state: tuple[tuple[T.Box, ...], tuple[bool, ...]]) -> None:
+        self.labels, self.clean = list(state[0]), list(state[1])
+
+    def misses(self, start: int) -> int:
+        """start번째부터 놓은 글자 가운데 빈 자리를 못 찾은 것의 수."""
+        return self.clean[start:].count(False)
+
+    def _best(self, lines: tuple[str, ...], candidates: list[Point],
+              avoid: Obstacles) -> tuple[tuple[bool, bool, float], Point, T.Box]:
         boxes = [lines_box(x, y, lines) for x, y in candidates]
         wides = [grow(b, LABEL_CLEAR) for b in boxes]
         region = span(pt for w in wides for pt in (w[:2], w[2:]))
@@ -817,8 +871,22 @@ class _Spots:
             if best is None or score > best[0]:
                 best = score, p, box
         assert best is not None
-        self.labels.append(best[2])
-        return best[1]
+        return best
+
+    def pick(self, lines: tuple[str, ...], candidates: list[Point], avoid: Obstacles) -> Point:
+        return self._keep(self._best(lines, candidates, avoid))
+
+    def pick_name(self, lines: tuple[str, ...], points: tuple[Point, ...], avoid: Obstacles,
+                  slide: bool = True) -> tuple[Point, bool]:
+        """이름 글자 자리와, 선을 따라 옮겼는지. 가운데 후보 둘이 다 피할 것에 걸리면(slide일 때) 선을 따라 더 본 자리(slide_spots)를
+        묶음 차례로 보아 처음 빈 자리가 나온 묶음의 가장 나은 자리로 옮기고, 빈 자리가 없으면 가운데 후보에 둔다."""
+        best = self._best(lines, name_spots(points, lines), avoid)
+        if slide and not best[0][0]:
+            for ring in slide_spots(points, lines):
+                found = self._best(lines, ring, avoid)
+                if found[0][0] and found[0][1]:
+                    return self._keep(found), True
+        return self._keep(best), False
 
 
 def _end_shape(r: Relation, t: RelationType, key: str) -> Optional[EndShape]:
@@ -1000,16 +1068,35 @@ def layout(diagram: Diagram) -> Layout:
         if held not in avoids:
             avoids[held] = obstacles(placed, held)
         avoid = avoids[held]
-        labels = []
-        if r.label_lines:
-            lines = r.label_lines
-            labels.append(Label("name", lines, *spots.pick(lines, name_spots(points, lines), avoid)))
-        for role, text, tip, toward in (("from_multiplicity", r.source_multiplicity, points[0], points[1]),
-                                        ("to_multiplicity", r.target_multiplicity, points[-1], points[-2])):
-            if text:
-                labels.append(Label(role, (text,), *spots.pick((text,), multiplicity_spots(tip, toward), avoid)))
+        before = spots.state()
+        labels, moved = _relation_labels(spots, r, points, avoid, slide=True)
+        if moved and len(labels) > 1:
+            # 선을 따라 옮긴 이름이 같은 관계의 다중도 자리를 차지했을 수 있다. 이름을 가운데에 둔 것과 견주어, 빈 자리를 못 찾은
+            # 글자가 더 적을 때만 옮긴 쪽을 쓴다
+            slid, after = labels, spots.state()
+            spots.restore(before)
+            labels, _ = _relation_labels(spots, r, points, avoid, slide=False)
+            if spots.misses(len(before[0])) > after[1][len(before[0]):].count(False):
+                labels = slid
+                spots.restore(after)
         out.append(replace(p, labels=tuple(labels)))
     return Layout(spec, placed, tuple(out), lines_of)
+
+
+def _relation_labels(spots: _Spots, r: Relation, points: tuple[Point, ...], avoid: Obstacles,
+                     slide: bool) -> tuple[list[Label], bool]:
+    """관계 하나의 선 글자를 이름 → from 다중도 → to 다중도 차례로 놓는다. 이름을 선을 따라 옮겼는지도 돌려준다."""
+    labels = []
+    moved = False
+    if r.label_lines:
+        lines = r.label_lines
+        (x, y), moved = spots.pick_name(lines, points, avoid, slide)
+        labels.append(Label("name", lines, x, y))
+    for role, text, tip, toward in (("from_multiplicity", r.source_multiplicity, points[0], points[1]),
+                                    ("to_multiplicity", r.target_multiplicity, points[-1], points[-2])):
+        if text:
+            labels.append(Label(role, (text,), *spots.pick((text,), multiplicity_spots(tip, toward), avoid)))
+    return labels, moved
 
 
 # ---------------------------------------------------------------- 그리기
