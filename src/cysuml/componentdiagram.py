@@ -2,9 +2,9 @@
 
 요소 종류는 shapes.SHAPES(클래스·패키지·컴포넌트·아티팩트·노드와 아이콘 표기 둘)에 제공 인터페이스 원(lollipop)을 더한 것이고, 관계는 클래스도 관계 여섯 가지
 (classdiagram.RELATIONS)에 소켓(requires — 쓰는 쪽에서 원으로 가는 실선이 원을 틈을 두고 감싸는 반원에서 끝난다)을 더한 것이고,
-표기 규칙은 클래스도 관계의 규칙(classdiagram.RULES)을 쓴다. 연관의 기본 방향은 '없음'이다 — 컴포넌트에서 제공 인터페이스 원으로
-가는 막대가 화살촉 없는 실선이라서. 읽기·자리 잡기·그리기는 공용 엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 소켓의 끝
-요소 종류만 여기서 읽은 뒤에 본다. 도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
+표기 규칙은 클래스도 관계 규칙(classdiagram.ClassRules)을 이어받아 소켓 잇기 규칙을 더한 것이다. 연관의 기본 방향은
+'없음'이다 — 컴포넌트에서 제공 인터페이스 원으로 가는 막대가 화살촉 없는 실선이라서. 읽기·자리 잡기·그리기는 공용
+엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
 """
 from __future__ import annotations
 
@@ -16,10 +16,11 @@ from .boxcheck import BOX_CLEARANCE
 from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Element, EndShape, PlacedBox, RelationType, Shape, Spec, floored
 from .canvas import SCALE, Canvas, Line, Point
 from .classdiagram import RELATIONS as CLASS_RELATIONS
-from .classdiagram import RULES
+from .classdiagram import ClassRules
 from .geom import Border, EllipseBorder
 from .guide import PLACED_ELEMENTS, box_tool, relation_fields, spacing_tips
-from .parsing import InputError, at, show
+from .parsing import Reader, at, show
+from .report import Notice
 from .shapes import SHAPES
 from .text import Box
 
@@ -76,37 +77,37 @@ SOCKET_HEAD = EndShape("소켓 반원", SOCKET_GAP, _socket, gap=SOCKET_GAP)
 REQUIRES = "requires"
 RELATIONS = {**CLASS_RELATIONS, REQUIRES: RelationType("소켓", end=SOCKET_HEAD, role="인터페이스를 쓰는 쪽")}
 
+
+class ComponentRules(ClassRules):
+    """클래스도 관계 규칙에 소켓 잇기 규칙을 더한 것 — 소켓은 인터페이스를 쓰는 쪽에서 제공 인터페이스 원으로 긋는다. 끝 하나가
+    읽히지 않으면 그 끝의 검사만 건너뛴다 — from 검사와 to 검사는 서로 다른 끝만 본다. 자기 자신으로 가는 소켓도 본다."""
+
+    def check(self, r: Reader, spec: Spec, elements: list[tuple[str, Element]],
+              relations: list[tuple[str, B.Relation]]) -> list[Notice]:
+        notices = super().check(r, spec, elements, relations)
+        kinds = {e.key: e.kind for _, e in elements}
+        for path, rel in relations:
+            if rel.kind != REQUIRES:
+                continue
+            if kinds.get(rel.source) == "lollipop":
+                r.fail(at(path, "from"), f"소켓({REQUIRES})의 from은 인터페이스를 쓰는 쪽이다 — from 요소 {show(rel.source)}의 "
+                                         "종류가 'lollipop'이다")
+            if (t := kinds.get(rel.target)) is not None and t != "lollipop":
+                r.fail(at(path, "to"), f"소켓({REQUIRES})은 제공 인터페이스 원(kind \"lollipop\")으로 긋는다 — to 요소 "
+                                       f"{show(rel.target)}의 종류가 {t!r}다")
+        return notices
+
+
 SPEC = Spec({**SHAPES, "lollipop": LOLLIPOP}, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none",
-            rules=RULES)
-
-
-def _socket_problems(d: Diagram) -> list[str]:
-    """소켓은 인터페이스를 쓰는 쪽에서 제공 인터페이스 원으로 긋는다. 공용 엔진의 관계 읽기는 끝 요소 종류를 보지 않아 여기서
-    본다 — 엔진이 문제 없이 읽었으면 relations 하나가 관계 하나라 차례가 입력 자리와 같다."""
-    kind = {e.key: e.kind for e in d.boxes}
-    out = []
-    for i, r in enumerate(d.relations):
-        if r.kind != REQUIRES:
-            continue
-        path = at("relations", i)
-        if kind[r.source] == "lollipop":
-            out.append(f"{at(path, 'from')}: 소켓({REQUIRES})의 from은 인터페이스를 쓰는 쪽이다 — from 요소 {show(r.source)}의 종류가 "
-                       "'lollipop'이다")
-        if kind[r.target] != "lollipop":
-            out.append(f"{at(path, 'to')}: 소켓({REQUIRES})은 제공 인터페이스 원(kind \"lollipop\")으로 긋는다 — to 요소 "
-                       f"{show(r.target)}의 종류가 {kind[r.target]!r}다")
-    return out
+            rules=ComponentRules())
 
 
 def parse(data: Any) -> Diagram:
-    d = B.parse(SPEC, data)
-    if problems := _socket_problems(d):
-        raise InputError(problems)
-    return d
+    return B.parse(SPEC, data)
 
 
 def render(data: Any, scale: float = SCALE) -> Drawing:
-    return B.draw(parse(data), scale)
+    return B.render(SPEC, data, scale)
 
 
 LOLLIPOP_INPUT = f"""  - 이 도구는 kind "lollipop"(제공 인터페이스 원)도 받는다. 지름 {BALL}px 원과 그 밖에 쓰는 이름이다. \

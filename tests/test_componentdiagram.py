@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from cysuml import boxcheck as K
+from cysuml import boxdiagram as B
 from cysuml import componentdiagram as C
 from cysuml import geom as G
 from cysuml import server
@@ -393,6 +394,45 @@ def test_socket_input_errors():
     with pytest.raises(InputError) as e:
         draw(users, [rel("requires", "U", "Api", to_multiplicity="1", navigable="to")])
     assert [p.split(":")[0] for p in e.value.problems] == ["relations[0].to_multiplicity", "relations[0].navigable"]
+
+
+SOCKET_ENDS = [el("component", "Shop", 0, 0), el("lollipop", "Pay", 300, 0), el("class", "A", 0, 200),
+               el("interface", "I", 300, 200)]
+TO_CLASS = rel("requires", "Shop", "A")  # 소켓이 원이 아닌 클래스로 간다
+
+
+def socket_ends(relations, broken=None):
+    """소켓 끝 확인 입력 — broken 이름의 요소에는 모르는 필드를 더해 그 요소가 읽히지 않게 한다."""
+    return {"elements": [{**e, "foo": 1} if e["name"] == broken else e for e in SOCKET_ENDS], "relations": relations}
+
+
+def error_paths(read, data):
+    with pytest.raises(InputError) as e:
+        read(data)
+    return [p.split(":")[0] for p in e.value.problems]
+
+
+@pytest.mark.parametrize("relations, broken, paths", [
+    ([TO_CLASS], None, ["relations[0].to"]),
+    ([TO_CLASS, rel("generalization", "A", "I")], None, ["relations[1]", "relations[0].to"]),
+    ([rel("dependency", "A", "I", foo=1), TO_CLASS], None, ["relations[0].foo", "relations[1].to"]),
+    ([TO_CLASS], "I", ["elements[3].foo", "relations[0].to"]),
+    ([TO_CLASS], "Shop", ["elements[0].foo", "relations[0].to"]),  # to인 A는 읽혀 to 검사가 돈다
+    ([rel("requires", "Pay", "A")], "A", ["elements[2].foo", "relations[0].from"]),  # from인 Pay는 읽혀 from 검사가 돈다
+    ([TO_CLASS], "A", ["elements[2].foo"]),  # 읽히지 않은 끝의 검사만 건너뛴다
+    ([rel("requires", "Shop", "Shop", via=[[-50, -50], [-50, 50]])], None, ["relations[0].to"]),
+    ([rel("requires", "Shop", "Shop", via=[[-50, -50]])], None, ["relations[0]"]),  # 엔진이 넘기지 않는 소켓
+])
+def test_wrong_socket_ends_come_with_the_other_input_errors(relations, broken, paths):
+    assert error_paths(C.parse, socket_ends(relations, broken)) == paths
+
+
+def test_shared_engine_reads_check_socket_ends_too():
+    assert error_paths(lambda data: B.parse(C.SPEC, data), socket_ends([TO_CLASS])) == ["relations[0].to"]
+
+
+def test_socket_to_a_ball_reads():
+    assert [r.kind for r in C.parse(socket_ends([rel("requires", "Shop", "Pay")])).relations] == ["requires"]
 
 
 # ---------------------------------------------------------------- 아이콘 표기와 소켓을 함께 쓴 그림
