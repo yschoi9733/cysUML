@@ -440,7 +440,7 @@ uvx cysuml
 
 ### 개발
 
-`uv sync`로 준비하고 `uv run pytest`로 시험한다. 작업 중인 코드를 Claude Code에서 써 보려면 다른 이름으로 등록한다:
+`uv sync`로 준비하고 `uv run pytest`로 테스트한다. 작업 중인 코드를 Claude Code에서 써 보려면 다른 이름으로 등록한다:
 `claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml`. 아직 배포하지 않은 `main`의 최신 코드를 써 보려면
 `uvx --from git+https://github.com/yschoi9733/cysUML cysuml`로 띄운다.
 
