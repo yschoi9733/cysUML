@@ -40,6 +40,9 @@ ARROW = 10          # 열린 화살촉 길이(그림판 기본값)
 # 10·cos 28° + (2 + 10·sin 28°·sin β) / cos β보다 길어야 한다(직각 10.83, β 30° 13.85, 50° 17.54 — 실측과 맞음). 꺾는 점을 요소
 # 가운데 줄에서 비켜 두면 끝 구간이 기울어 β가 생기므로 β 50°까지 덮게 잡는다
 ARROW_BEND = 20
+# 같은 부모로 공유 줄기를 받는 관계 종류가 둘 이상 오면 종류마다 선이 향하는 점을 이만큼 떨어뜨려 가로로 늘어놓는다(가운데에서
+# 양쪽으로 반씩). 삼각형 폭 18보다 넉넉해 아래 변에 나란히 놓인 두 삼각형 사이가 12px 남는다
+AIM_SPLIT = 30
 MAX_LINE = 200_000  # 관계선 하나의 길이 상한 — 그림판 점선 칸 수 상한(MAX_DASHES × 무늬)보다 넉넉히 작게
 EDGE_SLACK = 0.5    # 선이 끝 요소 안을 지나는지 볼 때 테두리에서 이만큼 안쪽부터 "안"으로 친다(테두리를 따라 가는 선은 괜찮다)
 
@@ -325,7 +328,8 @@ class Diagram:
 class PlacedBox:
     """자리를 잡은 요소. rect는 자리(모양 밖 이름까지 덮는다), shape_rect는 모양 자리, inner는 안의 요소를 둘 칸(안에 요소를 둘 수
     없는 모양은 None), zones는 이름 칸, frame은 안에 요소를 두는 모양의 테두리 선, parts는 겹침을 볼 때 그 요소를 이루는 테두리들
-    (Shape.parts), anchor는 선이 향하는 점(Shape.anchor — 없으면 테두리 가운데)이다."""
+    (Shape.parts), anchor는 선이 향하는 점(Shape.anchor — 없으면 테두리 가운데)이다. aims는 같은 부모로 공유 줄기를 받는 관계
+    종류가 둘 이상 올 때 종류(관계 kind)마다 그 종류의 선이 향하는 점이다(_split_aims) — 비어 있으면 모든 선이 anchor를 향한다."""
 
     box: Element
     shape: Shape = field(compare=False, repr=False)
@@ -338,6 +342,7 @@ class PlacedBox:
     name_at: tuple[tuple[float, float], ...] = ()  # 모양 밖 이름 줄마다 가운데
     parts: tuple[Border, ...] = ()
     anchor: Optional[Point] = None
+    aims: tuple[tuple[str, Point], ...] = ()
 
     def __post_init__(self):
         if not self.parts:
@@ -348,6 +353,11 @@ class PlacedBox:
     @property
     def key(self) -> str:
         return self.box.key
+
+    def aim(self, kind: str) -> Point:
+        """이 요소로 오는 kind 관계의 선이 향하는 점."""
+        assert self.anchor is not None
+        return next((p for k, p in self.aims if k == kind), self.anchor)
 
     @property
     def width(self) -> float:
@@ -822,18 +832,18 @@ class _Spots:
 
 
 def _end_shape(r: Relation, t: RelationType, key: str) -> Optional[EndShape]:
-    """선 처음(from)이나 끝(to)에 그리는 모양. 고정 모양이 있는 종류는 그 쪽 방향(navigable)을 읽기에서 받지 않으므로 둘 중 하나다
-    (_draw_relation과 같은 모양)."""
+    """선 처음(from)이나 끝(to)에 그리는 모양 — 입력 확인(_route)과 그리기(_draw_relation)가 함께 쓴다. 고정 모양이 있는 종류는 그
+    쪽 방향(navigable)을 읽기에서 받지 않으므로 둘 중 하나다."""
     fixed = t.start if key == "from" else t.end
     return fixed or (ARROW_HEAD if t.navigable and r.navigable in (key, "both") else None)
 
 
 def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType,
            w: Words) -> tuple[Optional[tuple[Point, ...]], list[str]]:
-    """관계선의 점들(선 끝은 요소가 향하게 한 점(anchor — 보통 테두리 가운데)에서 첫·마지막 꺾는 점으로, 꺾는 점이 없으면 다른
-    요소의 그 점으로 가는 선이 테두리와 만나는 곳)과, 그렇게 그을 수 없으면 그 까닭들."""
-    ca, cb = a.anchor, b.anchor
-    assert ca is not None and cb is not None
+    """관계선의 점들(선 끝은 요소가 향하게 한 점(anchor — 보통 테두리 가운데. 도착 요소는 그 관계 종류가 향하는 점, PlacedBox.aim)에서
+    첫·마지막 꺾는 점으로, 꺾는 점이 없으면 다른 요소의 그 점으로 가는 선이 테두리와 만나는 곳)과, 그렇게 그을 수 없으면 그 까닭들."""
+    ca, cb = a.anchor, b.aim(r.kind)
+    assert ca is not None
     if r.via:
         start, end = a.border.exit(ca, r.via[0]), b.border.exit(cb, r.via[-1])
         problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} {w.noun} {_show(p_.key)}({fmt_rect(p_.border.bounds)}) 안이나 "
@@ -962,13 +972,37 @@ def _place(spec: Spec, diagram: Diagram, lines_of: Mapping[str, tuple[str, ...]]
     return tuple(done[e.key] for e in diagram.boxes)
 
 
+def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> tuple[PlacedBox, ...]:
+    """같은 부모로 공유 줄기를 받는 관계 종류가 둘 이상 오면 종류마다 선이 향하는 점(PlacedBox.aims)을 나눈다. 요소가 향하게 한
+    점(anchor)을 가운데로 가로로 AIM_SPLIT씩 떨어뜨려 늘어놓고, 도구가 받는 관계 차례(클래스도는 상속, 실체화)대로 왼쪽부터 둔다 —
+    부모 아래 변으로 곧게 올라오는 줄기들이 종류마다 제 삼각형을 나란히 그린다. 끝 삼각형들이 모양 폭 안에 들지 않는 좁은 모양은
+    나누지 않는다."""
+    kinds: dict[str, set[str]] = {}
+    for r in diagram.relations:
+        if spec.relations[r.kind].trunk and r.source != r.target:
+            kinds.setdefault(r.target, set()).add(r.kind)
+    order = list(spec.relations)
+    out = []
+    for p in placed:
+        found = sorted(kinds.get(p.key, ()), key=order.index)
+        if len(found) > 1:
+            assert p.anchor is not None
+            x, y = p.anchor
+            xs = [x + (i - (len(found) - 1) / 2) * AIM_SPLIT for i in range(len(found))]
+            left, _, right, _ = p.border.bounds
+            if left <= xs[0] - TRIANGLE[1] and xs[-1] + TRIANGLE[1] <= right:
+                p = replace(p, aims=tuple((k, (ax, y)) for k, ax in zip(found, xs)))
+        out.append(p)
+    return tuple(out)
+
+
 def layout(diagram: Diagram) -> Layout:
     """요소 크기, 선의 점들, 선 글자 자리를 잡는다. 선을 그을 수 없는 배치면(꺾는 점이 요소 안이다, 두 요소가 겹치거나
     맞닿았다, 끝 구간이 끝 모양보다 짧다 등) 모두 모아 InputError. 선 글자는 관계 순서대로 이름 → from 다중도 → to 다중도
     차례로 놓고, 앞서 놓은 글자를 뒤 글자가 피한다."""
     spec = diagram.spec
     lines_of = lineage({e.key: e.parent for e in diagram.boxes})  # 품은 사이는 여기서 한 번 재서 검사(Layout)까지 넘긴다
-    placed = _place(spec, diagram, lines_of)
+    placed = _split_aims(spec, diagram, _place(spec, diagram, lines_of))
     by_key = {p.key: p for p in placed}
     problems: list[str] = []
     routes = []
@@ -1017,20 +1051,14 @@ def layout(diagram: Diagram) -> Layout:
 
 def _draw_relation(c: Canvas, r: PlacedRelation, t: RelationType, by_key: Mapping[str, PlacedBox]
                    ) -> tuple[Line, tuple[Union[Line, Polygon], ...], tuple[HeadMark, ...]]:
-    """선과 선 끝 모양을 그리고 그 기록과 끝 모양마다의 이름·끝 점을 돌려준다. 끝 모양은 끝 요소가 향하게 한 점(anchor)도 받는다."""
-    pts, o = r.points, r.owner
-    first, last = by_key[r.relation.source].anchor, by_key[r.relation.target].anchor
-    assert first is not None and last is not None
+    """선과 선 끝 모양(from 쪽, to 쪽 차례)을 그리고 그 기록과 끝 모양마다의 이름·끝 점을 돌려준다. 끝 모양은 끝 요소가 향하게 한
+    점(_route가 선 끝을 낸 점)도 받는다."""
+    pts, o, rel = r.points, r.owner, r.relation
+    first, last = by_key[rel.source].anchor, by_key[rel.target].aim(rel.kind)
+    assert first is not None
     line = c.line(pts, dash=t.dash, owner=o)
-    ends: list[tuple[EndShape, Point, Point, Point]] = []  # (모양, 끝 점, 그 앞 점, 끝 요소의 점)
-    if t.start is not None:
-        ends.append((t.start, pts[0], pts[1], first))
-    if t.end is not None:
-        ends.append((t.end, pts[-1], pts[-2], last))
-    if t.navigable and r.relation.navigable in ("to", "both"):
-        ends.append((ARROW_HEAD, pts[-1], pts[-2], last))
-    if t.navigable and r.relation.navigable in ("from", "both"):
-        ends.append((ARROW_HEAD, pts[0], pts[1], first))
+    ends = [(s, tip, frm, at) for key, tip, frm, at in (("from", pts[0], pts[1], first), ("to", pts[-1], pts[-2], last))
+            if (s := _end_shape(rel, t, key)) is not None]  # (모양, 끝 점, 그 앞 점, 끝 요소의 점)
     heads = tuple(s.draw(c, tip, frm, at, o) for s, tip, frm, at in ends)
     return line, heads, tuple(HeadMark(s.name, tip) for s, tip, _, _ in ends)
 

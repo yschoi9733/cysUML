@@ -691,3 +691,73 @@ def test_shape_sets_the_gap_between_itself_and_its_outside_name():
     near, far = (draw([el(k, "Api", 0, 0)], spec=spec).layout.boxes[0] for k in ("dot", "far"))
     assert far.height == near.height + 12 - B.NAME_SEP
     assert far.zones[0].rect[1] == 24 + 12 and near.zones[0].rect[1] == 24 + B.NAME_SEP
+
+
+# ---------------------------------------------------------------- 같은 부모로 오는 공유 줄기 종류마다 향하는 점
+
+
+def two_kinds_to(parent, *relations, more=(), spec=SPEC):
+    """부모 P 아래 A(0, 200)·B(300, 200)가 상속·실체화로 P에 온다(입력은 실체화 먼저). relations·more는 더 그을 관계·둘 요소."""
+    return draw([parent, el("class", "A", 0, 200), el("class", "B", 300, 200), *more],
+                [rel("realization", "B", "P"), rel("generalization", "A", "P"), *relations], spec)
+
+
+def test_two_trunk_kinds_aim_either_side_of_the_parent_in_the_tools_order():
+    # 입력 차례와 상관없이 도구가 받는 관계 차례(상속, 실체화)로 왼쪽부터, 가운데(245, 24)에서 AIM_SPLIT/2씩
+    p = two_kinds_to(el("class", "P", 200, 0)).layout.by_key["P"]
+    half = B.AIM_SPLIT / 2
+    assert p.anchor == (245, 24)
+    assert p.aims == (("generalization", (245 - half, 24)), ("realization", (245 + half, 24)))
+    assert p.aim("generalization") == (245 - half, 24) and p.aim("association") == p.anchor
+
+
+def test_one_trunk_kind_or_other_kinds_keep_the_middle():
+    one = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200)],
+               [rel("generalization", "A", "P"), rel("generalization", "B", "P"), rel("dependency", "A", "P"),
+                rel("association", "B", "P")])
+    assert one.layout.by_key["P"].aims == ()
+    # 나뉜 부모에서 나가는 상속과, 그 부모로 오는 다른 관계는 가운데를 향한다
+    d = two_kinds_to(el("class", "P", 200, 0), rel("generalization", "P", "G"), rel("association", "Q", "P"),
+                     more=[el("class", "G", 200, -150), el("class", "Q", 500, 0)])
+    lines = {r.owner: r.points for r in d.layout.relations}
+    assert lines["P->G"][0] == (245, 0) and lines["Q->P"][-1] == (290, 24)
+    assert d.layout.by_key["G"].aims == () and d.layout.by_key["Q"].aims == ()
+
+
+@pytest.mark.parametrize("width, split", [(B.AIM_SPLIT + 2 * B.TRIANGLE[1], True),
+                                          (B.AIM_SPLIT + 2 * B.TRIANGLE[1] - 1, False)])
+def test_parent_too_narrow_for_two_triangles_side_by_side_keeps_the_middle(width, split):
+    p = two_kinds_to(el("class", "P", 200, 0, width=width)).layout.by_key["P"]
+    assert p.width == width and bool(p.aims) == split
+
+
+def test_lines_of_each_kind_end_on_the_bottom_edge_under_their_own_point():
+    # 마지막 꺾는 점을 그 종류가 향하는 점 바로 아래에 주면 선 끝(과 삼각형 끝)이 아래 변의 그 x에 곧게 닿아, 두 삼각형이 나란히
+    # 놓이고 검사에 합격한다
+    half = B.AIM_SPLIT / 2
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200)],
+             [rel("generalization", "A", "P", via=[[45, 120], [245 - half, 120]]),
+              rel("realization", "B", "P", via=[[345, 120], [245 + half, 120]])])
+    assert [r.points[-1] for r in d.layout.relations] == [(245 - half, 48), (245 + half, 48)]
+    assert [m.tip for r in d.drawn for m in r.marks] == [(245 - half, 48), (245 + half, 48)]
+    assert K.check(d).passed
+
+
+def test_two_kinds_aim_either_side_of_a_point_off_the_middle():
+    # 가운데에서 비켜난 점을 향하는 모양(aims_aside)은 그 점에서 양쪽으로 나눈다
+    class Aside(B.Shape):
+        aims_aside = True
+
+        def size(self, e):
+            return 140, 48
+
+        def anchor(self, e, rect):
+            return rect[0] + 60, rect[1] + 24
+
+        def draw(self, c, p):
+            c.rect(p.rect[0], p.rect[1], p.width, p.height, owner=p.key)
+
+    spec = B.Spec({**SHAPES, "aside": Aside()}, RELATIONS)
+    p = two_kinds_to(el("aside", "P", 200, 0), spec=spec).layout.by_key["P"]
+    half = B.AIM_SPLIT / 2
+    assert p.anchor == (260, 24) and p.aims == (("generalization", (260 - half, 24)), ("realization", (260 + half, 24)))
