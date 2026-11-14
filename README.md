@@ -244,7 +244,7 @@ Elements and relations must follow UML notation, and the tool rejects the input 
 system boundary, an association joins an actor and a use case (never the system boundary, two actors, two use cases of
 the same system boundary, or two use cases both outside any boundary), a generalization joins two actors or two use
 cases and never runs in a cycle or back to itself, and «include» and «extend» go only on dependencies between use
-cases.
+cases, where a use case never includes itself and includes never run in a cycle.
 
 ### State diagrams
 
@@ -432,7 +432,7 @@ uvx cysuml
   요소와 관계는 UML 표기를 따라야 하고, 어기면 그리지 않고 입력 오류로 돌려준다 — 액터는 시스템 경계 밖에 두고, 연관은 액터와
   유즈케이스 사이에 긋고(시스템 경계, 액터끼리, 같은 시스템 경계 안이거나 둘 다 경계 밖인 유즈케이스끼리는 잇지 않는다),
   일반화는 액터끼리·유즈케이스끼리 고리를 이루거나 자기 자신으로 가지 않게 긋고, «include»·«extend»는 유즈케이스 사이의 의존에만
-  단다.
+  단다. 유즈케이스는 자기 자신을 포함하지 않고, «include»는 고리를 이루지 않는다.
 - **상태도**는 `draw_state_diagram`으로 그린다. 시작·끝 점, 상태, 선택 마름모를 전이로 잇는다. 상태의 `entry /`·`do /`·`exit /`
   줄은 `actions`에 주면 받은 그대로 쓰고, 상태 안에 상태를 넣을 때는 `in`으로 품은 상태를 가리킨다. 이름이 없는 시작·끝 점과
   선택은 `id`를 주어 전이가 가리키게 한다. 전이 글자(`name`)도 대괄호·빗금까지 받은 그대로 쓴다. 결과는 패키지도와 같다. 선이 그

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from . import boxdiagram as B
 from . import text as T
@@ -153,10 +153,26 @@ RELATIONS = {
 # ---------------------------------------------------------------- 표기 규칙
 
 STEPS = ("include", "extend")  # 유즈케이스 사이의 의존에만 다는 스테레오타입(대소문자는 가리지 않는다)
+KIND_JOSA = {"association": "이", "generalization": "이", "dependency": "가"}  # 관계 종류 이름 뒤 주격 조사(읽는 소리대로)
+
+Edge = tuple[str, str, str, Optional[str]]  # (kind, from, to, 소문자로 맞춘 stereotype)
+
+
+def _stereo(rel: B.Relation) -> Optional[str]:
+    return rel.stereotype.casefold() if rel.stereotype is not None else None
 
 
 def _step(rel: B.Relation) -> bool:
-    return rel.stereotype is not None and rel.stereotype.casefold() in STEPS
+    return _stereo(rel) in STEPS
+
+
+def _ends(rel: B.Relation, s: str, t: str) -> str:
+    return f"{end_of('from', rel.source, s)}, {end_of('to', rel.target, t)}"
+
+
+def _other(s: str, t: str) -> Optional[str]:
+    """시스템 경계가 한 끝인 관계에서 다른 끝의 종류. 두 끝이 다 시스템 경계면 None."""
+    return t if s == "system" and t != "system" else s if t == "system" and s != "system" else None
 
 
 class UseCaseRules(Rules):
@@ -167,8 +183,8 @@ class UseCaseRules(Rules):
     유즈케이스끼리 잇는 연관(UseCase 제약: 같은 주체를 가리키는 유즈케이스끼리는 연관을 맺지 않는다 — 주체는 유즈케이스를 품은
     가장 가까운 시스템 경계이고, 둘 다 경계 밖이면 같은 주체로 친다)은 틀렸다. 일반화는 액터끼리, 유즈케이스끼리 긋고 고리를 이루지
     않는다(자기 자신으로 가는 일반화는 관계 종류가 막는다 — RELATIONS의 reflexive). «include»·«extend»는 유즈케이스 사이의 의존에만
-    단다. 관계 하나에는 오류를 하나만 알리고(«include»·«extend»를 먼저 본다), 고치는 법은 그대로 따랐을 때 다시 걸리지 않게 두 끝
-    종류와 이미 있는 관계에 맞춘다."""
+    단다. 유즈케이스는 자기 자신을 포함하지 않고, «include»는 고리를 이루지 않는다(UseCase 제약: 저를 바로나 거쳐서 포함하는
+    유즈케이스를 포함할 수 없다). 관계 하나에는 오류를 하나만 알린다(«include»·«extend»를 먼저 본다). 고치는 법은 _Plan이 고른다."""
 
     def check(self, r: Reader, spec: Spec, elements: list[tuple[str, Element]],
               relations: list[tuple[str, B.Relation]]) -> list[Notice]:
@@ -182,36 +198,31 @@ class UseCaseRules(Rules):
         def subject(key: str) -> Optional[str]:
             return next((k for k in lines.get(key, ()) if kinds.get(k) == "system"), None)
 
-        have = {(rel.kind, rel.source, rel.target) for _, rel in relations}
-        parents: dict[str, list[str]] = {}  # 오류 없는 일반화(자식 → 부모들)
+        plan = _Plan()
         inherits: list[tuple[str, B.Relation]] = []
+        includes: list[tuple[str, B.Relation]] = []
         faults: list[tuple[str, B.Relation, str, str]] = []
         for path, rel in relations:
             s, t = kinds.get(rel.source), kinds.get(rel.target)
             if s is None or t is None:
                 continue
-            if _step(rel):
-                if not (rel.kind == "dependency" and s == t == "use_case"):
-                    faults.append((path, rel, s, t))
-            elif rel.kind == "generalization":
-                if s != t or s == "system":
-                    faults.append((path, rel, s, t))
-                else:
-                    parents.setdefault(rel.source, []).append(rel.target)
-                    inherits.append((path, rel))
-            elif rel.kind == "association" and ("system" in (s, t) or s == t == "actor"
-                                                or s == t == "use_case" and subject(rel.source) == subject(rel.target)):
+            if _fault(rel, s, t, subject):
                 faults.append((path, rel, s, t))
-        fix = _Fixes(have, parents, faults)
-        for path, rel, s, t in faults:  # 고치는 법이 오류 없는 일반화와 다른 오류 전부를 보고 고른다
-            if _step(rel):
-                r.fail(_at(path, "stereotype"), f"«include»·«extend»는 유즈케이스 사이의 dependency에만 단다(이 관계는 "
-                                                f"{rel.kind!r}, {_ends(rel, s, t)}) — {fix.step(rel, s, t)}")
-            elif rel.kind == "generalization":
-                r.fail(path, _generalization(rel, s, t, fix))
+            elif _stereo(rel) == "include" and rel.source == rel.target:
+                r.fail(path, "유즈케이스는 자기 자신을 포함할 수 없다(«include») — 이 관계를 지운다")
             else:
-                r.fail(path, _association(rel, s, t, subject(rel.source), fix))
+                plan.add((rel.kind, rel.source, rel.target, _stereo(rel)))
+                if rel.kind == "generalization":
+                    inherits.append((path, rel))
+                elif _stereo(rel) == "include":
+                    includes.append((path, rel))
+        parents = {k: list(v) for k, v in plan.graphs["generalization"].items()}  # 입력의 일반화·«include»(고치는 법을 더하기 전)
+        included = {k: list(v) for k, v in plan.graphs["include"].items()}
+        for path, rel, s, t in faults:  # 앞 오류의 고치는 법이 만들 관계까지 보고 고른다
+            r.fail(*_explain(plan, path, rel, s, t, subject(rel.source)))
         fail_loops(r, inherits, parents, "일반화", "조상이 다시 자식이 될 수 없다")
+        fail_loops(r, includes, included, "«include»", "유즈케이스는 저를 포함하는 유즈케이스를 다시 포함할 수 없다",
+                   pair="둘 가운데 하나를 지운다")
         return []
 
     def guide(self, spec: Spec) -> str:
@@ -222,119 +233,145 @@ class UseCaseRules(Rules):
             "  - 규칙: 일반화는 액터끼리, 유즈케이스끼리 긋는다. 종류가 다른 일반화, 시스템 경계가 끝인 일반화, 고리를 이루는 일반화(A의 "
             "부모가 B이고 B의 부모가 다시 A인 것 — 여러 단계도)는 입력 오류다.",
             '  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — 다른 '
-            "관계에 달면 입력 오류다. 다른 스테레오타입은 어느 관계에든 단다."])
+            "관계에 달면 입력 오류다. 다른 스테레오타입은 어느 관계에든 단다. 자기 자신을 포함하는 «include»와 고리를 이루는 "
+            "«include»(A가 B를, B가 다시 A를 포함하는 것 — 여러 단계도)도 입력 오류다."])
 
 
-def _ends(rel: B.Relation, s: str, t: str) -> str:
-    return f"{end_of('from', rel.source, s)}, {end_of('to', rel.target, t)}"
+def _fault(rel: B.Relation, s: str, t: str, subject: Callable[[str], Optional[str]]) -> bool:
+    """규칙에 어긋난 관계인지(고리와 자기 자신을 포함하는 «include»는 따로 본다)."""
+    if _step(rel):
+        return not (rel.kind == "dependency" and s == t == "use_case")
+    if rel.kind == "generalization":
+        return s != t or s == "system"
+    if rel.kind == "association":
+        return ("system" in (s, t) or s == t == "actor"
+                or s == t == "use_case" and subject(rel.source) == subject(rel.target))
+    return False
 
 
-def _other(s: str, t: str) -> Optional[str]:
-    """시스템 경계가 한 끝인 관계에서 다른 끝의 종류. 두 끝이 다 시스템 경계면 None."""
-    return t if s == "system" and t != "system" else s if t == "system" and s != "system" else None
+class _Plan:
+    """고치는 법을 모두 따랐을 때 남을 관계. 오류 없는 관계에서 시작해, 오류마다 입력 차례대로 고치는 법이 권하는 관계를 더한다.
+    권하는 관계의 두 끝을 이미 잇는 관계(권한 것 포함 — 종류·방향과 상관없이 같은 두 끝이면 선이 포개진다)가 있거나 권하는 관계가
+    일반화·«include» 고리를 만들면 권하지 않고 지우라고 한다. 포개짐과 고리는 관계가 있어야 생기는 문제라, 권한 관계를 다 더한
+    집합에 문제가 없으면 어느 것을 고르거나 지워도 문제가 생기지 않는다."""
+
+    def __init__(self) -> None:
+        self.pairs: dict[frozenset[str], tuple[str, Optional[str]]] = {}  # 두 끝 → (관계 종류, 그 관계를 권한 오류의 자리 — 입력에 있으면 None)
+        self.graphs: dict[str, dict[str, list[str]]] = {"generalization": {}, "include": {}}  # 자식 → 부모들, 포함하는 쪽 → 포함되는 쪽들
+
+    def add(self, edge: Edge, origin: Optional[str] = None) -> None:
+        kind, a, b, stereotype = edge
+        self.pairs.setdefault(frozenset((a, b)), (kind, origin))
+        graph = "generalization" if kind == "generalization" else "include" if stereotype == "include" else None
+        if graph is not None and a != b:
+            self.graphs[graph].setdefault(a, []).append(b)
+
+    def clash(self, edge: Edge) -> Optional[str]:
+        """edge를 더하면 생기는 문제의 글. 없으면 None."""
+        kind, a, b, stereotype = edge
+        if (got := self.pairs.get(frozenset((a, b)))) is not None:
+            there, origin = got
+            where = "이미 있다" if origin is None else f"생긴다({origin}의 고치는 법)"
+            return f"두 끝을 잇는 {there}{KIND_JOSA[there]} {where}"
+        graph = "generalization" if kind == "generalization" else "include" if stereotype == "include" else None
+        if graph is not None and (back := parent_path(self.graphs[graph], b, a)) is not None:
+            label = "일반화" if graph == "generalization" else "«include»"
+            return f"{label}로 두면 고리가 된다({' → '.join(_show(k) for k in [a, *back])})"
+        return None
+
+    def offer(self, path: str, what: str, options: list[tuple[str, str, Edge]], maybe: bool) -> str:
+        """options는 (뒤에 말이 이어지는 꼴, 끝맺는 꼴, 그 말대로 바꾼 관계) — 다른 뜻의 바꿈이다. 문제가 없는 것만 권하고 그 관계를
+        계획에 더한다. maybe면 권하는 말이 뜻에 따른 것이라(…이면 바꾼다) 끝에 아니면 지우라는 말을 붙인다. what은 이 관계를 부르는
+        말(관계·연관·일반화)이다."""
+        drop = f"이 {what}{B.josa(what, '을', '를')} 지운다"
+        problems = [self.clash(edge) for _, _, edge in options]
+        good = [o for o, p in zip(options, problems) if p is None]
+        for _, _, edge in good:
+            self.add(edge, path)
+        if not good:
+            return f"{next(p for p in problems if p)}. {drop}"
+        said = [joined for joined, _, _ in good[:-1]]
+        said.append(f"{good[-1][0]}, 아니면 {drop}" if maybe else good[-1][1])
+        return ", ".join(said)
 
 
-class _Fixes:
-    """틀린 관계의 고치는 법. have는 입력의 모든 관계 (kind, from, to), parents는 오류 없는 일반화(자식 → 부모들), faults는 틀린
-    관계들 (입력 안의 자리, 관계, from 종류, to 종류)이다 — 고치는 법을 따라 바꾼 관계가 이미 있는 관계와 겹치거나 일반화 고리를
-    만들면 그 관계를 지우라고 하고, 같은 두 요소를 거꾸로 잇는 두 오류가 둘 다 일반화로 바뀌어 고리가 되지 않게 한다."""
-
-    def __init__(self, have: set[tuple[str, str, str]], parents: dict[str, list[str]],
-                 faults: list[tuple[str, B.Relation, str, str]]):
-        self.have, self.parents = have, parents
-        # 고치는 법이 일반화로 두라고 할 오류 (from, to) → 입력 안의 자리
-        self.swaps = {(rel.source, rel.target): path for path, rel, s, t in faults
-                      if rel.source != rel.target and self.lineage(rel.source, rel.target) is None
-                      and (s == t == "actor" or s == t == "use_case" and rel.kind == "generalization"
-                           and ("dependency", rel.source, rel.target) not in have)}
-
-    def joined(self, kind: str, a: str, b: str) -> bool:
-        """a와 b를 kind 관계가 어느 방향으로든 잇는지."""
-        return (kind, a, b) in self.have or (kind, b, a) in self.have
-
-    def lineage(self, a: str, b: str) -> Optional[list[str]]:
-        """a와 b가 일반화로(여러 단계도) 이어져 있으면 자식에서 부모로 가는 길."""
-        return parent_path(self.parents, a, b) or parent_path(self.parents, b, a)
-
-    def mutual(self, rel: B.Relation) -> Optional[str]:
-        """같은 두 요소를 거꾸로 잇는 오류도 일반화로 두라는 고치는 법을 받으면 그 자리."""
-        return self.swaps.get((rel.target, rel.source))
-
-    def actors(self, rel: B.Relation, what: str) -> str:
-        """액터끼리 잇는 관계(what — 연관·관계)의 고치는 법. 액터끼리는 일반화만 긋는다."""
-        obj = B.josa(what, "을", "를")
-        if rel.source == rel.target:
-            return f"자기 자신과 잇는 {what}{B.josa(what, '은', '는')} 지운다"
-        if (ring := self.lineage(rel.source, rel.target)) is not None:
-            return f"두 액터는 이미 일반화로 이어져 있다({' → '.join(_show(k) for k in ring)}). 이 {what}{obj} 지운다"
-        if rel.kind == "generalization":
-            keep = "stereotype을 뺀다"
-            alone = f"액터 사이 일반화를 뜻했으면 {keep}"
-        else:
-            drop = " stereotype을 빼고" if rel.stereotype else ""
-            keep = f"한 액터가 다른 액터의 한 종류일 때{drop} kind를 'generalization'으로 바꾼다(from이 자식)"
-            alone = (f"한 액터가 다른 액터의 한 종류면{drop} kind를 'generalization'으로 바꾸고(from이 자식), 아니면 이 "
-                     f"{what}{obj} 지운다")
-        if (other := self.mutual(rel)) is not None:
-            return f"{other}도 같은 두 액터를 거꾸로 잇는다 — 둘 다 일반화로 두면 고리가 되니 하나를 지운다. 이것을 남기면 {keep}"
-        return alone
-
-    def step(self, rel: B.Relation, s: str, t: str) -> str:
-        """«include»·«extend»를 유즈케이스 사이의 의존이 아닌 관계에 달았을 때."""
-        if s == t == "use_case":  # 관계 종류만 틀렸다(연관·일반화)
-            if ("dependency", rel.source, rel.target) in self.have:
-                return "같은 from·to의 dependency가 이미 있다. 이 관계를 지운다"
-            if (rel.kind == "generalization" and self.lineage(rel.source, rel.target) is None
-                    and self.mutual(rel) is None):
-                return "포함·확장이면 kind를 'dependency'로 바꾸고, 일반화를 뜻했으면 stereotype을 뺀다"
-            return "kind를 'dependency'로 바꾼다"
-        if "system" in (s, t):
-            other = _other(s, t)
-            if other == "actor":
-                change = "" if rel.kind == "association" else " kind를 'association'으로 바꾸고"
-                return (f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 "
-                        f"고치고{change} stereotype을 뺀다")
-            where = "시스템 경계 쪽 끝을 유즈케이스로" if other == "use_case" else "from·to를 유즈케이스로"
-            return f"{where} 고친다" if rel.kind == "dependency" else f"{where} 고치고 kind를 'dependency'로 바꾼다"
-        if s == t == "actor":
-            return self.actors(rel, "관계") if rel.kind == "generalization" else f"액터끼리는 일반화만 긋는다. {self.actors(rel, '관계')}"
-        if rel.kind != "association" and self.joined("association", rel.source, rel.target):
-            return "두 끝을 잇는 association이 이미 있다. 이 관계를 지운다"
-        change = "" if rel.kind == "association" else " kind를 'association'으로 바꾸고"
-        return f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다.{change} stereotype을 뺀다"
-
-
-def _generalization(rel: B.Relation, s: str, t: str, fix: _Fixes) -> str:
-    for key, kind in ((rel.source, s), (rel.target, t)):
-        if kind == "system":
-            other = _other(s, t)
-            how = (f"시스템 경계 쪽 끝을 {'액터' if other == 'actor' else '유즈케이스'}로 고친다" if other
-                   else "from·to를 둘 다 액터나 둘 다 유즈케이스로 고친다")
-            return f"시스템 경계({_show(key)})는 일반화의 끝이 될 수 없다 — 일반화는 액터끼리, 유즈케이스끼리 긋는다. {how}"
-    how = ("두 끝을 잇는 association이 이미 있다. 이 일반화를 지운다" if fix.joined("association", rel.source, rel.target)
-           else "액터가 유즈케이스를 쓰는 것이면 kind를 'association'으로 바꾼다")
-    return f"일반화의 두 끝 종류가 다르다({_ends(rel, s, t)}) — 일반화는 액터끼리, 유즈케이스끼리 긋는다. {how}"
-
-
-def _association(rel: B.Relation, s: str, t: str, subject: Optional[str], fix: _Fixes) -> str:
-    """시스템 경계에 닿거나, 액터끼리이거나, 같은 주체(subject — from 쪽 유즈케이스의 주체)의 유즈케이스끼리 잇는 연관."""
+def _explain(plan: _Plan, path: str, rel: B.Relation, s: str, t: str, subject: Optional[str]) -> tuple[str, str]:
+    """틀린 관계의 (오류 자리, 오류 글). subject는 from 쪽 유즈케이스의 주체(시스템 경계)다."""
+    a, b, ends = rel.source, rel.target, _ends(rel, s, t)
+    if _step(rel):
+        return _at(path, "stereotype"), (f"«include»·«extend»는 유즈케이스 사이의 dependency에만 단다(이 관계는 {rel.kind!r}, "
+                                         f"{ends}) — {_step_fix(plan, path, rel, s, t)}")
+    if rel.kind == "generalization":
+        for key, kind in ((a, s), (b, t)):
+            if kind == "system":
+                other = _other(s, t)
+                how = (f"시스템 경계 쪽 끝을 {'액터' if other == 'actor' else '유즈케이스'}로 고친다" if other
+                       else "from·to를 둘 다 액터나 둘 다 유즈케이스로 고친다")
+                return path, f"시스템 경계({_show(key)})는 일반화의 끝이 될 수 없다 — 일반화는 액터끼리, 유즈케이스끼리 긋는다. {how}"
+        how = plan.offer(path, "일반화", [("액터가 유즈케이스를 쓰는 것이면 kind를 'association'으로 바꾸고", "",
+                                         ("association", a, b, None))], maybe=True)
+        return path, f"일반화의 두 끝 종류가 다르다({ends}) — 일반화는 액터끼리, 유즈케이스끼리 긋는다. {how}"
     if "system" in (s, t):
-        ends = ", ".join(end_of(side, key, kind) for side, key, kind in (("from", rel.source, s), ("to", rel.target, t))
-                         if kind == "system")
+        systems = ", ".join(end_of(side, key, kind) for side, key, kind in (("from", a, s), ("to", b, t)) if kind == "system")
         other = {"actor": "그 액터가 쓰는 유즈케이스로", "use_case": "그 유즈케이스를 쓰는 액터로"}.get(_other(s, t) or "")
         how = f"시스템 경계 쪽 끝을 {other} 고친다" if other else "from·to를 액터와 유즈케이스로 고친다"
-        return f"연관이 시스템 경계에 닿는다({ends}) — 연관은 액터와 유즈케이스 사이에 긋는다. {how}"
+        return path, f"연관이 시스템 경계에 닿는다({systems}) — 연관은 액터와 유즈케이스 사이에 긋는다. {how}"
     if s == "actor":
-        return f"액터끼리 잇는 연관이다({_ends(rel, s, t)}) — 액터는 유즈케이스와 연관으로 잇는다. {fix.actors(rel, '연관')}"
+        return path, f"액터끼리 잇는 연관이다({ends}) — 액터는 유즈케이스와 연관으로 잇는다. {_actors_fix(plan, path, rel, '연관')}"
     where = f"같은 시스템 경계({_show(subject)}) 안의" if subject is not None else "시스템 경계 밖의"
+    problem = (f"{where} 유즈케이스끼리 잇는 연관이다({ends}) — 같은 시스템 경계 안이거나 둘 다 경계 밖인 유즈케이스는 연관으로 "
+               "잇지 않는다")
+    if a == b:
+        return path, f"{problem}. 자기 자신과 잇는 연관은 지운다"
+    inc, ext = ("dependency", a, b, "include"), ("dependency", a, b, "extend")
+    if (why := plan.clash(inc)) is None:  # «include»로 둘 수 있으면 «extend»도 된다(겹침은 같고 고리는 «include»만 본다)
+        plan.add(inc, path)
+        return path, (f"{problem}. 포함·확장이면 kind를 'dependency'로 바꾸고 stereotype을 'include'나 'extend'로 하고, 아니면 이 연관을 "
+                      "지운다")
+    if (other := plan.clash(ext)) is not None:
+        return path, f"{problem}. {other}. 이 연관을 지운다"
+    plan.add(ext, path)
+    return path, (f"{problem}. 확장이면 kind를 'dependency'로 바꾸고 stereotype을 'extend'로 하고(«include»는 안 된다 — {why}), "
+                  "아니면 이 연관을 지운다")
+
+
+def _actors_fix(plan: _Plan, path: str, rel: B.Relation, what: str) -> str:
+    """액터끼리 잇는 관계(what — 연관·관계)의 고치는 법. 액터끼리는 일반화만 긋는다."""
     if rel.source == rel.target:
-        how = "자기 자신과 잇는 연관은 지운다"
-    elif fix.joined("dependency", rel.source, rel.target) or fix.joined("generalization", rel.source, rel.target):
-        how = "두 유즈케이스는 이미 다른 관계로 이어져 있다. 이 연관을 지운다"
+        return f"자기 자신과 잇는 {what}{B.josa(what, '은', '는')} 지운다"
+    if rel.kind == "generalization":  # «include»·«extend»를 단 일반화
+        options = [("액터 사이 일반화를 뜻했으면 stereotype을 빼고", "", ("generalization", rel.source, rel.target, None))]
     else:
-        how = "포함·확장이면 kind를 'dependency'로 바꾸고 stereotype 'include'나 'extend'를 단다"
-    return (f"{where} 유즈케이스끼리 잇는 연관이다({_ends(rel, s, t)}) — 같은 시스템 경계 안이거나 둘 다 경계 밖인 유즈케이스는 "
-            f"연관으로 잇지 않는다. {how}")
+        drop = " stereotype을 빼고" if rel.stereotype else ""
+        options = [(f"한 액터가 다른 액터의 한 종류면{drop} kind를 'generalization'으로 바꾸고(from이 자식)", "",
+                    ("generalization", rel.source, rel.target, None))]
+    return plan.offer(path, what, options, maybe=True)
+
+
+def _step_fix(plan: _Plan, path: str, rel: B.Relation, s: str, t: str) -> str:
+    """«include»·«extend»를 유즈케이스 사이의 의존이 아닌 관계에 달았을 때의 고치는 법."""
+    a, b, stereotype = rel.source, rel.target, _stereo(rel)
+    if s == t == "use_case":  # 관계 종류만 틀렸다(연관·일반화)
+        dependency = ("dependency", a, b, stereotype)
+        if rel.kind == "generalization":
+            return plan.offer(path, "관계", [("포함·확장이면 kind를 'dependency'로 바꾸고", "", dependency),
+                                            ("일반화를 뜻했으면 stereotype을 빼고", "", ("generalization", a, b, None))],
+                              maybe=True)
+        return plan.offer(path, "관계", [("", "kind를 'dependency'로 바꾼다", dependency)], maybe=False)
+    if "system" in (s, t):
+        other = _other(s, t)
+        if other == "actor":
+            change = "" if rel.kind == "association" else " kind를 'association'으로 바꾸고"
+            return (f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 "
+                    f"고치고{change} stereotype을 뺀다")
+        where = "시스템 경계 쪽 끝을 유즈케이스로" if other == "use_case" else "from·to를 유즈케이스로"
+        return f"{where} 고친다" if rel.kind == "dependency" else f"{where} 고치고 kind를 'dependency'로 바꾼다"
+    if s == t == "actor":
+        how = _actors_fix(plan, path, rel, "관계")
+        return how if rel.kind == "generalization" else f"액터끼리는 일반화만 긋는다. {how}"
+    change = "stereotype을 뺀다" if rel.kind == "association" else "kind를 'association'으로 바꾸고 stereotype을 뺀다"
+    how = plan.offer(path, "관계", [("", change, ("association", a, b, None))], maybe=False)
+    return f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. {how}"
 
 
 RULES = UseCaseRules()
