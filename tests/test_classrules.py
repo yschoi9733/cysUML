@@ -120,8 +120,7 @@ def test_other_relations_to_itself_still_need_two_bends_and_then_draw():
 
 def test_two_classes_inheriting_each_other_are_one_cycle_at_the_first_relation():
     assert class_problems(ROW[:2], [rel("generalization", "A", "B"), rel("generalization", "B", "A")]) == (
-        "relations[0]: 상속이 고리를 이룬다('A' → 'B' → 'A') — 조상을 다시 상속할 수 없다. 고리 안의 상속 하나를 지우거나 "
-        "from·to를 바꾼다",)
+        "relations[0]: 상속이 고리를 이룬다('A' → 'B' → 'A') — 조상을 다시 상속할 수 없다. 둘 가운데 하나를 지운다",)
 
 
 def test_a_longer_cycle_names_every_class_on_it():

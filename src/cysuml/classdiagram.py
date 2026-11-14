@@ -312,11 +312,10 @@ def parent_path(parents: dict[str, list[str]], start: str, goal: str) -> Optiona
 
 
 def fail_loops(r: Reader, inherits: list[tuple[str, B.Relation]], parents: dict[str, list[str]], label: str,
-               why: str, pair: str = "") -> None:
+               why: str) -> None:
     """고리를 이루는 상속(label — 상속·일반화 등)을 입력 오류로 알린다. inherits는 오류 없는 상속의 (입력 안의 자리, 관계), parents는
-    그 상속(자식 → 부모들)이고, why는 고리가 왜 틀렸는지다. pair는 두 관계가 서로 거꾸로 가는 고리의 고치는 법이다 — 주지 않으면
-    다른 고리처럼 하나를 지우거나 뒤집으라고 한다(뒤집으면 같은 관계가 둘이 된다). 고리(그 고리를 이루는 상속들)마다 입력에서 먼저
-    나온 상속에서 한 번 알린다."""
+    그 상속(자식 → 부모들)이고, why는 고리가 왜 틀렸는지다. 두 관계가 서로 거꾸로 가는 고리는 하나를 지우라고만 한다 — 뒤집으면
+    같은 관계가 둘이 되어 선이 포개진다. 고리(그 고리를 이루는 상속들)마다 입력에서 먼저 나온 상속에서 한 번 알린다."""
     loops: set[frozenset[tuple[str, str]]] = set()
     for path, rel in inherits:
         back = parent_path(parents, rel.target, rel.source)
@@ -327,7 +326,7 @@ def fail_loops(r: Reader, inherits: list[tuple[str, B.Relation]], parents: dict[
         if edges in loops:
             continue
         loops.add(edges)
-        fix = pair if pair and len(ring) == 3 else f"고리 안의 {label} 하나를 지우거나 from·to를 바꾼다"
+        fix = "둘 가운데 하나를 지운다" if len(ring) == 3 else f"고리 안의 {label} 하나를 지우거나 from·to를 바꾼다"
         r.fail(path, f"{label}{B.josa(label, '이', '가')} 고리를 이룬다({' → '.join(_show(k) for k in ring)}) — {why}. {fix}")
 
 

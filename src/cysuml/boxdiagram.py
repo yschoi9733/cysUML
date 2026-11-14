@@ -241,6 +241,11 @@ class Rules:
         """도구 설명의 관계 항목(guide.relation_fields)에 붙이는 규칙 글. 줄마다 들여 쓴 "  - " 항목이다. 없으면 빈 글."""
         return ""
 
+    def nests(self, outer: str, inner: str) -> bool:
+        """inner 종류 요소를 안에 요소를 두는 outer 종류 요소 안에 둘 수 있는지. 둘 수 없는 짜임은 check가 입력 오류로 알리고, 요소가
+        겹쳤을 때의 안내(boxcheck)는 in을 권하지 않는다. 기본은 모두 된다."""
+        return True
+
 
 NO_RULES = Rules()  # 짜임을 보지 않는 그림의 규칙(Spec.rules 기본값)
 
