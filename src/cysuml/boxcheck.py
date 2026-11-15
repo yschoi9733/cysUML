@@ -297,7 +297,7 @@ def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:
         segments = path + tuple(e for h in heads for e in h.edges)
         end = next((h for h in heads if h.closed and math.dist(h.tip, points[-1]) <= LINE_EPS), None)
         target, missed = lay.by_key[p.relation.target], None
-        point = dict(target.aims).get(p.relation.kind)
+        point = target.aim_of(p.relation.kind)
         if point is not None and p.aim is None and p.relation.source != p.relation.target:
             _, top, _, bottom = target.border.bounds
             side = next((s for s, edge in ((1, bottom), (-1, top)) if abs(points[-1][1] - edge) <= SIDE_EPS), 0)

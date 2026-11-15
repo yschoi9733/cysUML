@@ -424,6 +424,10 @@ class PlacedBox:
     def key(self) -> str:
         return self.box.key
 
+    def aim_of(self, kind: str) -> Optional[Point]:
+        """관계 종류 kind의 향하는 점(aims). 없으면 None."""
+        return dict(self.aims).get(kind)
+
     @property
     def width(self) -> float:
         return self.rect[2] - self.rect[0]
@@ -450,15 +454,15 @@ class Label:
 @dataclass(frozen=True)
 class PlacedRelation:
     """owner는 그 관계를 그린 기록의 owner다 — 보통 "출발->도착"이고, 같은 이름이 앞에 있으면 "#2"·"#3"을 붙인다. aim은 이 선이
-    도착 요소의 anchor 대신 향하는 종류마다의 점이다(_aim — 없으면 None). start는 출발 요소에서 선을 낸 점이다(_from_at — 없으면
+    도착 요소의 anchor 대신 향하는 종류마다의 점이다(_aim — 없으면 None). start는 출발 요소에서 선을 낸 점이다(_from_at — 보통
     출발 요소의 anchor)."""
 
     relation: Relation
     owner: str
     points: tuple[Point, ...]
     labels: tuple[Label, ...]
+    start: Point
     aim: Optional[Point] = None
-    start: Optional[Point] = None
 
 
 @dataclass(frozen=True)
@@ -1269,7 +1273,7 @@ def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> 
 def _aim(r: Relation, a: PlacedBox, b: PlacedBox) -> Optional[Point]:
     """도착 요소 b에서 선 r이 향하는 종류마다의 점(PlacedBox.aims). 없으면 None(anchor를 향한다). 마지막 꺾는 점(꺾는 점이 없으면
     출발 요소 a의 점)이 그 점 바로 아래·위인 선만 따라, 이미 그린 선이나 옆 변으로 들어오는 선을 기울이지 않는다."""
-    point = dict(b.aims).get(r.kind)
+    point = b.aim_of(r.kind)
     toward = r.via[-1] if r.via else a.anchor
     if point is None or toward is None or r.source == r.target or abs(toward[0] - point[0]) > AIM_EPS:
         return None
@@ -1307,7 +1311,7 @@ def layout(diagram: Diagram) -> Layout:
         while owner in used:
             owner, n = f"{base}#{n}", n + 1
         used.add(owner)
-        bare.append(PlacedRelation(r, owner, points, (), aim, origin))
+        bare.append(PlacedRelation(r, owner, points, (), origin, aim))
     sketch = Canvas()  # 선 끝 모양을 그림판과 똑같이 얻으려고 선만 한 번 그려 본다
     for p in bare:
         _draw_relation(sketch, p, spec.relations[p.relation.kind], by_key)
@@ -1360,8 +1364,8 @@ def _draw_relation(c: Canvas, r: PlacedRelation, t: RelationType, by_key: Mappin
     """선과 선 끝 모양(from 쪽, to 쪽 차례)을 그리고 그 기록과 끝 모양마다의 이름·끝 점을 돌려준다. 끝 모양은 끝 요소가 향하게 한
     점(_route가 선 끝을 낸 점)도 받는다."""
     pts, o, rel = r.points, r.owner, r.relation
-    first, last = r.start or by_key[rel.source].anchor, r.aim or by_key[rel.target].anchor
-    assert first is not None and last is not None
+    first, last = r.start, r.aim or by_key[rel.target].anchor
+    assert last is not None
     line = c.line(pts, dash=t.dash, owner=o)
     ends = [(s, tip, frm, at) for key, tip, frm, at in (("from", pts[0], pts[1], first), ("to", pts[-1], pts[-2], last))
             if (s := _end_shape(rel, t, key)) is not None]  # (모양, 끝 점, 그 앞 점, 끝 요소의 점)
