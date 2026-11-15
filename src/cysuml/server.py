@@ -1,6 +1,6 @@
 """MCP 서버: UML 그림을 그리는 도구를 stdio로 내놓는다(그림 목록은 README).
 
-도구는 그린 PNG와 그 입력(같은 이름의 .json)을 파일로 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이
+도구는 그린 PNG와 그 입력(<이름>.cysuml.json)을 파일로 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이
 너무 커서 PNG로 못 그리거나, 저장할 폴더에 쓸 수 없으면 저장하지 않고 오류 결과(isError)로 돌려준다 — AI가 읽고 고칠 수 있게 예외
 대신 결과로 낸다.
 새 그림의 도구 설명은 그 그림 모듈이 guide의 공용 조각으로 만든다(처음부터 있던 두 도구의 설명은 여기 있다). 상자 그림(공용 엔진
@@ -31,21 +31,14 @@ from pydantic import Field, WithJsonSchema
 from . import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, componentdiagram, deploymentdiagram,
                packagediagram, sequencecheck, sequencediagram, statediagram, usecasediagram)
 from .canvas import MIN_SCALE, SCALE
-from .guide import (COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, INPUT_RESULT, MAX_IMAGE_EDGE, MEMBERS, SAVED_INPUT, flow,
-                    relation_fields, spacing_tips)
+from .guide import (COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, INPUT_RESULT, INPUT_SUFFIX, MAX_IMAGE_EDGE, MEMBERS, SAVED_INPUT,
+                    flow, relation_fields, spacing_tips)
 from .parsing import InputError
 from .report import Report, fmt_num, fmt_rect
 from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
 
 MAX_NAME_BYTES = 200  # 파일 이름(확장자 빼고) UTF-8 길이 상한. 파일 시스템 한도는 보통 255바이트
-MAX_RECORD_BYTES = 16 * 2**20  # 이보다 큰 같은 이름 .json은 읽지 않고 남의 파일로 본다. PNG로 그릴 수 있는 그림의 입력은 훨씬 작다
 NAME_FORBIDDEN = set('/\\:*?"<>|')
-TOOL_NAMES: list[str] = []  # 등록한 그리기 도구 이름(_named가 모은다). 같은 이름 .json의 tool이 이 가운데 하나여야 cysUML 것으로 본다
-
-
-def _named(name: str) -> str:
-    TOOL_NAMES.append(name)
-    return name
 
 
 def _is_dir(path: Path) -> bool:
@@ -94,7 +87,7 @@ INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리
 
 {SEQUENCE_FLOW}"""
 
-CLASS_TOOL = f"""클래스도를 그려 PNG와 입력 파일(.json)로 저장하고, 검사 결과와 그림을 함께 돌려준다. 상자는 준 왼쪽 위(left·top) 그대로, \
+CLASS_TOOL = f"""클래스도를 그려 PNG와 입력 파일(.cysuml.json)로 저장하고, 검사 결과와 그림을 함께 돌려준다. 상자는 준 왼쪽 위(left·top) 그대로, \
 관계선은 준 꺾는 점(via)을 따라 그리고, 상자 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다.
 
 입력
@@ -120,7 +113,7 @@ CLASS_TOOL = f"""클래스도를 그려 PNG와 입력 파일(.json)로 저장하
 
 {CLASS_TIPS}"""
 
-SEQUENCE_TOOL = f"""교류도를 그려 PNG와 입력 파일(.json)로 저장하고, 검사 결과와 그림을 함께 돌려준다. 교류도는 도구가 배치한다 — 좌표는 받지 \
+SEQUENCE_TOOL = f"""교류도를 그려 PNG와 입력 파일(.cysuml.json)로 저장하고, 검사 결과와 그림을 함께 돌려준다. 교류도는 도구가 배치한다 — 좌표는 받지 \
 않고, 생명선 간격과 메시지 높이를 글자 폭에 맞춰 정하고 활성 막대를 메시지에서 잇는다.
 
 입력
@@ -175,10 +168,10 @@ def _error(text: str) -> CallToolResult:
 
 
 def _file_name(raw: str) -> tuple[Optional[str], Optional[str]]:
-    """(쓸 이름, 문제). 끝의 .png나 .json(입력 파일 이름을 그대로 줬을 때)은 떼고, 경로를 가리키거나 파일 이름으로 못 쓰는 글자가
-    들면 문제를 돌려준다."""
+    """(쓸 이름, 문제). 끝의 .png나 입력 파일의 끝(입력 파일 이름을 그대로 줬을 때)은 떼고, 경로를 가리키거나 파일 이름으로 못 쓰는
+    글자가 들면 문제를 돌려준다."""
     name = unicodedata.normalize("NFC", raw.strip())
-    for suffix in (".png", ".json"):
+    for suffix in (".png", INPUT_SUFFIX, ".json"):
         if name.lower().endswith(suffix):
             name = name[:-len(suffix)].rstrip()
             break
@@ -223,47 +216,8 @@ def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
     return ("{\n" + ",\n".join(fields) + "\n}\n").encode("utf-8", "backslashreplace")
 
 
-def _not_ours(path: Path) -> Optional[tuple[str, str]]:
-    """path에 cysUML이 저장한 입력 파일(tool이 cysUML 도구 이름이고 file_name이 든 JSON 객체)로 보이지 않는 것이 있으면 (그 까닭,
-    앞서 cysUML이 저장한 파일일 때 고치는 법 — 없으면 빈 글)을 돌려준다. 입력 파일 이름이 package.json 같은 남의 파일과 겹칠 수 있어
-    그런 파일은 덮어쓰지 않는다. 없으면 None이다. 폴더는
-    부르는 쪽(_save)이 먼저 거른다. 있는지 보다 난 오류(폴더 탐색 권한 등)는 그대로 올려 쓰기 오류로 알린다. 심볼릭 링크는 끊겼든
-    아니든 덮어쓰지 않는다 — 바꿔 넣으면 링크 대상이 아니라 링크가 보통 파일로 바뀐다. 종류와 크기는 연 핸들로 본다 — 보고 나서 여는
-    사이에 FIFO로 바뀌어도 읽다 멈추지 않게(이 함수는 저장 잠금 안에서 돈다)."""
-    unreadable, restore = "읽을 수 있게 하고", "읽을 수 있는 JSON 객체(tool·file_name 포함)로 되돌리고"
-    try:
-        if stat.S_ISLNK(os.lstat(path).st_mode):
-            return "심볼릭 링크다", ""
-    except FileNotFoundError:
-        return None
-    try:
-        # FIFO도 쓰는 쪽을 기다리지 않고 열린다. Windows는 O_BINARY가 없으면 글자 모드로 읽는다
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
-    except FileNotFoundError:
-        return None
-    except OSError as e:
-        return f"읽을 수 없다({e.strerror or e})", unreadable
-    with os.fdopen(fd, "rb") as f:
-        st = os.fstat(f.fileno())
-        if not stat.S_ISREG(st.st_mode):
-            return "보통 파일이 아니다", ""
-        if st.st_size > MAX_RECORD_BYTES:
-            return f"{MAX_RECORD_BYTES // 2**20}MiB보다 크다", ""
-        try:
-            raw = f.read()
-        except OSError as e:
-            return f"읽을 수 없다({e.strerror or e})", unreadable
-    try:
-        v = json.loads(raw)
-    except (ValueError, RecursionError):  # UnicodeDecodeError도 ValueError다
-        return "JSON으로 읽을 수 없다", restore
-    if not (isinstance(v, dict) and v.get("tool") in TOOL_NAMES and isinstance(v.get("file_name"), str)):
-        return "cysUML 도구 이름인 tool과 file_name이 든 JSON 객체가 아니다", restore
-    return None
-
-
 def _stage(path: Path, data: bytes) -> Path:
-    tmp =path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
     try:
         with open(tmp, "xb") as f:
             f.write(data)
@@ -286,7 +240,7 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
         folder = Path(os.path.abspath(os.path.expanduser(given or DEFAULT_DIR)))
     except OSError as e:  # 서버 작업 폴더가 지워졌다
         return None, f"서버 작업 폴더를 알 수 없어 저장할 곳을 정하지 못했다({e.strerror or e}). out_dir에 절대 경로를 준다."
-    image, kept = folder / f"{name}.png", folder / f"{name}.json"
+    image, kept = folder / f"{name}.png", folder / f"{name}{INPUT_SUFFIX}"
     files = ((image, png), (kept, record))
     where = f"out_dir {folder}" if given else f"기본 폴더 {folder}(서버 작업 폴더 아래 {DEFAULT_DIR}/)"
     staged: list[tuple[Path, Path]] = []
@@ -300,12 +254,6 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
                 at = path
                 if _is_dir(path):
                     raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR))
-            at = kept
-            if found := _not_ours(kept):
-                why, own = found
-                fix = f"앞서 cysUML이 저장한 파일이면 {own}, 아니면 " if own else ""
-                return None, (f"그림을 저장하지 않았다 — {where}에 같은 이름의 {kept.name}이 있는데 {why}. cysUML이 저장한 입력 "
-                              f"파일로 보이지 않아 덮어쓰지 않았다. {fix}다른 file_name이나 out_dir을 준다.")
             for path, data in files:
                 at = path
                 staged.append((_stage(path, data), path))
@@ -403,15 +351,15 @@ def _relations(word: str) -> Any:
     return Annotated[Any, _listed(f"{word} 목록. 필드는 도구 설명에 있다.")]
 
 
-FileName = Annotated[str, Field(description="저장할 파일 이름(확장자 없이). 그림(.png)과 입력 파일(.json)에 쓰고, 같은 이름이면 "
-                                            "둘 다 덮어쓴다.")]
+FileName = Annotated[str, Field(description=f"저장할 파일 이름(확장자 없이). 그림(.png)과 입력 파일({INPUT_SUFFIX})에 쓰고, 같은 "
+                                            "이름이면 둘 다 덮어쓴다.")]
 Elements = Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")]
 Relations = _relations("관계")
 OutDir = Annotated[Optional[str], Field(description=f"저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/.")]
 Scale = Annotated[float, Field(ge=MIN_SCALE, allow_inf_nan=False, description=f"출력 배율(기본 {SCALE:g}). 보통은 주지 않는다.")]
 
 
-CLASS_NAME = _named("draw_class_diagram")
+CLASS_NAME = "draw_class_diagram"
 
 
 @mcp.tool(name=CLASS_NAME, description=CLASS_TOOL)
@@ -429,8 +377,6 @@ def draw_class_diagram(
 def _box_tool(name: str, diagram: ModuleType, word: str = "관계") -> None:
     """상자 그림 도구 하나를 등록한다. 그림 모듈(diagram)의 render·TOOL을 쓰고, 인자는 file_name·elements·relations·out_dir·
     scale이다. word는 relations 인자 설명에 쓰는 말(관계·전이·흐름)이다."""
-    _named(name)
-
     def tool(file_name, elements, relations=None, out_dir=None, scale=SCALE):
         data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
         return _draw(name, file_name, data, scale, diagram.render, boxcheck.check, out_dir, _places)
@@ -451,7 +397,7 @@ _box_tool("draw_state_diagram", statediagram, "전이")
 _box_tool("draw_activity_diagram", activitydiagram, "흐름")
 
 
-SEQUENCE_NAME = _named("draw_sequence_diagram")
+SEQUENCE_NAME = "draw_sequence_diagram"
 
 
 @mcp.tool(name=SEQUENCE_NAME, description=SEQUENCE_TOOL)

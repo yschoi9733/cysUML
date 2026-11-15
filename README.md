@@ -329,11 +329,10 @@ messages, the messages a frame covers, shorter text, or splitting the diagram.
 - **Saved to** `out_dir`, or `diagrams/` under the server's working folder when `out_dir` is not given. The same
   `file_name` overwrites both files below. Some clients start servers in a folder you can't write to (such as `/`); the
   tool then answers with an error, and the assistant should pass an `out_dir`.
-- **Input file** `<file_name>.json` is saved next to the picture: the tool name and the input that drew it, without
-  `out_dir`. To change a diagram later, the assistant reads that file, edits it, and draws it again with `out_dir` set to
-  the file's folder; the file as it is draws the same picture.
-  A same-name `.json` that cysUML did not write (such as `package.json` for `file_name` `package`) is left alone: the
-  tool saves nothing and answers with an error.
+- **Input file** `<file_name>.cysuml.json` is saved next to the picture: the tool name and the input that drew it,
+  without `out_dir`. To change a diagram later, the assistant reads that file, edits it, and draws it again with
+  `out_dir` set to the file's folder; the file as it is draws the same picture. The `.cysuml.json` ending keeps it apart
+  from other tools' files such as `package.json`.
 - **Returned picture** is shrunk to 1568 px on its long side when it is bigger. The saved file keeps its full size.
 
 The full input format is in the tool descriptions, which your client hands to the assistant.
@@ -441,9 +440,9 @@ uvx cysuml
 - 입력 형식 전체는 도구 설명에 있어 클라이언트가 어시스턴트에게 넘긴다.
 - 그림은 `out_dir`에, 없으면 서버 작업 폴더 아래 `diagrams/`에 저장한다. 같은 `file_name`이면 그림과 아래 입력 파일을 둘 다
   덮어쓴다. 쓸 수 없는 폴더(`/` 등)에서 서버를 띄우는 클라이언트도 있는데, 그때는 도구가 오류로 알리므로 `out_dir`을 주면 된다.
-- 그림 옆에 그린 도구 이름과 입력(`out_dir`만 빼고)을 `<file_name>.json`으로 함께 저장한다. 나중에 그림을 고칠 때는 어시스턴트가
-  그 파일을 읽어 고친 뒤, `out_dir`에 그 파일이 있는 폴더를 주어 다시 그린다. 파일을 그대로 넣으면 같은 그림이 나온다. cysUML이 쓰지 않은 같은 이름 `.json`(`file_name`이 `package`일 때의
-  `package.json` 등)이 있으면 건드리지 않고, 아무것도 저장하지 않은 채 오류로 알린다.
+- 그림 옆에 그린 도구 이름과 입력(`out_dir`만 빼고)을 `<file_name>.cysuml.json`으로 함께 저장한다. 나중에 그림을 고칠 때는
+  어시스턴트가 그 파일을 읽어 고친 뒤, `out_dir`에 그 파일이 있는 폴더를 주어 다시 그린다. 파일을 그대로 넣으면 같은 그림이 나온다.
+  끝을 `.cysuml.json`으로 해서 `package.json` 같은 다른 도구의 파일과 이름이 겹치지 않는다.
 - 돌려주는 그림은 긴 변이 1568px를 넘으면 그 길이로 줄인다. 저장한 파일은 원래 크기다.
 
 ### 개발
