@@ -327,8 +327,8 @@ messages, the messages a frame covers, shorter text, or splitting the diagram.
 ### All tools
 
 - **Saved to** `out_dir`, or `diagrams/` under the server's working folder when `out_dir` is not given. The same
-  `file_name` overwrites both files below. Some clients start servers in a folder you can't write to (such as `/`); the
-  tool then answers with an error, and the assistant should pass an `out_dir`.
+  `file_name` overwrites the picture and its input file (below). Some clients start servers in a folder you can't
+  write to (such as `/`); the tool then answers with an error, and the assistant should pass an `out_dir`.
 - **Input file** `<file_name>.cysuml.json` is saved next to the picture: the tool name and the input that drew it,
   without `out_dir`. To change a diagram later, the assistant reads that file, edits it, and draws it again with
   `out_dir` set to the file's folder; the file as it is draws the same picture. The `.cysuml.json` ending keeps it apart

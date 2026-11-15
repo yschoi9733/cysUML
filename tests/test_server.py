@@ -669,7 +669,8 @@ def test_a_folder_in_the_way_of_either_file_is_an_error_and_writes_nothing(tmp_p
     (tmp_path / in_the_way).mkdir()
     r = draw(file_name="order", classes=ORDER, out_dir=str(tmp_path))
     assert r.is_error
-    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {tmp_path}에 {in_the_way}을(를) 쓸 수 없다(")
+    assert text(r).startswith(f"그림을 저장하지 못했다 — out_dir {tmp_path}의 {in_the_way} 자리에 폴더가 있다. 그 폴더를 옮기거나 "
+                              "다른 file_name을 준다.\n")
     assert [p.name for p in tmp_path.iterdir()] == [in_the_way]
     assert list((tmp_path / in_the_way).iterdir()) == []
 
@@ -745,7 +746,7 @@ def test_the_input_file_puts_one_item_on_a_line_like_the_readme(tmp_path):
     assert '  "relations": [],\n' in (tmp_path / "order.cysuml.json").read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("given", ["order.cysuml.json", "order.json", "order.png"])
+@pytest.mark.parametrize("given", ["order.cysuml.json", "order.png"])
 def test_a_file_name_ending_in_a_saved_file_suffix_names_the_same_pair(tmp_path, given):
     draw(file_name=given, classes=ORDER, out_dir=str(tmp_path))
     assert sorted(p.name for p in tmp_path.iterdir()) == ["order.cysuml.json", "order.png"]
@@ -763,7 +764,7 @@ def test_a_json_file_of_another_tool_with_the_same_name_is_left_alone(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="Windows와 root는 권한을 빼도 연다")
-def test_a_folder_that_cannot_be_searched_is_a_write_error_not_a_file_that_is_there(tmp_path):
+def test_a_folder_that_cannot_be_searched_is_a_write_error(tmp_path):
     folder = tmp_path / "img"
     folder.mkdir()
     folder.chmod(0o600)  # 읽고 쓸 수는 있지만 안의 파일을 찾지 못한다

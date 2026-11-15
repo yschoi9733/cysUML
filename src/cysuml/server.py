@@ -1,6 +1,6 @@
 """MCP 서버: UML 그림을 그리는 도구를 stdio로 내놓는다(그림 목록은 README).
 
-도구는 그린 PNG와 그 입력(<이름>.cysuml.json)을 파일로 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이
+도구는 그린 PNG와 그 입력 파일(guide.INPUT_SUFFIX)을 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이
 너무 커서 PNG로 못 그리거나, 저장할 폴더에 쓸 수 없으면 저장하지 않고 오류 결과(isError)로 돌려준다 — AI가 읽고 고칠 수 있게 예외
 대신 결과로 낸다.
 새 그림의 도구 설명은 그 그림 모듈이 guide의 공용 조각으로 만든다(처음부터 있던 두 도구의 설명은 여기 있다). 상자 그림(공용 엔진
@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import errno
 import io
 import json
 import os
@@ -87,7 +86,7 @@ INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리
 
 {SEQUENCE_FLOW}"""
 
-CLASS_TOOL = f"""클래스도를 그려 PNG와 입력 파일(.cysuml.json)로 저장하고, 검사 결과와 그림을 함께 돌려준다. 상자는 준 왼쪽 위(left·top) 그대로, \
+CLASS_TOOL = f"""클래스도를 그려 PNG와 입력 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 상자는 준 왼쪽 위(left·top) 그대로, \
 관계선은 준 꺾는 점(via)을 따라 그리고, 상자 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다.
 
 입력
@@ -113,7 +112,7 @@ CLASS_TOOL = f"""클래스도를 그려 PNG와 입력 파일(.cysuml.json)로 �
 
 {CLASS_TIPS}"""
 
-SEQUENCE_TOOL = f"""교류도를 그려 PNG와 입력 파일(.cysuml.json)로 저장하고, 검사 결과와 그림을 함께 돌려준다. 교류도는 도구가 배치한다 — 좌표는 받지 \
+SEQUENCE_TOOL = f"""교류도를 그려 PNG와 입력 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 교류도는 도구가 배치한다 — 좌표는 받지 \
 않고, 생명선 간격과 메시지 높이를 글자 폭에 맞춰 정하고 활성 막대를 메시지에서 잇는다.
 
 입력
@@ -171,7 +170,7 @@ def _file_name(raw: str) -> tuple[Optional[str], Optional[str]]:
     """(쓸 이름, 문제). 끝의 .png나 입력 파일의 끝(입력 파일 이름을 그대로 줬을 때)은 떼고, 경로를 가리키거나 파일 이름으로 못 쓰는
     글자가 들면 문제를 돌려준다."""
     name = unicodedata.normalize("NFC", raw.strip())
-    for suffix in (".png", INPUT_SUFFIX, ".json"):
+    for suffix in (".png", INPUT_SUFFIX):
         if name.lower().endswith(suffix):
             name = name[:-len(suffix)].rstrip()
             break
@@ -252,8 +251,9 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
             folder.mkdir(parents=True, exist_ok=True)
             for path, _ in files:  # 한쪽만 바꿔 넣은 채 멈추지 않게 먼저 본다
                 at = path
-                if _is_dir(path):
-                    raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR))
+                if _is_dir(path):  # 폴더는 쓸 수 있으니 다른 폴더가 아니라 그 자리를 비우라고 한다
+                    return None, (f"그림을 저장하지 못했다 — {where}의 {path.name} 자리에 폴더가 있다. 그 폴더를 옮기거나 다른 "
+                                  "file_name을 준다.")
             for path, data in files:
                 at = path
                 staged.append((_stage(path, data), path))
