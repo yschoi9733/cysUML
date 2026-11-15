@@ -110,9 +110,8 @@ def _holds(spec: Spec) -> bool:
     return any(s.holds for s in spec.shapes.values())
 
 
-def _trunk_types(spec: Spec) -> list[RelationType]:
-    """공유 줄기를 받는 관계 종류(boxdiagram.trunk_kinds 차례)."""
-    return [spec.relations[k] for k in trunk_kinds(spec)]
+def _types(spec: Spec, kinds: Iterable[str]) -> list[RelationType]:
+    return [spec.relations[k] for k in kinds]
 
 
 def kind_aim(label: str, x: str, y: str) -> str:
@@ -123,7 +122,7 @@ def kind_aim(label: str, x: str, y: str) -> str:
 def trunk_aims(spec: Spec) -> str:
     """결과 글의 자리 뒤에 덧붙는 종류마다의 향하는 점(boxdiagram._split_aims) 설명. 엔진이 나누지 않는 도구(split_kinds가 빈
     튜플)는 빈 글."""
-    types = [spec.relations[k] for k in split_kinds(spec)]
+    types = _types(spec, split_kinds(spec))
     if not types:
         return ""
     noun, labels = spec.words.noun, _joined(t.label for t in types)
@@ -246,7 +245,7 @@ def relation_fields(spec: Spec) -> str:
     lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "
                  f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 "
                  f"한다{never_self}." + (f" {arrow_bend(spec.words)}" if arrows else ""))
-    if trunks := _trunk_types(spec):
+    if trunks := _types(spec, trunk_kinds(spec)):
         lines.append(_trunk(trunks, spec))
     if rules := spec.rules.guide(spec):
         lines.append(rules)
@@ -276,7 +275,7 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
              f"    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다. 마지막 점이 모두 같아 {head}{ga} 한 자리에 "
              f"그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다."]
     if split := split_kinds(spec):  # 엔진이 나누는 도구 — 왼쪽·오른쪽 종류를 엔진과 같은 판정에서 받는다
-        (first, second), half = (spec.relations[k].label for k in split), fmt_num(AIM_SPLIT / 2)
+        (first, second), half = (t.label for t in _types(spec, split)), fmt_num(AIM_SPLIT / 2)
         narrow = fmt_num(AIM_EDGE)
         to = josa(edge, "으로", "로")
         within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if outside else ""
@@ -293,9 +292,10 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
                   f"오른쪽(같은 x 포함)에 있으면 두 줄기를 같은 높이 y에 둔다. 아니면 같은 높이에서 두 줄기가 포개지니, 한 종류의 줄기를 "
                   f"y + {TRUNK_SPLIT}(자식 쪽)에 둔다. 그때 위 줄기 종류의 자식 가운데 x가 다른 종류의 향하는 점 x에서 {TRUNK_NEAR}px "
                   f"안이면 세로 줄끼리 포개지니 그 자식을 옮긴다.",
-                  f"    - 줄기를 y와 y + {TRUNK_SPLIT} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 아래 줄기가 자식 {noun}들의 위 "
-                  f"{edge}보다 {TRUNK_CLEAR}px 이상 위에 오게 부모와 자식 사이를 {TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 "
-                  f"내리지 않는다.",
+                  f"    - 줄기를 y와 y + {TRUNK_SPLIT} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 위 줄기 y를 부모 아래 {edge}에서 "
+                  f"{fmt_num(longest + TRUNK_CLEAR)}px({head} 길이 + {TRUNK_CLEAR}) 이상 떼어 다른 종류의 {head} 밑을 지나지 않게 하고, "
+                  f"아래 줄기를 자식 {noun}들의 위 {edge}보다 {TRUNK_CLEAR}px 이상 위에 둔다 — 부모와 자식 사이를 {TRUNK_ROOM}px 이상 "
+                  f"띄우고 y를 가운데쯤에 두면 둘 다 맞는다.",
                   f"    - 결과의 부모 자리 뒤에 종류마다 향하는 점이 덧붙지 않으면(부모 아래 {edge}{josa(edge, '이', '가')} "
                   f"{narrow}px보다 좁아 {head} 둘이 나란히 들지 않을 때 등) 한 종류만 위대로 아래 {edge} 가운데에 모으고, 다른 종류는 "
                   f"옆 {edge}{to} 들인다. 세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {TRUNK_SIDE}로 정하고, 그 종류의 "

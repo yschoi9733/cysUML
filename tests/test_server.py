@@ -290,9 +290,10 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
            "포함)에 있으면 두 줄기를 같은 높이 y에 둔다.",
            f"아니면 같은 높이에서 두 줄기가 포개지니, 한 종류의 줄기를 y + {split}(자식 쪽)에 둔다. 그때 위 줄기 종류의 자식 가운데 "
            f"x가 다른 종류의 향하는 점 x에서 {guide.TRUNK_NEAR}px 안이면 세로 줄끼리 포개지니 그 자식을 옮긴다.",
-           f"    - 줄기를 y와 y + {split} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 아래 줄기가 자식 {noun}들의 위 {edge}보다 "
-           f"{guide.TRUNK_CLEAR}px 이상 위에 오게 부모와 자식 사이를 {guide.TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 "
-           "내리지 않는다.",
+           f"    - 줄기를 y와 y + {split} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 위 줄기 y를 부모 아래 {edge}에서 "
+           f"{boxdiagram.TRIANGLE[0] + guide.TRUNK_CLEAR}px(삼각형 길이 + {guide.TRUNK_CLEAR}) 이상 떼어 다른 종류의 삼각형 밑을 "
+           f"지나지 않게 하고, 아래 줄기를 자식 {noun}들의 위 {edge}보다 {guide.TRUNK_CLEAR}px 이상 위에 둔다 — 부모와 자식 사이를 "
+           f"{guide.TRUNK_ROOM}px 이상 띄우고 y를 가운데쯤에 두면 둘 다 맞는다.",
            f"    - 결과의 부모 자리 뒤에 종류마다 향하는 점이 덧붙지 않으면(부모 아래 {edge}" + ("이" if edge == "변" else "가")
            + f" {narrow}px보다 좁아 삼각형 둘이 나란히 들지 않을 때 등) 한 종류만 위대로 아래 {edge} 가운데에 모으고, 다른 종류는 "
            f"옆 {edge}{to} 들인다.",
@@ -323,6 +324,10 @@ def test_trunk_numbers_fit_together():
         assert guide.TRUNK_SIDE > longest  # 좁은 부모의 옆 변으로 들이는 끝 구간이 끝 모양보다 길다(짧으면 입력 오류)
     # 그때 아래 줄기가 자식 위 변에서 TRUNK_CLEAR 떨어지고, 그 거리는 붙어 감 판정(BOX_CLEARANCE)보다 넉넉하다
     assert guide.TRUNK_ROOM / 2 - guide.TRUNK_SPLIT >= guide.TRUNK_CLEAR > boxcheck.BOX_CLEARANCE
+    # 두 높이일 때 위 줄기는 다른 종류의 삼각형 밑변(아래 변 + 삼각형 길이)에서 TRUNK_CLEAR 떨어지라고 하고(실측: 3px부터 합격 —
+    # 선 끝 모양 검사 여유 OVERLAP_GAP 2), 가운데에 두면 그만큼 떨어진다
+    triangle = boxdiagram.TRIANGLE[0]
+    assert guide.TRUNK_CLEAR > boxcheck.OVERLAP_GAP and guide.TRUNK_ROOM / 2 >= triangle + guide.TRUNK_CLEAR
     assert guide.TRUNK_NEAR > boxcheck.OVERLAP_GAP
     # 아래 변에 나란히 놓인 두 삼각형 사이(한 종류의 세로 줄과 다른 종류의 삼각형 사이는 더 넓다)도 검사 여유보다 넓다
     assert boxdiagram.AIM_SPLIT - 2 * boxdiagram.TRIANGLE[1] > boxcheck.OVERLAP_GAP
