@@ -229,7 +229,7 @@ def test_two_diamonds_whose_boxes_overlap_but_not_their_shapes_pass():
     ([el("state", "A"), el("state", "B", left=200)], [tr("A", "B", to_multiplicity="1")],
      "relations[0].to_multiplicity: 모르는 필드다"),
     ([el("state", "A", actions="entry / x")], [], "elements[0].actions: 목록이어야 한다"),
-    ([el("state", "A"), el("initial", id="s", left=200, **{"in": "s"})], [], "elements[1].in: 제 자신 안에"),
+    ([el("state", "A"), el("initial", id="s", left=200, **{"in": "s"})], [], "elements[1].in: 자기 자신 안에"),
     ([el("choice", id="c"), el("state", "A", left=200, **{"in": "c"})], [], "안에 요소를 둘 수 없다 — 안에 요소를 두는 종류: 'state'"),
     ([el("state", "A")], [tr("A", "A", via=[[200, 0]])], "꺾는 점(via)이 둘 이상"),
     ([el("initial", id="s"), el("state", "A", left=100)], [tr("A", "s")],
