@@ -19,7 +19,7 @@ from typing import Iterable, Optional
 
 from .boxcheck import KINDS, bend_away
 from .boxdiagram import (AIM_EDGE, AIM_SPLIT, ARROW, ARROW_HEAD, ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec,
-                         Words, aims_off_center, josa)
+                         Words, aims_off_center, josa, split_kinds)
 from .canvas import MIN_SCALE, SCALE
 from .report import fmt_num
 
@@ -111,7 +111,7 @@ def _holds(spec: Spec) -> bool:
 
 
 def _trunk_types(spec: Spec) -> list[RelationType]:
-    """공유 줄기를 받는 관계 종류(도구가 받는 차례 — 같은 부모로 함께 오면 이 차례로 왼쪽부터 향하는 점을 둔다)."""
+    """공유 줄기를 받는 관계 종류(도구가 받는 차례 — 둘이면 split_kinds와 같은 차례다)."""
     return [t for t in spec.relations.values() if t.trunk]
 
 
@@ -121,10 +121,10 @@ def kind_aim(label: str, x: str, y: str) -> str:
 
 
 def trunk_aims(spec: Spec) -> str:
-    """결과 글의 자리 뒤에 덧붙는 종류마다의 향하는 점(boxdiagram._split_aims) 설명. 공유 줄기를 받는 관계 종류가 둘이 아닌 도구는
-    빈 글(엔진이 나누지 않는다)."""
-    types = _trunk_types(spec)
-    if len(types) != 2:
+    """결과 글의 자리 뒤에 덧붙는 종류마다의 향하는 점(boxdiagram._split_aims) 설명. 엔진이 나누지 않는 도구(split_kinds가 빈
+    튜플)는 빈 글."""
+    types = [spec.relations[k] for k in split_kinds(spec)]
+    if not types:
         return ""
     noun, labels = spec.words.noun, _joined(t.label for t in types)
     shown = ", ".join(kind_aim(t.label, "x", "y") for t in types)
@@ -275,12 +275,12 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
              f"정한다. 부모 아래 {edge}에서 {head} 길이 {fmt_num(longest)}px보다 가까우면 입력 오류다.",
              f"    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다. 마지막 점이 모두 같아 {head}{ga} 한 자리에 "
              f"그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다."]
-    if len(types) == 2:  # 엔진도 두 종류일 때만 나눈다(boxdiagram._split_aims)
+    if split_kinds(spec):  # 엔진이 나누는 도구(types는 그 두 종류와 같은 차례다)
         (first, second), half = (t.label for t in types), fmt_num(AIM_SPLIT / 2)
         narrow = fmt_num(AIM_EDGE)
         to = josa(edge, "으로", "로")
         within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if outside else ""
-        away = "(부모의 모양 밖 이름이 오른쪽에 있으면 처음부터 아래 거울처럼 왼쪽으로)" if outside else ""
+        away = f"(부모의 모양 밖 이름이 오른쪽에 있으면 처음부터 다음 문장의 왼쪽 x2로 왼쪽 {edge}에 들인다)" if outside else ""
         lines += [f"    - 같은 부모로 {first}·{second}{josa(second, '이', '가')} 함께 오면 종류마다 향하는 점이 정해진다 — "
                   f"{first}{josa(first, '은', '는')} 가운데에서 왼쪽으로 {half}px, {second}{josa(second, '은', '는')} 오른쪽으로 "
                   f"{half}px이고, 결과의 그 부모 자리 뒤에 \"{first} 향하는 점 x, y, {second} 향하는 점 x, y\"로 덧붙는다. {first} 선은 "

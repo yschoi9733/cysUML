@@ -276,7 +276,7 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     half, narrow = boxdiagram.AIM_SPLIT // 2, boxdiagram.AIM_EDGE
     to = "으로" if edge == "변" else "로"
     within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if outside else ""
-    away = "(부모의 모양 밖 이름이 오른쪽에 있으면 처음부터 아래 거울처럼 왼쪽으로)" if outside else ""
+    away = f"(부모의 모양 밖 이름이 오른쪽에 있으면 처음부터 다음 문장의 왼쪽 x2로 왼쪽 {edge}에 들인다)" if outside else ""
     split = guide.TRUNK_SPLIT
     two = (f"    - 같은 부모로 상속·실체화가 함께 오면 종류마다 향하는 점이 정해진다 — 상속은 가운데에서 왼쪽으로 {half}px, 실체화는 "
            f'오른쪽으로 {half}px이고, 결과의 그 부모 자리 뒤에 "상속 향하는 점 x, y, 실체화 향하는 점 x, y"로 덧붙는다.',

@@ -1001,22 +1001,29 @@ def _flat(p: PlacedBox, x: float, side: int) -> bool:
     return True
 
 
+def split_kinds(spec: Spec) -> tuple[str, ...]:
+    """종류마다 향하는 점을 나눌 공유 줄기 관계 종류 둘(도구가 받는 차례 — 이 차례로 왼쪽부터 점을 둔다). 공유 줄기 종류를 둘 받는
+    도구만 나누고, 그 밖이면 빈 튜플이다(셋 이상 받는 도구의 요령은 도구 설명에 쓰지 않았다). 엔진(_split_aims)과 도구 설명(guide)이
+    함께 쓴다."""
+    kinds = tuple(k for k, t in spec.relations.items() if t.trunk)
+    return kinds if len(kinds) == 2 else ()
+
+
 def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> tuple[PlacedBox, ...]:
-    """같은 부모로 공유 줄기를 받는 관계 종류가 둘 오면 종류마다 향하는 점(PlacedBox.aims)을 정한다 — 요소가 향하게 한 점(anchor)에서
-    가로로 AIM_SPLIT/2씩 양쪽에, 도구가 받는 관계 차례(클래스도는 상속, 실체화)대로 왼쪽부터 둔다. 그 점을 향하는 선은 _aim이
-    고른다. 끝 삼각형들이 아래 변과 위 변의 곧은 부분에 나란히 들지 않는 좁은 모양에는 정하지 않는다 — 정한 점은 어느 쪽에서 오는
-    선이든 쓸 수 있다. 공유 줄기 종류를 둘 받는 도구에서만 나눈다(셋 이상 받는 도구의 요령은 도구 설명에 쓰지 않았다 —
-    guide._trunk)."""
-    if sum(t.trunk for t in spec.relations.values()) != 2:
+    """같은 부모로 split_kinds의 두 종류가 다 오면 종류마다 향하는 점(PlacedBox.aims)을 정한다 — 요소가 향하게 한 점(anchor)에서
+    가로로 AIM_SPLIT/2씩 양쪽에, split_kinds 차례(클래스도는 상속, 실체화)대로 왼쪽부터 둔다. 그 점을 향하는 선은 _aim이 고른다. 끝
+    삼각형들이 아래 변과 위 변의 곧은 부분에 나란히 들지 않는 좁은 모양에는 정하지 않는다 — 정한 점은 어느 쪽에서 오는 선이든 쓸 수
+    있다."""
+    split = split_kinds(spec)
+    if not split:
         return placed
     kinds: dict[str, set[str]] = {}
     for r in diagram.relations:
-        if spec.relations[r.kind].trunk and r.source != r.target:
+        if r.kind in split and r.source != r.target:
             kinds.setdefault(r.target, set()).add(r.kind)
-    order = list(spec.relations)
     out = []
     for p in placed:
-        found = sorted(kinds.get(p.key, ()), key=order.index)
+        found = [k for k in split if k in kinds.get(p.key, ())]
         if len(found) == 2:
             assert p.anchor is not None
             x, y = p.anchor
@@ -1031,7 +1038,8 @@ def _aim(r: Relation, b: PlacedBox) -> Optional[Point]:
     """도착 요소 b에서 선 r이 향하는 종류마다의 점(PlacedBox.aims) — 마지막 꺾는 점을 그 점 바로 아래나 위(x가 같게)에 준 선만 그
     점을 향하고, 그 밖의 선(꺾는 점이 없는 선도)은 None(anchor를 향한다). AI가 그 점을 쓰려고 준 선만 옮겨, 이미 그린 선이나 옆 변으로
     들어오는 선을 기울이지 않는다. 결과 글은 점을 소수 한 자리로 적으니 x는 AIM_EPS 안이면 같다고 본다(_snap이 맞춘다). 자기
-    자신으로 가는 관계는 따르지 않는다(자기 관계를 받는 공유 줄기 종류도 있다 — 유즈케이스도 일반화)."""
+    자신으로 가는 관계는 따르지 않는다(지금 나누는 도구의 상속·실체화는 자기 관계를 받지 않지만, 자기 관계를 받는 공유 줄기
+    종류도 있다 — 유즈케이스도 일반화)."""
     point = dict(b.aims).get(r.kind)
     if point is None or not r.via or r.source == r.target or abs(r.via[-1][0] - point[0]) > AIM_EPS:
         return None
