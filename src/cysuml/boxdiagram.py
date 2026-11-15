@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import numbers
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from functools import cached_property
 from typing import Any, Callable, Iterable, Iterator, Mapping, NamedTuple, Optional, Union
@@ -243,8 +244,69 @@ class Rules:
         """도구 설명의 관계 항목(guide.relation_fields)에 붙이는 규칙 글. 줄마다 들여 쓴 "  - " 항목이다. 없으면 빈 글."""
         return ""
 
+    def nests(self, outer: str, inner: str) -> bool:
+        """inner 종류 요소를 안에 요소를 두는 outer 종류 요소 안에 둘 수 있는지. 요소가 겹쳤을 때의 안내(boxcheck)는 둘 수 없으면
+        in을 권하지 않는다. 엔진은 이것으로 입력을 막지 않는다 — 막는 것은 그림 모듈이 이어받은 check가 제 오류 글로 한다. 기본은
+        모두 된다."""
+        return True
+
 
 NO_RULES = Rules()  # 짜임을 보지 않는 그림의 규칙(Spec.rules 기본값)
+
+
+def end_of(side: str, key: str, kind: str) -> str:
+    """오류·알림 글에서 관계의 한 끝: from 'Circle': 'class'. 이름 바로 뒤에 조사를 붙이지 않는다(영어 이름은 받침을 알 수 없다)."""
+    return f"{side} {_show(key)}: {kind!r}"
+
+
+def ends_of(rel: Relation, source: str, target: str) -> str:
+    """오류·알림 글에서 관계의 두 끝(source·target은 두 끝의 요소 종류): from 'A': 'class', to 'B': 'interface'."""
+    return f"{end_of('from', rel.source, source)}, {end_of('to', rel.target, target)}"
+
+
+def parent_path(parents: dict[str, list[str]], start: str, goal: str) -> Optional[list[str]]:
+    """parents(자식 → 부모들)의 상속을 따라 start에서 goal로 가는 가장 짧은 길(양 끝 포함). 없으면 None."""
+    came: dict[str, Optional[str]] = {start: None}
+    queue = [start]
+    for key in queue:
+        if key == goal:
+            path = [key]
+            while (up := came[path[-1]]) is not None:
+                path.append(up)
+            return path[::-1]
+        for parent in parents.get(key, ()):
+            if parent not in came:
+                came[parent] = key
+                queue.append(parent)
+    return None
+
+
+def fail_loops(r: Reader, inherits: list[tuple[str, Relation]], parents: dict[str, list[str]], label: str,
+               why: str) -> None:
+    """고리를 이루는 상속(label — 상속·일반화 등)을 입력 오류로 알린다. inherits는 오류 없는 상속의 (입력 안의 자리, 관계), parents는
+    그 상속(자식 → 부모들)이고, why는 고리가 왜 틀렸는지다. 고치는 법은 고리 안의 하나를 지우라고만 한다 — 뒤집으면 이미 있는
+    관계와 같아지거나(두 관계 고리는 늘) 다른 고리가 남을 수 있다. 같은 from·to의 상속이 여럿이면 그것을 모두 지우라고 덧붙인다(하나만
+    지우면 고리가 남는다). 고리(그 고리를 이루는 상속들)마다 입력에서 먼저 나온 상속에서 한 번 알린다."""
+    count = Counter((rel.source, rel.target) for _, rel in inherits)
+    loops: set[frozenset[tuple[str, str]]] = set()
+    for path, rel in inherits:
+        back = parent_path(parents, rel.target, rel.source)
+        if back is None:
+            continue
+        ring = [rel.source, *back]
+        edges = frozenset(zip(ring, ring[1:]))
+        if edges in loops:
+            continue
+        loops.add(edges)
+        pairs = list(zip(ring, ring[1:]))
+        if all(count[e] == 1 for e in pairs):
+            fix = "둘 가운데 하나를 지운다" if len(pairs) == 2 else f"고리 안의 {label} 하나를 지운다"
+        elif len(pairs) == 2:  # 같은 from·to가 여럿이면 하나만 지워서는 고리가 남는다 — 방향마다 몇 개인지 적는다
+            fix = "한 방향의 관계를 모두 지운다(" + ", ".join(f"{_show(x)} → {_show(y)} {count[(x, y)]}개" for x, y in pairs) + ")"
+        else:
+            fix = (f"고리 안의 from·to 하나를 골라 그 {label}{josa(label, '을', '를')} 모두 지운다(같은 from·to의 "
+                   f"{label}{josa(label, '이', '가')} 여럿 있다)")
+        r.fail(path, f"{label}{josa(label, '이', '가')} 고리를 이룬다({' → '.join(_show(k) for k in ring)}) — {why}. {fix}")
 
 
 @dataclass(frozen=True, eq=False)

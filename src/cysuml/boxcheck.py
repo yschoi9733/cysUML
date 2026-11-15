@@ -378,7 +378,8 @@ def _box_overlaps(boxes: list[_Box], lay: Layout, w: Words) -> Iterator[Finding]
             for outer, inner in ((a, b), (b, a)):
                 o = outer.placed.inner  # 안의 요소를 두는 칸에 든 요소만 — 칸 밖(패키지 탭 오른쪽 등)이면 in을 줘도 걸린다
                 if (lay.spec.extended and o is not None and o[0] <= inner.rect[0] and o[1] <= inner.rect[1]
-                        and inner.rect[2] <= o[2] and inner.rect[3] <= o[3]):
+                        and inner.rect[2] <= o[2] and inner.rect[3] <= o[3]
+                        and lay.spec.rules.nests(outer.placed.box.kind, inner.placed.box.kind)):
                     hint += (f" {inner.name}{josa(inner.name, '을', '를')} {outer.name} 안에 두려면 {inner.name}의 in에 "
                              f"{outer.name}{josa(outer.name, '을', '를')} 준다.")
             yield Finding("box_overlap", (a.name, b.name), between(pa, pb), f"{what}: {a.title}, {b.title}.", hint)
