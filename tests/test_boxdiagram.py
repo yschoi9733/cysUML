@@ -749,9 +749,22 @@ def test_a_line_follows_its_kinds_point_only_from_right_under_it(dx, follows):
                     [rel("generalization", "A", "P"), rel("realization", "B", "P")])
     s = straight.layout.relations[0]
     assert s.aim == ((245 - half, 24) if follows else None)
-    if dx == 0:
-        assert s.points == ((245 - half, 200), (245 - half, 48))  # 자식 바로 위로 곧게
+    if follows:
+        assert s.points == ((245 - half, 200), (245 - half, 48))  # 자식 가운데가 비켜나도 그 점의 x로 곧게
     assert B.AIM_EPS < B.AIM_SPLIT / 4  # 가운데(점에서 AIM_SPLIT/2)를 뜻한 선과 헷갈리지 않는다
+
+
+@pytest.mark.parametrize("via", [[], [[231.76, 150]]])
+def test_a_line_from_a_child_a_little_off_the_point_rises_upright_and_shares_the_triangle(via):
+    # 자식 A의 가운데(231.76)가 상속 점(230)에서 AIM_EPS 안이면, 꺾는 점이 없거나 첫 꺾는 점이 그 x로 맞춰진 선은 자식에서부터 230으로
+    # 곧게 올라간다 — 기울면 끝 삼각형이 점에서 비켜나, 같은 점으로 꺾어 오는 C의 상속 선 삼각형과 겹친다
+    d = draw([el("class", "P", 200, 0), el("class", "A", 186.76, 200), el("class", "C", 0, 200), el("class", "B", 400, 200)],
+             [rel("generalization", "A", "P", via=via), rel("generalization", "C", "P", via=[[45, 120], [230, 120]]),
+              rel("realization", "B", "P", via=[[445, 120], [260, 120]])])
+    a = d.layout.relations[0]
+    assert a.points[0] == (230, 200) and a.points[-1] == (230, 48)
+    assert all(p[0] == 230 for p in a.points)
+    assert K.check(d).passed
 
 
 def test_overlap_hint_names_the_point_a_line_did_not_follow():
@@ -761,6 +774,27 @@ def test_overlap_hint_names_the_point_a_line_did_not_follow():
              [rel("generalization", "A", "P", via=[[45, 120], [230, 120]]), rel("realization", "B", "P")])
     (f,) = [f for f in K.check(d).failures if f.kind == "head_overlap"]
     assert '덧붙은 점("실체화 향하는 점 260, 24") 바로 아래에 둔다' in f.hint and "상속 향하는 점" not in f.hint
+
+
+def test_overlap_hint_says_right_above_the_point_for_a_parent_drawn_below():
+    # 위 그림을 위아래로 뒤집어 부모가 아래에 있다 — 선이 위 변으로 들어오니 꺾는 점을 그 점 바로 위에 두라고 한다
+    d = draw([el("class", "P", 200, 300), el("class", "A", 0, 100), el("class", "B", 200, 100)],
+             [rel("generalization", "A", "P", via=[[45, 200], [230, 200]]), rel("realization", "B", "P")])
+    (f,) = [f for f in K.check(d).failures if f.kind == "head_overlap"]
+    assert '덧붙은 점("실체화 향하는 점 260, 324") 바로 위에 둔다' in f.hint and "바로 아래" not in f.hint
+
+
+def test_overlap_hint_says_nothing_of_the_points_for_a_line_entering_a_side_edge():
+    # 실체화 선이 P의 오른쪽 변으로 들어오고, D에서 P로 가는 연관 선이 그 가로 구간에 포개진다 — 옆 변으로 들어온 선은 그 점을
+    # 따라도 곧게 앉지 않으니 고치는 법에 점을 붙이지 않는다
+    d = draw([el("class", "P", 200, 0, width=140), el("class", "A", 0, 200), el("class", "B", 400, 200),
+              el("class", "D", 500, 0)],
+             [rel("generalization", "A", "P", via=[[45, 150], [255, 150]]), rel("realization", "B", "P", via=[[445, 24]]),
+              rel("association", "D", "P")])
+    assert d.layout.relations[1].points[-1] == (340, 24)
+    failures = K.check(d).failures
+    assert any(f.kind == "line_overlap" for f in failures)
+    assert all("향하는 점" not in f.hint for f in failures)
 
 
 def test_a_stem_of_bends_under_the_point_is_set_upright_without_a_zero_length_piece():

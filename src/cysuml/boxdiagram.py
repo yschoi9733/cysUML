@@ -1048,10 +1048,15 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType, 
            aim: Optional[Point] = None) -> tuple[Optional[tuple[Point, ...]], list[str]]:
     """관계선의 점들(선 끝은 요소가 향하게 한 점(anchor — 보통 테두리 가운데. 도착 요소에서 종류마다 정한 점(aim, _aim이 고른다)을
     향하는 선은 그 점)에서 첫·마지막 꺾는 점으로, 꺾는 점이 없으면 다른 요소의 그 점으로 가는 선이 테두리와 만나는 곳)과, 그렇게 그을
-    수 없으면 그 까닭들. aim을 향하는 선은 끝 꺾는 점들의 x를 aim의 x로 맞춘다(_snap)."""
+    수 없으면 그 까닭들. aim을 향하는 선은 끝 꺾는 점들의 x를 aim의 x로 맞추고(_snap), 출발 요소가 그 점 바로 아래·위면 출발 끝도
+    그 x로 옮겨 자식에서부터 곧게 올라가게 한다 — 끝 삼각형이 그 점에 정확히 앉아 같은 종류 선들과 하나로 모인다."""
     ca, cb = a.anchor, aim or b.anchor
     assert ca is not None and cb is not None
     via = r.via if aim is None else _snap(r.via, aim[0])
+    if aim is not None and (not via or via[0][0] == aim[0]):
+        straight = (aim[0], ca[1])
+        if abs(ca[0] - aim[0]) <= AIM_EPS and a.border.holds(straight):
+            ca = straight
     if via:
         start, end = a.border.exit(ca, via[0]), b.border.exit(cb, via[-1])
         problems = [f"{_at(_at(path, 'via'), j)}: 꺾는 점 {r.via[j]}이 {key} {w.noun} {_show(p_.key)}({fmt_rect(p_.border.bounds)}) 안이나 "

@@ -31,7 +31,7 @@ from . import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, 
                packagediagram, sequencecheck, sequencediagram, statediagram, usecasediagram)
 from .canvas import MIN_SCALE, SCALE
 from .guide import (COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, INPUT_RESULT, INPUT_SUFFIX, MAX_IMAGE_EDGE, MEMBERS, SAVED_INPUT,
-                    flow, kind_aim, relation_fields, spacing_tips, trunk_aims)
+                    flow, relation_fields, spacing_tips, trunk_aims)
 from .parsing import InputError
 from .report import Report, fmt_num, fmt_rect
 from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
@@ -304,7 +304,7 @@ def _places(drawing: boxdiagram.Drawing) -> list[str]:
         assert p.anchor is not None
         shape = f", 모양 {fmt_rect(p.shape_rect)}" if p.shape_rect != p.rect else ""
         aim = f", 향하는 점 {fmt_num(p.anchor[0])}, {fmt_num(p.anchor[1])}" if boxdiagram.aims_off_center(p.shape) else ""
-        aim += "".join(f", {kind_aim(relations[k].label, fmt_num(x), fmt_num(y))}" for k, (x, y) in p.aims)
+        aim += "".join(f", {boxdiagram.kind_aim(relations[k].label, fmt_num(x), fmt_num(y))}" for k, (x, y) in p.aims)
         return f"{p.key}({fmt_rect(p.rect)}{shape}{aim})"
     noun = drawing.layout.spec.words.noun
     return [f"{noun} 자리(왼, 위, 폭×높이): " + ", ".join(one(p) for p in drawing.layout.boxes)]

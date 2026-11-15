@@ -179,7 +179,8 @@ class _Relation:
     end_shape: Optional[_Head]  # to 쪽 끝의 삼각형·마름모
     trunk: bool  # 공유 줄기를 받는 관계 종류인지
     holders: frozenset[str]  # 끝 요소를 품은 요소들
-    missed_aim: Optional[str] = None  # 도착 요소에 이 종류의 향하는 점이 있는데 따르지 않았으면 그 점(결과 글 꼴)
+    # 도착 요소의 이 종류 향하는 점을 따르지 않고 위·아래 변으로 들어왔으면 (종류 이름, 그 점, 들어온 변 — 아래 1·위 -1)
+    missed_aim: Optional[tuple[str, Point, int]] = None
 
     @property
     def owner(self) -> str:
@@ -286,9 +287,12 @@ def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:
         path = tuple(zip(points, points[1:]))
         segments = path + tuple(e for h in heads for e in h.edges)
         end = next((h for h in heads if h.closed and math.dist(h.tip, points[-1]) <= LINE_EPS), None)
-        point = dict(lay.by_key[p.relation.target].aims).get(p.relation.kind)
-        missed = (kind_aim(lay.kind_of(p.relation).label, fmt_num(point[0]), fmt_num(point[1]))
-                  if point is not None and p.aim is None else None)
+        target = lay.by_key[p.relation.target]
+        point = dict(target.aims).get(p.relation.kind)
+        _, top, _, bottom = target.border.bounds
+        side = next((s for s, edge in ((1, bottom), (-1, top)) if abs(points[-1][1] - edge) <= LINE_EPS), 0)
+        missed = ((lay.kind_of(p.relation).label, point, side)
+                  if point is not None and p.aim is None and side and p.relation.source != p.relation.target else None)
         rel = _Relation(i, p, points, heads, path, segments, _cover(segments), end, lay.kind_of(p.relation).trunk,
                         lay.holders(p.relation), missed)
         relations.append(rel)
@@ -600,13 +604,18 @@ def _line_overlaps(relations: list[_Relation], pairs: Pairs) -> tuple[list[Findi
 
 
 def _aim_hint(rels: Iterable[_Relation]) -> str:
-    """걸린 선 가운데 도착 요소의 종류마다 향하는 점을 따르지 않고 가운데로 간 선이 있으면, 고치는 법 끝에 그 점을 쓰라는 말을
-    붙인다 — 두 종류를 가운데 한 점으로 모아 포개지거나 겹친 그림이 그 점으로 곧게 풀린다."""
-    points = list(dict.fromkeys(r.missed_aim for r in rels if r.missed_aim is not None))
-    if not points:
+    """걸린 선 가운데 도착 요소의 종류마다 향하는 점을 따르지 않고 위·아래 변으로 가운데에 들어간 선이 있으면, 고치는 법 끝에 그
+    점을 쓰라는 말을 붙인다 — 두 종류를 가운데 한 점으로 모아 포개지거나 겹친 그림이 그 점으로 곧게 풀린다. 들어온 변 쪽(아래 변이면
+    점 바로 아래, 위 변이면 바로 위)에 꺾는 점을 두라고 한다. 옆 변으로 들어온 선은 그 점을 따라도 곧게 앉지 않아 붙이지 않는다."""
+    missed = list(dict.fromkeys(r.missed_aim for r in rels if r.missed_aim is not None))
+    groups = []
+    for side, where in ((1, "바로 아래"), (-1, "바로 위")):
+        shown = ", ".join(f"\"{kind_aim(label, fmt_num(x), fmt_num(y))}\"" for label, (x, y), s in missed if s == side)
+        if shown:
+            groups.append(f"점({shown}) {where}")
+    if not groups:
         return ""
-    shown = ", ".join(f"\"{p}\"" for p in points)
-    return f" 그 종류의 선은 마지막 꺾는 점을 결과의 부모 자리 뒤에 덧붙은 점({shown}) 바로 아래에 둔다."
+    return f" 그 종류의 선은 마지막 꺾는 점을 결과의 부모 자리 뒤에 덧붙은 {'에, '.join(groups)}에 둔다."
 
 
 def _merged_overlaps(overlaps: list[Overlap]) -> Iterator[Finding]:
