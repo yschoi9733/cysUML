@@ -769,12 +769,13 @@ def test_a_line_from_a_child_a_little_off_the_point_rises_upright_and_shares_the
 
 def test_overlap_hint_names_the_point_a_line_did_not_follow():
     # 상속은 상속 점(230)을 따르고, 실체화는 가운데(245) 바로 아래에서 곧게 와 가운데로 간다 — 두 삼각형이 겹치는 항목의 고치는
-    # 법이 따르지 않은 실체화의 점만, 종류 이름을 붙여 알린다
+    # 법이 따르지 않은 실체화의 점만, 종류 이름을 붙여 알린다. 실체화 선은 꺾는 점이 없으니 도구 설명처럼 자식 가운데도 든다(꺾는
+    # 점이 있는 선만이면 "마지막 꺾는 점을"만 — test_classcheck의 공유 줄기 테스트)
     d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 200, 200)],
              [rel("generalization", "A", "P", via=[[45, 120], [230, 120]]), rel("realization", "B", "P")])
     (f,) = [f for f in K.check(d).failures if f.kind == "head_overlap"]
-    assert f.hint.endswith(' 실체화 선은 마지막 꺾는 점을 결과의 부모 자리 뒤에 덧붙은 같은 종류의 점("실체화 향하는 점 260, 24") '
-                           '바로 아래에 둔다.')
+    assert f.hint.endswith(' 실체화 선은 마지막 꺾는 점(꺾는 점이 없으면 자식 가운데)을 결과의 부모 자리 뒤에 덧붙은 같은 종류의 '
+                           '점("실체화 향하는 점 260, 24") 바로 아래에 둔다.')
 
 
 def test_overlap_hint_says_right_above_the_point_for_a_parent_drawn_below():

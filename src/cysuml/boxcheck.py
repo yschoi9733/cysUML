@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
 from .boxdiagram import (ARROW_BEND, ARROW_HEAD, BOX_WORDS, LABEL_CLEAR, NEST_PAD, PLACE_EPS, Drawing, HeadMark, Layout, NameZone,
-                         PlacedBox, PlacedRelation, TRIANGLE, Words, josa, kind_aim)
+                         PlacedBox, PlacedRelation, SIDE_EPS, TRIANGLE, Words, josa, kind_aim)
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
                    grow, hits, inside, meets, outline, overlap, span)
@@ -300,7 +300,7 @@ def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:
         point = dict(target.aims).get(p.relation.kind)
         if point is not None and p.aim is None and p.relation.source != p.relation.target:
             _, top, _, bottom = target.border.bounds
-            side = next((s for s, edge in ((1, bottom), (-1, top)) if abs(points[-1][1] - edge) <= LINE_EPS), 0)
+            side = next((s for s, edge in ((1, bottom), (-1, top)) if abs(points[-1][1] - edge) <= SIDE_EPS), 0)
             if side:
                 missed = _MissedAim(lay.kind_of(p.relation).label, point, side, grow(target.border.bounds, TRIANGLE[0]))
         rel = _Relation(i, p, points, heads, path, segments, _cover(segments), end, lay.kind_of(p.relation).trunk,
@@ -617,16 +617,20 @@ def _aim_hint(rels: Iterable[_Relation], where: Box) -> str:
     """걸린 선 가운데 도착 요소의 종류마다 향하는 점을 따르지 않고 위·아래 변으로 가운데에 들어간 선이 있고 걸린 곳(where)이 그 도착
     요소 가까이(_MissedAim.near)면, 고치는 법 끝에 그 점을 쓰라는 말을 붙인다 — 두 종류를 가운데 한 점으로 모아 포개지거나 겹친
     그림이 그 점으로 곧게 풀린다. 도착 요소에서 먼 곳에서 걸린 선은 그 점을 따라도 풀리지 않아 붙이지 않는다. 들어온 변 쪽(아래
-    변이면 점 바로 아래, 위 변이면 바로 위)에 꺾는 점을 두라고 한다. 옆 변으로 들어온 선은 그 점을 따라도 곧게 앉지 않아 _read가
-    missed_aim을 두지 않는다."""
-    missed = list(dict.fromkeys(m for r in rels if (m := r.missed_aim) is not None and meets(where, m.near)))
+    변이면 점 바로 아래, 위 변이면 바로 위)에 마지막 꺾는 점을 두라고 하고, 꺾는 점 없는 선이 섞이면 도구 설명(guide.trunk_aims)처럼
+    자식 가운데도 든다. 옆 변으로 들어온 선은 그 점을 따라도 곧게 앉지 않아 _read가 missed_aim을 두지 않는다."""
+    straight: dict[_MissedAim, bool] = {}  # 그 점마다, 꺾는 점 없는 선이 있는지
+    for r in rels:
+        if (m := r.missed_aim) is not None and meets(where, m.near):
+            straight[m] = straight.get(m, False) or not r.via
+    what = "마지막 꺾는 점(꺾는 점이 없으면 자식 가운데)을" if any(straight.values()) else "마지막 꺾는 점을"
     groups = []
     for side, at in ((1, "바로 아래"), (-1, "바로 위")):
-        chosen = [m for m in missed if m.side == side]
+        chosen = [m for m in straight if m.side == side]
         if chosen:
             kinds = "·".join(dict.fromkeys(m.label for m in chosen))
             shown = ", ".join(f"\"{kind_aim(m.label, fmt_num(m.point[0]), fmt_num(m.point[1]))}\"" for m in chosen)
-            groups.append(f"{kinds} 선은 {'마지막 꺾는 점을 결과의 부모 자리 뒤에 덧붙은 ' if not groups else ''}같은 종류의 "
+            groups.append(f"{kinds} 선은 {what + ' 결과의 부모 자리 뒤에 덧붙은 ' if not groups else ''}같은 종류의 "
                           f"점({shown}) {at}에")
     return f" {', '.join(groups)} 둔다." if groups else ""
 

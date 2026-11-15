@@ -1293,21 +1293,21 @@ def layout(diagram: Diagram) -> Layout:
     routes = []
     aims = [_aim(r, by_key[r.source], by_key[r.target]) for r in diagram.relations]
     for i, (r, aim) in enumerate(zip(diagram.relations, aims)):
-        points, found, start = _route(r, by_key[r.source], by_key[r.target], _at("relations", i), spec.relations[r.kind],
-                                      spec.words, aim)
+        points, found, origin = _route(r, by_key[r.source], by_key[r.target], _at("relations", i), spec.relations[r.kind],
+                                       spec.words, aim)
         problems += found
-        routes.append((points, start))
+        routes.append((points, origin))
     if problems:
         raise InputError(problems)
     used = set(by_key)
     bare = []
-    for r, (points, start), aim in zip(diagram.relations, routes, aims):
+    for r, (points, origin), aim in zip(diagram.relations, routes, aims):
         owner = base = f"{r.source}->{r.target}"
         n = 2
         while owner in used:
             owner, n = f"{base}#{n}", n + 1
         used.add(owner)
-        bare.append(PlacedRelation(r, owner, points, (), aim, start))
+        bare.append(PlacedRelation(r, owner, points, (), aim, origin))
     sketch = Canvas()  # 선 끝 모양을 그림판과 똑같이 얻으려고 선만 한 번 그려 본다
     for p in bare:
         _draw_relation(sketch, p, spec.relations[p.relation.kind], by_key)
