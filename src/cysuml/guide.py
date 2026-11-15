@@ -79,7 +79,7 @@ COMMON_INPUT = f"""- file_name: 저장할 파일 이름(확장자 없이). 그�
 - out_dir: 저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/이고, 상대 경로도 서버 작업 폴더 기준이다.
 - scale: 출력 배율(기본 {SCALE:g}, {MIN_SCALE:g} 이상). 보통은 주지 않는다."""
 
-IMAGE_RESULT = f"- 그림: 저장한 PNG. 긴 변이 {MAX_IMAGE_EDGE}px를 넘으면 그 길이로 줄여 돌려준다(저장한 파일은 줄이지 않는다)."
+IMAGE_RESULT = f"- 그림: 저장한 PNG. 긴 변이 {MAX_IMAGE_EDGE}px를 넘으면 그 길이로 줄여 돌려준다(저장한 그림은 줄이지 않는다)."
 
 # 그림 옆에 저장하는 입력 파일. SAVED_INPUT은 서버 안내문에, INPUT_RESULT는 모든 도구의 결과 절에 넣는다
 SAVED_INPUT = (f"그림을 저장할 때 그린 입력도 그림 옆 <file_name>{INPUT_SUFFIX}에 함께 저장한다. 있던 그림을 고칠 때는 그 파일을 "

@@ -333,7 +333,7 @@ messages, the messages a frame covers, shorter text, or splitting the diagram.
   without `out_dir`. To change a diagram later, the assistant reads that file, edits it, and draws it again with
   `out_dir` set to the file's folder; the file as it is draws the same picture. The `.cysuml.json` ending keeps it apart
   from other tools' files such as `package.json`.
-- **Returned picture** is shrunk to 1568 px on its long side when it is bigger. The saved file keeps its full size.
+- **Returned picture** is shrunk to 1568 px on its long side when it is bigger. The saved picture keeps its full size.
 
 The full input format is in the tool descriptions, which your client hands to the assistant.
 
@@ -443,7 +443,7 @@ uvx cysuml
 - 그림 옆에 그린 도구 이름과 입력(`out_dir`만 빼고)을 `<file_name>.cysuml.json`으로 함께 저장한다. 나중에 그림을 고칠 때는
   어시스턴트가 그 파일을 읽어 고친 뒤, `out_dir`에 그 파일이 있는 폴더를 주어 다시 그린다. 파일을 그대로 넣으면 같은 그림이 나온다.
   끝을 `.cysuml.json`으로 해서 `package.json` 같은 다른 도구의 파일과 이름이 겹치지 않는다.
-- 돌려주는 그림은 긴 변이 1568px를 넘으면 그 길이로 줄인다. 저장한 파일은 원래 크기다.
+- 돌려주는 그림은 긴 변이 1568px를 넘으면 그 길이로 줄인다. 저장한 그림은 원래 크기다.
 
 ### 개발
 

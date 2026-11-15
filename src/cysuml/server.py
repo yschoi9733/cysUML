@@ -39,15 +39,6 @@ from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPAN
 MAX_NAME_BYTES = 200  # 파일 이름(확장자 빼고) UTF-8 길이 상한. 파일 시스템 한도는 보통 255바이트
 NAME_FORBIDDEN = set('/\\:*?"<>|')
 
-
-def _is_dir(path: Path) -> bool:
-    """path 자리 자체가 폴더인지(링크는 따라가지 않는다 — 바꿔 넣으면 링크가 바뀐다). 없으면 False, 폴더를 탐색하지 못하는 등의 오류는
-    올린다 — Path.is_dir은 파이썬 버전마다 오류를 삼키는 범위가 달라 쓰지 않는다(3.14는 모두 삼킨다)."""
-    try:
-        return stat.S_ISDIR(os.lstat(path).st_mode)
-    except FileNotFoundError:
-        return False
-
 CLASS_TIPS = f"""클래스도 배치 요령:
 - 연결이 가장 많은 클래스를 가운데에 둔다.
 - 상속·실체화는 부모를 위에, 자식들을 그 아래 한 줄에 둔다.
@@ -220,6 +211,15 @@ def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
     return text.encode("utf-8", "backslashreplace")
 
 
+def _is_dir(path: Path) -> bool:
+    """path 자리 자체가 폴더인지(링크는 따라가지 않는다 — 바꿔 넣으면 링크가 바뀐다). 없으면 False, 폴더를 탐색하지 못하는 등의 오류는
+    올린다 — Path.is_dir은 파이썬 버전마다 오류를 삼키는 범위가 달라 쓰지 않는다(3.14는 모두 삼킨다)."""
+    try:
+        return stat.S_ISDIR(os.lstat(path).st_mode)
+    except FileNotFoundError:
+        return False
+
+
 def _stage(path: Path, data: bytes) -> Path:
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
     try:
@@ -339,7 +339,7 @@ def _draw(tool: str, file_name: str, data: dict, scale: float, render: Callable[
     lines = [report.summary(), *extra, f"저장한 파일: {image_path} ({img.width}×{img.height}px), 입력 {input_path}"]
     if shown is not img:
         lines.append(f"돌려준 그림은 긴 변을 {MAX_IMAGE_EDGE}px로 줄였다({shown.width}×{shown.height}px). "
-                     "원래 크기는 저장한 파일에 있다.")
+                     "원래 크기는 저장한 그림에 있다.")
     data_b64 = base64.b64encode(full if shown is img else _png(shown)).decode("ascii")
     return CallToolResult(content=[
         TextContent(type="text", text="\n".join(lines)),
