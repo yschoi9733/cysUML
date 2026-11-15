@@ -23,6 +23,7 @@ from .report import fmt_num
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
 DEFAULT_DIR = "diagrams"
+INPUT_SUFFIX = ".cysuml.json"  # 그림 옆에 저장하는 입력 파일의 끝. package.json 같은 남의 파일과 이름이 겹치지 않게 cysUML만 쓴다
 # 같은 부모로 종류가 다른 두 줄기를 둘 때의 수(px). 맞물리는 조건은 test_server가 본다
 TRUNK_SPLIT = 20  # 둘째 줄기는 첫 줄기보다 이만큼 아래(자식 쪽)에 둔다
 TRUNK_SIDE = 30  # 둘째 줄기를 부모 옆 변으로 들일 때 그 변에서 떼는 거리. 끝 구간이 끝 모양 길이보다 길어야 한다
@@ -74,14 +75,21 @@ def flow(kinds: Optional[Iterable[str]] = None, words: Words = ELEMENT_WORDS) ->
             f"{len(names)}가지: {', '.join(names)}.")
 
 
-COMMON_INPUT = f"""- file_name: 저장할 파일 이름(확장자 없이). 같은 이름이면 덮어쓴다.
+COMMON_INPUT = f"""- file_name: 저장할 파일 이름(확장자 없이). 그림(.png)과 입력 파일({INPUT_SUFFIX})에 쓰고, 같은 이름이면 둘 다 덮어쓴다.
 - out_dir: 저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/이고, 상대 경로도 서버 작업 폴더 기준이다.
 - scale: 출력 배율(기본 {SCALE:g}, {MIN_SCALE:g} 이상). 보통은 주지 않는다."""
 
-IMAGE_RESULT = f"- 그림: 저장한 PNG. 긴 변이 {MAX_IMAGE_EDGE}px를 넘으면 그 길이로 줄여 돌려준다(저장한 파일은 줄이지 않는다)."
+IMAGE_RESULT = f"- 그림: 저장한 PNG. 긴 변이 {MAX_IMAGE_EDGE}px를 넘으면 그 길이로 줄여 돌려준다(저장한 그림은 줄이지 않는다)."
 
-PLACES_RESULT = ("- 글: 검사 결과, 요소마다 그린 자리(열쇠와 왼, 위, 폭×높이), 저장한 파일 경로와 픽셀 크기. 자리를 그대로 다음 "
-                 "입력에 넣으면 요소가 움직이지 않는다.")
+# 그림 옆에 저장하는 입력 파일. SAVED_INPUT은 서버 안내문에, INPUT_RESULT는 모든 도구의 결과 절에 넣는다
+SAVED_INPUT = (f"그림을 저장할 때 그린 입력도 그림 옆 <file_name>{INPUT_SUFFIX}에 함께 저장한다. 있던 그림을 고칠 때는 그 파일을 "
+               "읽어 고친 뒤 다시 그린다(도구 설명의 결과 절).")
+INPUT_RESULT = (f"- 입력 파일: 그림 옆 <file_name>{INPUT_SUFFIX}에 그린 도구 이름(tool)과 이 입력(out_dir만 빼고)을 저장한다. 있던 "
+                "그림을 고칠 때는 이 파일을 읽어 고친 뒤 out_dir에 그 폴더를 주어 tool의 도구로 다시 그린다 — 그대로 넣으면 같은 "
+                "그림이 나온다(tool은 도구가 무시한다).")
+
+PLACES_RESULT = ("- 글: 검사 결과, 요소마다 그린 자리(열쇠와 왼, 위, 폭×높이), 저장한 그림·입력 파일 경로와 그림 픽셀 크기. 자리를 "
+                 "그대로 다음 입력에 넣으면 요소가 움직이지 않는다.")
 OUTSIDE_PLACES = ("  모양 밖 이름이 있는 요소의 자리는 모양과 이름을 함께 덮고, 그 뒤에 모양 자리를 \"모양 왼, 위, 폭×높이\"로 "
                   "덧붙인다(꺾는 점을 모양 둘레에 줄 때 쓴다).")  # places_result가 모양 밖 이름이 있는 모양을 받는 도구에만 붙인다
 
@@ -281,7 +289,7 @@ def box_tool(intro: str, spec: Spec, inputs: str, tips: str, kinds: Iterable[str
     if notation:
         parts.append(notation)
     more = f"{errors} " if errors else ""
-    parts += [f"결과\n{places_result(spec)}\n{IMAGE_RESULT}\n- {field}·relations·file_name이 틀리면 그리지 않고 틀린 곳을 "
+    parts += [f"결과\n{places_result(spec)}\n{IMAGE_RESULT}\n{INPUT_RESULT}\n- {field}·relations·file_name이 틀리면 그리지 않고 틀린 곳을 "
               f"{field}[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. {more}그림이 너무 커서 PNG로 그릴 수 없거나 저장할 "
               "폴더에 쓸 수 없을 때도 오류로 돌려준다.",
               flow(kinds, spec.words), tips]

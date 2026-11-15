@@ -72,7 +72,7 @@ optional bend points:
 }
 ```
 
-It gets back the check result, the size and place of every box as drawn, the saved file path, and the picture.
+It gets back the check result, the size and place of every box as drawn, the saved file paths, and the picture.
 The check **fails** when boxes overlap, a line runs through a box, a label or another line's arrowhead, or labels
 overlap. Crossing lines and the picture size are reported but don't fail. Inheritance lines from several children to
 one parent may join into one trunk that shares a single triangle (realization lines too, but not mixed with
@@ -320,16 +320,20 @@ cysUML spaces the lifelines to fit the text and draws the activation bars:
 }
 ```
 
-It gets back the check result, the saved file path, and the picture. As cysUML does the layout, a failed check is a
+It gets back the check result, the saved file paths, and the picture. As cysUML does the layout, a failed check is a
 cysUML bug. Each finding still says what to change in the input to get around it: the order of participants or
 messages, the messages a frame covers, shorter text, or splitting the diagram.
 
 ### All tools
 
 - **Saved to** `out_dir`, or `diagrams/` under the server's working folder when `out_dir` is not given. The same
-  `file_name` overwrites the file. Some clients start servers in a folder you can't write to (such as `/`); the tool
-  then answers with an error, and the assistant should pass an `out_dir`.
-- **Returned picture** is shrunk to 1568 px on its long side when it is bigger. The saved file keeps its full size.
+  `file_name` overwrites the picture and its input file (below). Some clients start servers in a folder you can't
+  write to (such as `/`); the tool then answers with an error, and the assistant should pass an `out_dir`.
+- **Input file** `<file_name>.cysuml.json` is saved next to the picture: the tool name and the input that drew it,
+  without `out_dir`. To change a diagram later, the assistant reads that file, edits it, and draws it again with
+  `out_dir` set to the file's folder; the file as it is draws the same picture. The `.cysuml.json` ending keeps it apart
+  from other tools' files such as `package.json`.
+- **Returned picture** is shrunk to 1568 px on its long side when it is bigger. The saved picture keeps its full size.
 
 The full input format is in the tool descriptions, which your client hands to the assistant.
 
@@ -392,7 +396,7 @@ uvx cysuml
 서버가 어시스턴트에게 알려 준다.
 
 - **클래스도**는 `draw_class_diagram`으로 그린다. 어시스턴트가 상자의 왼쪽 위 자리와, 필요하면 관계선의 꺾는 점을 준다. 결과로
-  검사 결과, 상자마다 그린 자리와 크기, 저장한 파일 경로, 그림을 돌려준다. 상자끼리 겹치거나, 선이 상자·글자·다른 선의 화살촉을
+  검사 결과, 상자마다 그린 자리와 크기, 저장한 그림·입력 파일 경로, 그림을 돌려준다. 상자끼리 겹치거나, 선이 상자·글자·다른 선의 화살촉을
   지나거나, 글자끼리 겹치면 불합격이다. 선끼리 엇갈린 곳과 그림 크기는 알려 주기만 하고 불합격이 아니다. 같은 부모로 가는
   상속끼리, 실체화끼리는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 써도 된다(꺾는 점을 주는 법은 도구 설명에 있다). 관계는
   UML 표기를 따라야 하고, 어기면 그리지 않고 입력 오류로 돌려준다 — 상속은 같은 종류끼리(클래스와 추상 클래스는 같은 종류)
@@ -431,12 +435,15 @@ uvx cysuml
   흐름의 조건은 `name`에 대괄호까지 쓴다. 결과와 검사는 패키지도와 같다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
   프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다. 결과로 검사 결과, 저장한
-  파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면
+  그림·입력 파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면
   비켜 가는지(참여자·메시지 차례, 프레임이 덮는 범위, 글자 줄이기, 그림 나누기) 알려 준다.
 - 입력 형식 전체는 도구 설명에 있어 클라이언트가 어시스턴트에게 넘긴다.
-- 그림은 `out_dir`에, 없으면 서버 작업 폴더 아래 `diagrams/`에 저장한다. 같은 `file_name`이면 덮어쓴다. 쓸 수 없는 폴더(`/` 등)에서
-  서버를 띄우는 클라이언트도 있는데, 그때는 도구가 오류로 알리므로 `out_dir`을 주면 된다.
-- 돌려주는 그림은 긴 변이 1568px를 넘으면 그 길이로 줄인다. 저장한 파일은 원래 크기다.
+- 그림은 `out_dir`에, 없으면 서버 작업 폴더 아래 `diagrams/`에 저장한다. 같은 `file_name`이면 그림과 아래 입력 파일을 둘 다
+  덮어쓴다. 쓸 수 없는 폴더(`/` 등)에서 서버를 띄우는 클라이언트도 있는데, 그때는 도구가 오류로 알리므로 `out_dir`을 주면 된다.
+- 그림 옆에 그린 도구 이름과 입력(`out_dir`만 빼고)을 `<file_name>.cysuml.json`으로 함께 저장한다. 나중에 그림을 고칠 때는
+  어시스턴트가 그 파일을 읽어 고친 뒤, `out_dir`에 그 파일이 있는 폴더를 주어 다시 그린다. 파일을 그대로 넣으면 같은 그림이 나온다.
+  끝을 `.cysuml.json`으로 해서 `package.json` 같은 다른 도구의 파일과 이름이 겹치지 않는다.
+- 돌려주는 그림은 긴 변이 1568px를 넘으면 그 길이로 줄인다. 저장한 그림은 원래 크기다.
 
 ### 개발
 
