@@ -275,8 +275,8 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
              f"정한다. 부모 아래 {edge}에서 {head} 길이 {fmt_num(longest)}px보다 가까우면 입력 오류다.",
              f"    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다. 마지막 점이 모두 같아 {head}{ga} 한 자리에 "
              f"그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다."]
-    if split_kinds(spec):  # 엔진이 나누는 도구(types는 그 두 종류와 같은 차례다)
-        (first, second), half = (t.label for t in types), fmt_num(AIM_SPLIT / 2)
+    if split := split_kinds(spec):  # 엔진이 나누는 도구 — 왼쪽·오른쪽 종류를 엔진과 같은 판정에서 받는다
+        (first, second), half = (spec.relations[k].label for k in split), fmt_num(AIM_SPLIT / 2)
         narrow = fmt_num(AIM_EDGE)
         to = josa(edge, "으로", "로")
         within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if outside else ""
@@ -284,7 +284,7 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
         lines += [f"    - 같은 부모로 {first}·{second}{josa(second, '이', '가')} 함께 오면 종류마다 향하는 점이 정해진다 — "
                   f"{first}{josa(first, '은', '는')} 가운데에서 왼쪽으로 {half}px, {second}{josa(second, '은', '는')} 오른쪽으로 "
                   f"{half}px이고, 결과의 그 부모 자리 뒤에 \"{first} 향하는 점 x, y, {second} 향하는 점 x, y\"로 덧붙는다. {first} 선은 "
-                  f"{first} 향하는 점, {second} 선은 {second} 향하는 점 바로 아래(x가 같게. 부모가 아래에 있으면 바로 위)에 마지막 꺾는 "
+                  f"{first} 향하는 점, {second} 선은 {second} 향하는 점 바로 아래(x가 같게)에 마지막 꺾는 "
                   f"점을 두면 그 점을 향해 곧게 들어가 두 종류의 {head}{ga} 나란히 놓이고, 그 밖의 선(꺾는 점이 없는 선도)은 그대로 "
                   f"가운데를 향한다. 그러니 위 두 점의 [부모 가운데 x, y] 대신 {first} 자식은 [{first} 향하는 점 x, y]를, {second} "
                   f"자식은 [{second} 향하는 점 x, y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 하나만 "

@@ -40,8 +40,8 @@ ARROW = 10          # 열린 화살촉 길이(그림판 기본값)
 # 10·cos 28° + (2 + 10·sin 28°·sin β) / cos β보다 길어야 한다(직각 10.83, β 30° 13.85, 50° 17.54 — 실측과 맞음). 꺾는 점을 요소
 # 가운데 줄에서 비켜 두면 끝 구간이 기울어 β가 생기므로 β 50°까지 덮게 잡는다
 ARROW_BEND = 20
-# 같은 부모로 공유 줄기를 받는 관계 종류가 둘 이상 오면 종류마다 선이 향하는 점을 이만큼 떨어뜨려 가로로 늘어놓는다(가운데에서
-# 양쪽으로 반씩). 삼각형 폭 18보다 넉넉해 변에 나란히 놓인 두 삼각형 사이가 12px 남는다
+# 같은 부모로 공유 줄기 관계 두 종류(split_kinds)가 오면 종류마다 선이 향하는 점을 이만큼 떨어뜨려 가로로 늘어놓는다
+# (가운데에서 양쪽으로 반씩). 삼각형 폭 18보다 넉넉해 변에 나란히 놓인 두 삼각형 사이가 12px 남는다
 AIM_SPLIT = 30
 AIM_EDGE = AIM_SPLIT + 2 * TRIANGLE[1]  # 두 종류의 점을 정하는 가장 좁은 아래·위 변(가운데를 향하는 모양에서). 도구 설명이 알린다
 # 마지막 꺾는 점이 종류마다 향하는 점 바로 아래·위인지 볼 때의 여유 — 결과 글이 그 점을 소수 한 자리로 적고, 반 픽셀 가운데에서 셈한
@@ -333,8 +333,8 @@ class Diagram:
 class PlacedBox:
     """자리를 잡은 요소. rect는 자리(모양 밖 이름까지 덮는다), shape_rect는 모양 자리, inner는 안의 요소를 둘 칸(안에 요소를 둘 수
     없는 모양은 None), zones는 이름 칸, frame은 안에 요소를 두는 모양의 테두리 선, parts는 겹침을 볼 때 그 요소를 이루는 테두리들
-    (Shape.parts), anchor는 선이 향하는 점(Shape.anchor — 없으면 테두리 가운데)이다. aims는 공유 줄기를 받는 관계 종류가 둘 이상
-    올 때 종류(관계 kind)마다 정한 점이다(_split_aims) — 그 점 바로 아래나 위에서 곧게 들어오는 그 종류의 선만 그 점을 향하고(_aim),
+    (Shape.parts), anchor는 선이 향하는 점(Shape.anchor — 없으면 테두리 가운데)이다. aims는 split_kinds의 두 종류가 다 올 때
+    종류(관계 kind)마다 정한 점이다(_split_aims) — 그 점 바로 아래나 위에서 곧게 들어오는 그 종류의 선만 그 점을 향하고(_aim),
     그 밖의 선은 anchor를 향한다."""
 
     box: Element
@@ -905,9 +905,8 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType, 
 
 
 def _snap(via: tuple[Point, ...], x: float) -> tuple[Point, ...]:
-    """마지막 꺾는 점과, 그 앞으로 이어진 세로 줄(높이가 다르고 x가 AIM_EPS 안인 점들)의 x를 x로 맞춘다 — 결과 글의 반올림 안에서
-    받은 점이라, 맞추면 종류마다 정한 점으로 올라가는 세로 줄이 곧게 서고 같은 종류의 선들이 삼각형 하나를 함께 쓴다. 가로로 이어진
-    앞 점(자식 쪽 꺾는 점 등)은 옮기지 않는다. 맞춰서 연달아 같아진 점은 하나로 줄인다(길이 0인 구간을 그리지 않게)."""
+    """종류마다 정한 점으로 올라가는 끝 세로 줄을 그 점의 x로 맞춘다 — 결과 글의 반올림 안에서 받은 점이라, 맞춰야 세로 줄이 곧게
+    서고 같은 종류의 선들이 삼각형 하나를 함께 쓴다."""
     pts, i = list(via), len(via) - 1
     while i >= 0 and abs(pts[i][0] - x) <= AIM_EPS and (i == len(via) - 1 or via[i][1] != via[i + 1][1]):
         pts[i], i = (x, pts[i][1]), i - 1
@@ -1023,11 +1022,10 @@ def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> 
             kinds.setdefault(r.target, set()).add(r.kind)
     out = []
     for p in placed:
-        found = [k for k in split if k in kinds.get(p.key, ())]
-        if len(found) == 2:
+        if kinds.get(p.key) == set(split):
             assert p.anchor is not None
             x, y = p.anchor
-            points = tuple((k, (x + d * AIM_SPLIT / 2, y)) for k, d in zip(found, (-1, 1)))
+            points = tuple((k, (x + d * AIM_SPLIT / 2, y)) for k, d in zip(split, (-1, 1)))
             if all(_flat(p, ax, side) for _, (ax, _) in points for side in (1, -1)):
                 p = replace(p, aims=points)
         out.append(p)
@@ -1035,11 +1033,8 @@ def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> 
 
 
 def _aim(r: Relation, b: PlacedBox) -> Optional[Point]:
-    """도착 요소 b에서 선 r이 향하는 종류마다의 점(PlacedBox.aims) — 마지막 꺾는 점을 그 점 바로 아래나 위(x가 같게)에 준 선만 그
-    점을 향하고, 그 밖의 선(꺾는 점이 없는 선도)은 None(anchor를 향한다). AI가 그 점을 쓰려고 준 선만 옮겨, 이미 그린 선이나 옆 변으로
-    들어오는 선을 기울이지 않는다. 결과 글은 점을 소수 한 자리로 적으니 x는 AIM_EPS 안이면 같다고 본다(_snap이 맞춘다). 자기
-    자신으로 가는 관계는 따르지 않는다(지금 나누는 도구의 상속·실체화는 자기 관계를 받지 않지만, 자기 관계를 받는 공유 줄기
-    종류도 있다 — 유즈케이스도 일반화)."""
+    """도착 요소 b에서 선 r이 향하는 종류마다의 점(PlacedBox.aims). 없으면 None(anchor를 향한다). AI가 그 점을 쓰려고 마지막 꺾는
+    점을 그 점 바로 아래·위에 준 선만 따라, 이미 그린 선이나 옆 변으로 들어오는 선을 기울이지 않는다."""
     point = dict(b.aims).get(r.kind)
     if point is None or not r.via or r.source == r.target or abs(r.via[-1][0] - point[0]) > AIM_EPS:
         return None
