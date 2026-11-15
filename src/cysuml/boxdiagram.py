@@ -296,9 +296,14 @@ def fail_loops(r: Reader, inherits: list[tuple[str, Relation]], parents: dict[st
         if edges in loops:
             continue
         loops.add(edges)
-        fix = "둘 가운데 하나를 지운다" if len(ring) == 3 else f"고리 안의 {label} 하나를 지운다"
-        if any(count[e] > 1 for e in edges):
-            fix += "(같은 from·to의 관계가 여럿이면 그것을 모두 지운다)"
+        pairs = list(zip(ring, ring[1:]))
+        if all(count[e] == 1 for e in pairs):
+            fix = "둘 가운데 하나를 지운다" if len(pairs) == 2 else f"고리 안의 {label} 하나를 지운다"
+        elif len(pairs) == 2:  # 같은 from·to가 여럿이면 하나만 지워서는 고리가 남는다 — 방향마다 몇 개인지 적는다
+            fix = "한 방향의 관계를 모두 지운다(" + ", ".join(f"{_show(x)} → {_show(y)} {count[(x, y)]}개" for x, y in pairs) + ")"
+        else:
+            fix = (f"고리 안의 from·to 하나를 골라 그 {label}{josa(label, '을', '를')} 모두 지운다(같은 from·to의 "
+                   f"{label}{josa(label, '이', '가')} 여럿 있다)")
         r.fail(path, f"{label}{josa(label, '이', '가')} 고리를 이룬다({' → '.join(_show(k) for k in ring)}) — {why}. {fix}")
 
 

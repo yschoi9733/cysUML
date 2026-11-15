@@ -223,8 +223,12 @@ def test_an_association_to_itself_is_refused_by_its_kind_even_without_bend_point
 def test_a_loop_with_the_same_relation_twice_is_told_to_remove_all_of_them():
     found = problems([rel("generalization", "고객", "은행"), rel("generalization", "고객", "은행", via=[[100, 0], [100, 50]]),
                       rel("generalization", "은행", "고객")])
-    assert found == ("relations[0]: 일반화가 고리를 이룬다('고객' → '은행' → '고객') — 조상이 다시 자식이 될 수 없다. 둘 가운데 "
-                     "하나를 지운다(같은 from·to의 관계가 여럿이면 그것을 모두 지운다)",)
+    assert found == ("relations[0]: 일반화가 고리를 이룬다('고객' → '은행' → '고객') — 조상이 다시 자식이 될 수 없다. 한 방향의 "
+                     "관계를 모두 지운다('고객' → '은행' 2개, '은행' → '고객' 1개)",)
+    (p,) = problems([rel("generalization", "고객", "은행"), rel("generalization", "고객", "은행", via=[[100, 0], [100, 50]]),
+                     rel("generalization", "은행", "카드사"), rel("generalization", "카드사", "고객")], [*BASE, CARD])
+    assert p.endswith("조상이 다시 자식이 될 수 없다. 고리 안의 from·to 하나를 골라 그 일반화를 모두 지운다(같은 from·to의 일반화가 "
+                      "여럿 있다)")
 
 
 def test_generalization_between_actors_or_between_use_cases_reads():
@@ -310,9 +314,9 @@ def test_two_use_case_generalizations_with_extend_the_other_way_round_get_one_fi
                             rel("generalization", "결제한다", "주문한다", stereotype="extend")])
     assert first.endswith(") — 확장이면 kind를 'dependency'로 바꾸고, 일반화를 뜻했으면 stereotype을 빼고, 아니면 이 관계를 지운다")
     # 거꾸로 가는 «extend»도, 일반화도 앞 것의 고치는 법과 고리가 된다
-    assert then.endswith(") — «extend»로 두면 고리가 된다('결제한다' → '주문한다' → '결제한다' — relations[0]의 고치는 법을 따르면). "
-                         "일반화로 두면 고리가 된다('결제한다' → '주문한다' → '결제한다' — relations[0]의 고치는 법을 따르면). 이 관계를 "
-                         "지운다")
+    assert then.endswith(") — 의존은 안 된다(«extend»로 두면 고리가 된다('결제한다' → '주문한다' → '결제한다' — relations[0]의 "
+                         "고치는 법을 따르면)). 일반화는 안 된다(일반화로 두면 고리가 된다('결제한다' → '주문한다' → '결제한다' — "
+                         "relations[0]의 고치는 법을 따르면)). 이 관계를 지운다")
 
 
 def test_two_use_case_associations_the_other_way_round_do_not_become_includes_of_each_other():
@@ -320,7 +324,7 @@ def test_two_use_case_associations_the_other_way_round_do_not_become_includes_of
     assert first.endswith("포함·확장이면 kind를 'dependency'로 바꾸고(다중도·navigable이 있으면 뺀다) stereotype을 'include'나 "
                           "'extend'로 하고, 아니면 이 연관을 지운다")
     loop = "고리가 된다('결제한다' → '주문한다' → '결제한다' — relations[0]의 고치는 법을 따르면)"
-    assert then.endswith(f"«include»는 안 된다(«include»로 두면 {loop}). «extend»도 안 된다(«extend»로 두면 {loop}). 이 연관을 "
+    assert then.endswith(f"«include»는 안 된다(«include»로 두면 {loop}). «extend»는 안 된다(«extend»로 두면 {loop}). 이 연관을 "
                          "지운다")
 
 
@@ -367,14 +371,14 @@ def test_association_between_use_cases_that_can_become_neither_tells_both_reason
     (p,) = problems([rel("dependency", "결제한다", "주문한다", stereotype="include"),
                      rel("dependency", "주문한다", "결제한다", stereotype="extend"), rel("association", "주문한다", "결제한다")])
     assert p.endswith(f"{SAME_SYSTEM}. «include»는 안 된다(«include»로 두면 고리가 된다('주문한다' → '결제한다' → '주문한다')). "
-                      "«extend»도 안 된다(같은 from·to의 «extend» dependency가 이미 있다). 이 연관을 지운다")
+                      "«extend»는 안 된다(같은 from·to의 «extend» dependency가 이미 있다). 이 연관을 지운다")
 
 
 def test_the_same_use_case_association_twice_is_offered_a_dependency_once():
     first, then = problems([rel("association", "주문한다", "결제한다"), rel("association", "주문한다", "결제한다")])
     assert first.endswith("stereotype을 'include'나 'extend'로 하고, 아니면 이 연관을 지운다")
     assert then.endswith(f"{SAME_SYSTEM}. «include»는 안 된다(같은 from·to의 «include» dependency가 생긴다(relations[0]의 고치는 "
-                         "법)). «extend»도 안 된다(같은 from·to의 «extend» dependency가 생긴다(relations[0]의 고치는 법)). 이 연관을 "
+                         "법)). «extend»는 안 된다(같은 from·to의 «extend» dependency가 생긴다(relations[0]의 고치는 법)). 이 연관을 "
                          "지운다")
 
 
@@ -431,8 +435,8 @@ REFUND = inside("sys", "use_case", "환불한다", 480, 160)
     # 막힌 까닭을 모두 적는다
     ([rel("generalization", "결제한다", "주문한다"), rel("dependency", "주문한다", "결제한다", stereotype="include"),
       rel("generalization", "주문한다", "결제한다", stereotype="include")],
-     "같은 from·to의 «include» dependency가 이미 있다. 일반화로 두면 고리가 된다('주문한다' → '결제한다' → '주문한다'). 이 관계를 "
-     "지운다"),
+     "의존은 안 된다(같은 from·to의 «include» dependency가 이미 있다). 일반화는 안 된다(일반화로 두면 고리가 된다('주문한다' → "
+     "'결제한다' → '주문한다')). 이 관계를 지운다"),
     ([rel("dependency", "주문한다", "결제한다", stereotype="include"),
       rel("association", "주문한다", "결제한다", stereotype="include")], "같은 from·to의 «include» dependency가 이미 있다. 이 관계를 지운다"),
     # 종류·stereotype이 다른 관계와 선이 포개지는 것은 꺾는 점으로 푼다

@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import re
 from functools import lru_cache
+from dataclasses import replace
 from typing import Any, Callable, Optional
 
 from . import boxdiagram as B
@@ -146,7 +147,7 @@ SYSTEM = SystemShape()
 
 SHAPES = {"actor": ACTOR, "use_case": USE_CASE, "system": SYSTEM}
 RELATIONS = {
-    "association": RelationType("연관", navigable=True, multiplicity=True, reflexive=False),
+    "association": replace(CLASS_RELATIONS["association"], reflexive=False),
     "dependency": CLASS_RELATIONS["dependency"],
     "generalization": RelationType("일반화", end=TRIANGLE_HEAD, trunk=True, role="자식", reflexive=False),
 }
@@ -331,22 +332,27 @@ class _Plan:
             return f"{label}로 두면 고리가 된다({' → '.join(_show(k) for k in [a, *back])}{how})"
         return None
 
-    def offer(self, path: str, what: str, options: list[tuple[str, str, Edge, str]], maybe: bool) -> str:
+    def offer(self, path: str, what: str, options: list[tuple[str, str, Edge, str]], maybe: bool, together: str = "") -> str:
         """options는 (뒤에 말이 이어지는 꼴, 끝맺는 꼴, 그 말대로 바꾼 관계, 그 바꿈을 부르는 말 — 의존·일반화 등) — 다른 뜻의
         바꿈이다. 문제가 없는 것만 권하고 그 관계를 계획에 더한다. 막힌 바꿈은 까닭을 적는다 — 적지 않으면 그 바꿈도 된다고 읽힌다.
         maybe면 권하는 말이 뜻에 따른 것이라(…이면 바꾼다) 끝에 아니면 지우라는 말을 붙인다. what은 이 관계를 부르는
-        말(관계·연관·일반화)이다."""
+        말(관계·연관·일반화)이다. together는 모든 바꿈이 될 때 하나로 묶어 쓰는 말(뒤에 말이 이어지는 꼴)이다."""
         drop = f"이 {what}{B.josa(what, '을', '를')} 지운다"
         problems = [self.clash(o[2]) for o in options]
         good = [o for o, p in zip(options, problems) if p is None]
         for o in good:
             self.add(o[2], path)
-        if not good:
-            return f"{'. '.join(dict.fromkeys(p for p in problems if p))}. {drop}"
+        if not good:  # 바꿈이 여럿이면 저마다 막힌 까닭을 이름과 함께 적는다
+            if len(options) == 1:
+                return f"{problems[0]}. {drop}"
+            return "".join(f"{o[3]}{B.josa(o[3], '은', '는')} 안 된다({p}). " for o, p in zip(options, problems)) + drop
         # 막힌 바꿈은 앞에 따로 적는다 — 권하는 말 뒤에 붙이면 그 말의 조건처럼 읽힌다
         blocked = "".join(f"{o[3]}{B.josa(o[3], '은', '는')} 안 된다({p}). " for o, p in zip(options, problems) if p)
-        said = [o[0] for o in good[:-1]]
-        said.append(f"{good[-1][0]}, 아니면 {drop}" if maybe else good[-1][1])
+        said = [together] if together and len(good) == len(options) else [o[0] for o in good]
+        if maybe:
+            said[-1] += f", 아니면 {drop}"
+        else:  # 뜻에 따르지 않는 바꿈은 끝맺는 꼴로 쓴다(together는 maybe일 때만 쓴다)
+            said[-1] = good[-1][1]
         return blocked + ", ".join(said)
 
 
@@ -370,8 +376,8 @@ class _InOrder(Reader):
             r.fail(path, message)
 
 
-PICK = "(자기 자신으로 가거나, 고리를 이루거나, 이미 있는 관계와 같아지지 않게 고른다)"
-UNASSOCIATE = "(다중도·navigable이 있으면 뺀다)"  # 연관을 다른 종류로 바꾸라고 할 때 — 그 칸은 연관만 받는다  # 사람이 고르는 끝을 권할 때 — 고를 요소를 몰라 계획으로 볼 수 없다
+PICK = "(자기 자신으로 가거나, 고리를 이루거나, 이미 있는 관계와 같아지지 않게 고른다)"  # 사람이 고르는 끝을 권할 때 — 고를 요소를 몰라 계획으로 볼 수 없다
+UNASSOCIATE = "(다중도·navigable이 있으면 뺀다)"  # 연관을 다른 종류로 바꾸라고 할 때 — 그 칸은 연관만 받는다
 
 
 def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str,
@@ -413,21 +419,11 @@ def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str
     where = f"같은 시스템 경계({_show(subject)}) 안의" if subject is not None else "시스템 경계 밖의"
     problem = (f"{where} 유즈케이스끼리 잇는 연관이다({ends}) — 같은 시스템 경계 안이거나 둘 다 경계 밖인 유즈케이스는 연관으로 "
                "잇지 않는다")
-    inc, ext = ("dependency", a, b, "include"), ("dependency", a, b, "extend")
-    no_inc, no_ext = plan.clash(inc), plan.clash(ext)
-    for edge, why in ((inc, no_inc), (ext, no_ext)):
-        if why is None:
-            plan.add(edge, path)
     change = f"kind를 'dependency'로 바꾸고{UNASSOCIATE} stereotype을"
-    if no_inc is None and no_ext is None:
-        how = f"포함·확장이면 {change} 'include'나 'extend'로 하고"
-    elif no_inc is None:
-        how = f"«extend»는 안 된다({no_ext}). 포함이면 {change} 'include'로 하고"
-    elif no_ext is None:
-        how = f"«include»는 안 된다({no_inc}). 확장이면 {change} 'extend'로 하고"
-    else:
-        return path, f"{problem}. «include»는 안 된다({no_inc}). «extend»도 안 된다({no_ext}). 이 연관을 지운다"
-    return path, f"{problem}. {how}, 아니면 이 연관을 지운다"
+    how = plan.offer(path, "연관", [(f"포함이면 {change} 'include'로 하고", "", ("dependency", a, b, "include"), "«include»"),
+                                   (f"확장이면 {change} 'extend'로 하고", "", ("dependency", a, b, "extend"), "«extend»")],
+                     maybe=True, together=f"포함·확장이면 {change} 'include'나 'extend'로 하고")
+    return path, f"{problem}. {how}"
 
 
 def _actors_fix(plan: _Plan, path: str, rel: B.Relation, what: str) -> str:
