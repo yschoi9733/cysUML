@@ -836,7 +836,7 @@ def name_spots(points: tuple[Point, ...], lines: Union[str, tuple[str, ...]]) ->
 
 
 def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[tuple[T.Box, list[list[Point]]]]:
-    """가운데 후보(name_spots) 둘이 다 피할 것에 걸릴 때 더 볼 이름 글자 자리를 구간마다 (띠, 묶음들)로 낸다. 묶음은 가운데에서
+    """가운데 후보(name_spots) 둘이 다 빈 자리가 아닐 때 더 볼 이름 글자 자리를 구간마다 (띠, 묶음들)로 낸다. 묶음은 가운데에서
     가까운 것부터다 — 가장 긴 구간은 가운데에서 양쪽으로 NAME_STEP씩 옮긴 자리마다 선 양옆 둘(진행 방향 앞쪽·뒤쪽 차례로 네 자리가
     한 묶음), 그다음 구간도 길이 차례로 그 가운데(두 자리)부터 같게 낸다. 글자는 제 구간 옆을 벗어나지 않는다 — 글자 상자를 구간
     방향으로 비춘 폭이 구간 안에 드는 자리만 낸다. 띠는 그 구간 묶음들의 흰 바탕을 다 덮는 상자다."""
@@ -1009,19 +1009,20 @@ class _Spots:
         return self._keep(self._best(lines, candidates, avoid))
 
     def pick_name(self, lines: tuple[str, ...], points: tuple[Point, ...], avoid: Obstacles,
-                  slide: bool = True) -> tuple[Point, bool]:
-        """이름 글자 자리와, 선을 따라 옮겼는지. 가운데 후보 둘이 다 피할 것에 걸리면(slide일 때) 선을 따라 더 본 자리(slide_spots)를
-        구간마다 묶음 차례로 보아 처음 빈 자리가 나온 묶음의 가장 나은 자리로 옮기고, 빈 자리가 없으면 가운데 후보에 둔다. 피할
-        것만 비키고 선에 닿는 자리로는 옮기지 않는다 — 선 여러 개에 닿아 불합격이 늘 수 있다."""
+                  slide: bool = True, wide: bool = True) -> tuple[Point, bool, bool]:
+        """이름 글자 자리와, 선을 따라 옮겼는지와, 좁은 조건이라면 옮기지 않았을 이름인지. 가운데 후보 둘이 다 빈 자리가 아니면(wide가
+        아니면 둘 다 피할 것에 걸리면 — 좁은 조건) slide일 때 선을 따라 더 본 자리(slide_spots)를 구간마다 묶음 차례로 보아 처음 빈
+        자리가 나온 묶음의 가장 나은 자리로 옮기고, 빈 자리가 없으면 가운데 후보에 둔다. 피할 것만 비키고 선에 닿는 자리로는 옮기지
+        않는다 — 선 여러 개에 닿아 불합격이 늘 수 있다."""
         best = self._best(lines, name_spots(points, lines), avoid)
-        if slide and not best.off:
+        if slide and not (best.free if wide else best.off):
             for band, rings in slide_spots(points, lines):
                 pool = self._pool(band, avoid)  # 구간마다 한 번만 거른다
                 for ring in rings:
                     found = self._best(lines, ring, avoid, pool)
                     if found.free:
-                        return self._keep(found), True
-        return self._keep(best), False
+                        return self._keep(found), True, best.off
+        return self._keep(best), False, False
 
 
 def _end_shape(r: Relation, t: RelationType, key: str) -> Optional[EndShape]:
@@ -1168,7 +1169,9 @@ def _place(spec: Spec, diagram: Diagram, lines_of: Mapping[str, tuple[str, ...]]
 def layout(diagram: Diagram) -> Layout:
     """요소 크기, 선의 점들, 선 글자 자리를 잡는다. 선을 그을 수 없는 배치면(꺾는 점이 요소 안이다, 두 요소가 겹치거나
     맞닿았다, 끝 구간이 끝 모양보다 짧다 등) 모두 모아 InputError. 선 글자는 관계 순서대로 이름 → from 다중도 → to 다중도
-    차례로 놓고, 앞서 놓은 글자를 뒤 글자가 피한다."""
+    차례로 놓고, 앞서 놓은 글자를 뒤 글자가 피한다(_labels). 이름은 가운데 후보 둘이 다 빈 자리가 아니면 선을 따라 옮기는데,
+    좁은 조건(둘 다 피할 것에 걸릴 때만 옮긴다)이라면 옮기지 않았을 이름이 남으면 좁은 조건으로도 놓아 보고 그림 전체의 걸린 것이
+    더 적은 쪽을 쓴다(같으면 넓힌 쪽) — 옮긴 이름이 뒤 관계의 글자가 쓸 자리를 차지해 뒤 글자가 밀리면 넓혀서 더 나빠질 수 있다."""
     spec = diagram.spec
     lines_of = lineage({e.key: e.parent for e in diagram.boxes})  # 품은 사이는 여기서 한 번 재서 검사(Layout)까지 넘긴다
     placed = _place(spec, diagram, lines_of)
@@ -1195,9 +1198,24 @@ def layout(diagram: Diagram) -> Layout:
     for p in bare:
         _draw_relation(sketch, p, spec.relations[p.relation.kind], by_key)
     lined = [(s, rec.owner) for rec in sketch.records for s in outline([rec])]
-    spots = _Spots([s for s, _ in lined], [owner for _, owner in lined])
+    segments, owners = [s for s, _ in lined], [owner for _, owner in lined]
     avoids: dict[frozenset[str], Obstacles] = {}  # 끝을 품은 요소들마다 한 번만 만든다
+    spots = _Spots(segments, owners)
+    out, widened = _labels(spots, bare, placed, lines_of, avoids, wide=True)
+    if widened and spots.misses(0) != (0, 0):  # 걸린 것이 없으면 좁은 조건이 더 나을 수 없다
+        narrow = _Spots(segments, owners)
+        kept, _ = _labels(narrow, bare, placed, lines_of, avoids, wide=False)
+        if spots.misses(0) > narrow.misses(0):
+            out = kept
+    return Layout(spec, placed, tuple(out), lines_of)
+
+
+def _labels(spots: _Spots, bare: list[PlacedRelation], placed: tuple[PlacedBox, ...], lines_of: Mapping[str, tuple[str, ...]],
+            avoids: dict[frozenset[str], Obstacles], wide: bool) -> tuple[list[PlacedRelation], bool]:
+    """관계마다 선 글자를 놓은 관계들과, 좁은 조건이라면 옮기지 않았을 이름이 남았는지(pick_name의 wide). 남지 않았으면 좁은 조건으로
+    놓은 것과 같다 — 그런 이름이 없는 관계는 앞 글자가 같으면 같게 놓이므로. avoids는 끝을 품은 요소들마다의 피할 것을 모아 둔다."""
     out = []
+    widened = False
     for p in bare:
         r, points = p.relation, p.points
         held = holders(lines_of, r)
@@ -1205,34 +1223,38 @@ def layout(diagram: Diagram) -> Layout:
             avoids[held] = obstacles(placed, held)
         avoid = avoids[held]
         start = len(spots.labels)
-        labels, moved = _relation_labels(spots, r, points, avoid, slide=True)
+        labels, moved, wider = _relation_labels(spots, r, points, avoid, slide=True, wide=wide)
         if moved and (missed := spots.misses(start)) != (0, 0):
             # 옮긴 이름(빈 자리다) 때문에 같은 관계의 다중도가 빈 자리를 못 찾았을 수 있다. 이름을 가운데에 둔 것과 견주어 걸린 것이
             # 더 적을 때(같으면 피할 것에 걸린 글자가 더 적을 때)만 옮긴 쪽을 쓰고, 둘 다 같으면 가운데에 둔다
             slid, tail = labels, spots.cut(start)
-            labels, _ = _relation_labels(spots, r, points, avoid, slide=False)
+            labels, _, _ = _relation_labels(spots, r, points, avoid, slide=False, wide=wide)
             if spots.misses(start) > missed:
                 spots.cut(start)
                 spots.put(tail)
                 labels = slid
+            else:
+                wider = False
+        widened |= wider
         out.append(replace(p, labels=tuple(labels)))
-    return Layout(spec, placed, tuple(out), lines_of)
+    return out, widened
 
 
 def _relation_labels(spots: _Spots, r: Relation, points: tuple[Point, ...], avoid: Obstacles,
-                     slide: bool) -> tuple[list[Label], bool]:
-    """관계 하나의 선 글자를 이름 → from 다중도 → to 다중도 차례로 놓는다. 이름을 선을 따라 옮겼는지도 돌려준다."""
+                     slide: bool, wide: bool) -> tuple[list[Label], bool, bool]:
+    """관계 하나의 선 글자를 이름 → from 다중도 → to 다중도 차례로 놓는다. 이름을 선을 따라 옮겼는지와, 좁은 조건이라면 옮기지 않았을
+    이름인지도 돌려준다(pick_name)."""
     labels = []
-    moved = False
+    moved = wider = False
     if r.label_lines:
         lines = r.label_lines
-        (x, y), moved = spots.pick_name(lines, points, avoid, slide)
+        (x, y), moved, wider = spots.pick_name(lines, points, avoid, slide, wide)
         labels.append(Label("name", lines, x, y))
     for role, text, tip, toward in (("from_multiplicity", r.source_multiplicity, points[0], points[1]),
                                     ("to_multiplicity", r.target_multiplicity, points[-1], points[-2])):
         if text:
             labels.append(Label(role, (text,), *spots.pick((text,), multiplicity_spots(tip, toward), avoid)))
-    return labels, moved
+    return labels, moved, wider
 
 
 # ---------------------------------------------------------------- 그리기

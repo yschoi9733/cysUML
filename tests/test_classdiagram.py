@@ -417,6 +417,63 @@ def test_name_with_no_free_spot_along_the_line_stays_in_the_middle():
     assert [f.kind for f in K.check(d).failures] == ["text_on_box"]
 
 
+def test_name_moves_along_the_line_when_its_middle_only_touches_another_line(monkeypatch):
+    # 상자에는 안 걸려도 가운데 후보 둘을 U→D 세로선(x 195)이 지나면 빈 자리가 아니라 선을 따라 옮긴다. 가운데에만 두면 그 선이
+    # 이름을 지나 불합격이다
+    data = two_boxes(kind="dependency", name="has")
+    data["classes"] += [{"name": "U", "left": 150, "top": -150}, {"name": "D", "left": 150, "top": 150}]
+    data["relations"].append({"kind": "association", "from": "U", "to": "D"})
+    d = C.render(data)
+    label = d.layout.relations[0].labels[0]
+    assert (label.x, label.y) not in C.name_spots(((90, 24), (300, 24)), "has") and K.check(d).passed
+    middle_only(monkeypatch)
+    assert kinds_of(C.render(data)) == ["line_through_text"]
+
+
+def test_widened_moves_are_undone_when_the_whole_diagram_gets_more_faults(monkeypatch):
+    # 상자 둘 사이에 관계 넷이 포개진 그림. 둘째 관계의 이름은 가운데가 선과 앞 이름에만 닿아(상자에는 안 걸려) 옮기는 조건을 넓혀야
+    # 옮겨 가는데, 그 자리를 뒤 관계의 글자가 쓰고 있어 뒤 글자가 밀린다. 넓히기만 하면 그림 전체의 걸린 것이 (4, 0)으로 좁은 조건의
+    # (3, 0)보다 많으니 좁은 조건의 배치를 쓴다
+    data = {"classes": [{"name": "C0", "left": -10, "top": 190}, {"name": "C1", "left": -30, "top": 80}],
+            "relations": [{"kind": "aggregation", "from": "C1", "to": "C0", "name": "«use»", "to_multiplicity": "*"},
+                          {"kind": "dependency", "from": "C1", "to": "C0", "name": "«use»"},
+                          {"kind": "composition", "from": "C0", "to": "C1", "from_multiplicity": "0..*"},
+                          {"kind": "composition", "from": "C0", "to": "C1", "name": "places", "from_multiplicity": "0..*"}]}
+    real = B._labels
+    seen = {}
+
+    def spy(spots, *args, wide):
+        out = real(spots, *args, wide=wide)
+        seen[wide] = spots.misses(0)
+        return out
+
+    def labels_of(drawing):
+        return [r.labels for r in drawing.layout.relations]
+
+    with monkeypatch.context() as m:
+        m.setattr(B, "_labels", spy)
+        d = C.render(data)
+    assert seen == {True: (4, 0), False: (3, 0)}
+    with monkeypatch.context() as m:
+        m.setattr(B, "_labels", lambda spots, *args, wide: real(spots, *args, wide=False))
+        narrow = C.render(data)
+    with monkeypatch.context() as m:
+        m.setattr(B, "_labels", lambda spots, *args, wide: (real(spots, *args, wide=True)[0], False))  # 견주지 않고 넓힌 쪽을 쓴다
+        wide = C.render(data)
+    assert labels_of(d) == labels_of(narrow) != labels_of(wide)
+    assert (len(K.check(wide).failures), len(K.check(d).failures)) == (5, 4)
+
+
+def test_layout_without_widened_moves_is_laid_out_once(monkeypatch):
+    # 좁은 조건이라면 옮기지 않았을 이름이 없으면(여기서는 이름이 상자에 막혀 두 조건 모두 옮긴다) 좁은 조건으로 다시 놓지 않는다
+    calls = []
+    real = B._labels
+    monkeypatch.setattr(B, "_labels", lambda spots, *args, wide: calls.append(wide) or real(spots, *args, wide=wide))
+    d = C.render(walled(120, 260, kind="association", name="has", from_multiplicity="1"))
+    (r,) = d.layout.relations
+    assert calls == [True] and (r.labels[0].x, r.labels[0].y) not in C.name_spots(r.points, "has")
+
+
 def test_label_faults_count_each_element_each_relation_line_and_each_label():
     # 글자 하나가 요소 둘, 끝을 품은 요소의 테두리 선 둘, 관계 r1의 선분 둘과 r2의 선분 하나, 앞서 놓은 글자 하나에 걸리면 걸린 것은
     # 요소 둘 + 테두리 하나 + 관계 둘 + 글자 하나 = 6이다(검사도 요소마다·관계마다·글자 쌍마다 하나씩 알린다)
