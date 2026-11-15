@@ -11,7 +11,7 @@ import math
 import re
 from functools import lru_cache
 from dataclasses import replace
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 from . import boxdiagram as B
 from . import text as T
@@ -202,12 +202,16 @@ class UseCaseRules(Rules):
         parent_of = {e.key: e.parent for _, e in elements}
 
         def subject(key: str) -> tuple[bool, Optional[str]]:
-            """(주체를 알 수 있는지, 주체 — 품은 가장 가까운 시스템 경계, 경계 밖이면 None). 품은 쪽의 in이 틀렸으면(읽히지 않은
-            요소·품을 수 없는 요소·고리 — 엔진이 이미 알렸다) 알 수 없다."""
+            """(주체를 알 수 있는지, 주체 — 품은 가장 가까운 시스템 경계, 경계 밖이면 None). 그 경계까지의 in이 맞으면 안다 — 경계
+            바깥쪽 in이 틀린 것은 주체를 바꾸지 않는다. 품은 경계가 없으면 끝까지 in이 맞아야 경계 밖으로 친다. 틀린 in(읽히지 않은 요소·
+            품을 수 없는 요소·고리)은 엔진이 이미 알렸다."""
             chain = B.ancestors(parent_of, key)
-            if parent_of.get(chain[-1] if chain else key) is not None or not all(holds(k) for k in chain):
-                return False, None
-            return True, next((k for k in chain if kinds[k] == "system"), None)
+            for k in chain:
+                if not holds(k):
+                    return False, None
+                if kinds[k] == "system":
+                    return True, k
+            return parent_of.get(chain[-1] if chain else key) is None, None
 
         plan = _Plan()
         inherits: list[tuple[str, B.Relation]] = []
@@ -248,9 +252,9 @@ class UseCaseRules(Rules):
             "유즈케이스끼리 잇는 연관은 입력 오류다(서로 다른 시스템 경계이거나 한쪽만 경계 안인 유즈케이스끼리는 받는다).",
             "  - 규칙: 일반화는 액터끼리, 유즈케이스끼리 긋는다. 종류가 다른 일반화, 고리를 이루는 일반화(A의 부모가 B이고 B의 부모가 "
             "다시 A인 것 — 여러 단계도)는 입력 오류다.",
-            '  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — 다른 '
-            "관계에 달면 입력 오류다. 다른 스테레오타입은 어느 관계에든 단다. 자기 자신을 포함하거나 확장하는 관계와 고리를 이루는 "
-            "«include»끼리·«extend»끼리(A가 B를, B가 다시 A를 포함하거나 확장하는 것 — 여러 단계도)도 입력 오류다(«include»와 "
+            '  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — 공용 '
+            '입력의 "어느 관계에든 단다"와 달리 다른 관계에 달면 입력 오류다. 다른 스테레오타입은 어느 관계에든 단다. 자기 자신을 '
+            "포함하거나 확장하는 관계와 고리를 이루는 «include»끼리·«extend»끼리(A가 B를, B가 다시 A를 포함하거나 확장하는 것 — 여러 단계도)도 입력 오류다(«include»와 "
             "«extend»가 섞인 고리는 받는다)."])
 
 
@@ -332,16 +336,21 @@ class _Plan:
             return f"{label}로 두면 고리가 된다({' → '.join(_show(k) for k in [a, *back])}{how})"
         return None
 
-    def offer(self, path: str, what: str, options: list[tuple[str, str, Edge, str]], maybe: bool, together: str = "") -> str:
-        """options는 (뒤에 말이 이어지는 꼴, 끝맺는 꼴, 그 말대로 바꾼 관계, 그 바꿈을 부르는 말 — 의존·일반화 등) — 다른 뜻의
+    def offer(self, path: str, what: str, options: list[tuple[str, str, Union[Edge, list[Edge]], str]], maybe: bool,
+              together: str = "") -> str:
+        """options는 (뒤에 말이 이어지는 꼴, 끝맺는 꼴, 그 말대로 바꾼 관계 — 여럿이면 다 되어야 한다, 그 바꿈을 부르는 말 — 의존·일반화 등) — 다른 뜻의
         바꿈이다. 문제가 없는 것만 권하고 그 관계를 계획에 더한다. 막힌 바꿈은 까닭을 적는다 — 적지 않으면 그 바꿈도 된다고 읽힌다.
         maybe면 권하는 말이 뜻에 따른 것이라(…이면 바꾼다) 끝에 아니면 지우라는 말을 붙인다. what은 이 관계를 부르는
         말(관계·연관·일반화)이다. together는 모든 바꿈이 될 때 하나로 묶어 쓰는 말(뒤에 말이 이어지는 꼴)이다."""
         drop = f"이 {what}{B.josa(what, '을', '를')} 지운다"
-        problems = [self.clash(o[2]) for o in options]
+        def edges(o) -> list[Edge]:
+            return o[2] if isinstance(o[2], list) else [o[2]]
+
+        problems = [next((p for p in map(self.clash, edges(o)) if p), None) for o in options]
         good = [o for o, p in zip(options, problems) if p is None]
         for o in good:
-            self.add(o[2], path)
+            for edge in edges(o):
+                self.add(edge, path)
         if not good:  # 바꿈이 여럿이면 저마다 막힌 까닭을 이름과 함께 적는다
             if len(options) == 1:
                 return f"{problems[0]}. {drop}"
@@ -378,6 +387,23 @@ class _InOrder(Reader):
 
 PICK = "(자기 자신으로 가거나, 고리를 이루거나, 이미 있는 관계와 같아지지 않게 고른다)"  # 사람이 고르는 끝을 권할 때 — 고를 요소를 몰라 계획으로 볼 수 없다
 UNASSOCIATE = "(다중도·navigable이 있으면 뺀다)"  # 연관을 다른 종류로 바꾸라고 할 때 — 그 칸은 연관만 받는다
+FLIP = "뜻에 맞게 from·to를 바꿔도 된다"
+
+
+def _either(plan: _Plan, clause: str, edge: Edge, name: str, side: str, extra: str = "") -> tuple[str, str, list[Edge], str]:
+    """방향이 없는 연관을 방향이 있는 관계(edge — from·to는 연관 그대로)로 바꾸라는 바꿈 하나(_Plan.offer의 options 꼴). side는
+    from이 무엇인지(포함하는 쪽·자식 등)이고, extra는 같은 괄호에 덧붙일 말이다. 뜻에 맞게 from·to를 바꿔도 되게 두 방향을 다 계획으로 보고, 한 방향만 되면 어느 쪽인지
+    적는다. 두 방향 다 막히면 offer가 막힌 까닭을 적는다."""
+    kind, a, b, stereotype = edge
+    back = (kind, b, a, stereotype)
+    ahead, behind = plan.clash(edge), plan.clash(back)
+    if ahead is None and behind is None:
+        return f"{clause}(from이 {side}{extra} — {FLIP})", "", [edge, back], name
+    if ahead is None:
+        return f"{clause}(from이 {side}{extra} — from·to를 바꾸면 안 된다: {behind})", "", [edge], name
+    if behind is None:
+        return f"{clause}(from이 {side}{extra} — 그대로는 안 되고 from·to를 바꿔야 한다: {ahead})", "", [back], name
+    return clause, "", [edge], name
 
 
 def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str,
@@ -388,7 +414,8 @@ def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str
         what = "포함" if _stereo(rel) == "include" else "확장"
         return path, f"유즈케이스는 자기 자신을 {what}할 수 없다(«{_stereo(rel)}») — 이 관계를 지운다"
     if fault == "step":
-        return _at(path, "stereotype"), (f"«include»·«extend»는 유즈케이스 사이의 dependency에만 단다(이 관계는 {rel.kind!r}, "
+        where = path if "system" in (s, t) else _at(path, "stereotype")  # 경계가 끼면 고칠 곳은 stereotype보다 경계 쪽 끝이다
+        return where, (f"«include»·«extend»는 유즈케이스 사이의 dependency에만 단다(이 관계는 {rel.kind!r}, "
                                          f"{ends}) — {_step_fix(plan, path, rel, s, t)}")
     if fault == "system_generalization":
         keys = ", ".join(_show(k) for k, kind in ((a, s), (b, t)) if kind == "system")
@@ -420,9 +447,16 @@ def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str
     problem = (f"{where} 유즈케이스끼리 잇는 연관이다({ends}) — 같은 시스템 경계 안이거나 둘 다 경계 밖인 유즈케이스는 연관으로 "
                "잇지 않는다")
     change = f"kind를 'dependency'로 바꾸고{UNASSOCIATE} stereotype을"
-    how = plan.offer(path, "연관", [(f"포함이면 {change} 'include'로 하고", "", ("dependency", a, b, "include"), "«include»"),
-                                   (f"확장이면 {change} 'extend'로 하고", "", ("dependency", a, b, "extend"), "«extend»")],
-                     maybe=True, together=f"포함·확장이면 {change} 'include'나 'extend'로 하고")
+    options = [_either(plan, f"포함이면 {change} 'include'로 하고", ("dependency", a, b, "include"), "«include»", "포함하는 쪽"),
+               _either(plan, f"확장이면 {change} 'extend'로 하고", ("dependency", a, b, "extend"), "«extend»", "확장하는 쪽")]
+    together = ""
+    if all(len(o[2]) == 2 for o in options):
+        together = f"포함·확장이면 {change} 'include'나 'extend'로 하고(from이 포함·확장하는 쪽 — {FLIP})"
+    if rel.stereotype is not None:  # «include»·«extend» 밖의 stereotype — 그 뜻대로 의존으로만 바꿔도 된다
+        options.append((f"{_show(rel.stereotype)} 의존을 뜻했으면 kind만 'dependency'로 바꾸고{UNASSOCIATE}", "",
+                        ("dependency", a, b, _stereo(rel)), "의존"))
+        together = ""
+    how = plan.offer(path, "연관", options, maybe=True, together=together)
     return path, f"{problem}. {how}"
 
 
@@ -434,9 +468,9 @@ def _actors_fix(plan: _Plan, path: str, rel: B.Relation, what: str) -> str:
                     "일반화")]
     else:
         drop = " stereotype을 빼고" if _step(rel) else ""
-        fields = ", 다중도·navigable이 있으면 뺀다" if rel.kind == "association" else ""  # UNASSOCIATE를 괄호 하나로
-        options = [(f"한 액터가 다른 액터의 한 종류면{drop} kind를 'generalization'으로 바꾸고(from이 자식{fields})", "",
-                    ("generalization", rel.source, rel.target, None), "일반화")]
+        fields = ", 다중도·navigable이 있으면 뺀다" if rel.kind == "association" else ""  # UNASSOCIATE를 from 괄호에 함께
+        clause = f"한 액터가 다른 액터의 한 종류면{drop} kind를 'generalization'으로 바꾸고"
+        options = [_either(plan, clause, ("generalization", rel.source, rel.target, None), "일반화", "자식", fields)]
     return plan.offer(path, what, options, maybe=True)
 
 
