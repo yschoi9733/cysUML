@@ -759,13 +759,21 @@ def test_a_stem_of_bends_under_the_point_is_set_upright_without_a_zero_length_pi
 
 
 def test_three_trunk_kinds_are_not_split_and_the_description_says_nothing_of_points():
-    # 세 종류를 나누는 요령은 도구 설명에 없으니 엔진도 나누지 않고(이 PR 전처럼 가운데), 설명을 만들다 멈추지도 않는다
+    # 세 종류를 받는 도구의 요령은 도구 설명에 없으니 엔진도 나누지 않고(이 PR 전처럼 가운데), 설명을 만들다 멈추지도 않는다 — 부모로
+    # 셋이 다 오든 둘만 오든 같다
     spec = B.Spec(SHAPES, {**RELATIONS, "extends": B.RelationType("확장", end=B.TRIANGLE_HEAD, trunk=True, role="자식")})
-    d = draw([el("class", "P", 200, 0, width=300), el("class", "A", 0, 200), el("class", "B", 200, 200),
-              el("class", "C", 400, 200)],
-             [rel("generalization", "A", "P"), rel("realization", "B", "P"), rel("extends", "C", "P")], spec)
-    assert d.layout.by_key["P"].aims == ()
+    boxes = [el("class", "P", 200, 0, width=300), el("class", "A", 0, 200), el("class", "B", 200, 200), el("class", "C", 400, 200)]
+    for kinds in (("generalization", "realization", "extends"), ("generalization", "extends")):
+        d = draw(boxes, [rel(k, child, "P") for k, child in zip(kinds, "ABC")], spec)
+        assert d.layout.by_key["P"].aims == (), kinds
     assert "종류마다 향하는 점" not in guide.relation_fields(spec) and guide.trunk_aims(spec) == ""
+
+
+def test_a_bend_joined_sideways_to_the_stem_is_not_moved():
+    # 자식 가운데(230.3)에서 올라온 꺾는 점은 마지막 꺾는 점(230)과 같은 높이로 가로로 이어져 세로 줄이 아니다 — 옮기지 않는다
+    d = draw([el("class", "P", 200, 0), el("class", "A", 185.3, 200), el("class", "B", 400, 200)],
+             [rel("generalization", "A", "P", via=[[230.3, 150], [230, 150]]), rel("realization", "B", "P")])
+    assert d.layout.relations[0].points[1:] == ((230.3, 150), (230, 150), (230, 48))
 
 
 def test_lines_of_one_kind_within_the_rounding_share_one_triangle():

@@ -905,11 +905,11 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType, 
 
 
 def _snap(via: tuple[Point, ...], x: float) -> tuple[Point, ...]:
-    """끝에서부터 x가 x에서 AIM_EPS 안인 꺾는 점들(종류마다 정한 점으로 곧게 올라가는 세로 줄)의 x를 x로 맞춘다 — 결과 글의 반올림
-    안에서 받은 점이라, 맞추면 그 세로 줄이 곧게 서고 같은 종류의 선들이 삼각형 하나를 함께 쓴다. 맞춰서 연달아 같아진 점은 하나로
-    줄인다(길이 0인 구간을 그리지 않게)."""
+    """마지막 꺾는 점과, 그 앞으로 이어진 세로 줄(높이가 다르고 x가 AIM_EPS 안인 점들)의 x를 x로 맞춘다 — 결과 글의 반올림 안에서
+    받은 점이라, 맞추면 종류마다 정한 점으로 올라가는 세로 줄이 곧게 서고 같은 종류의 선들이 삼각형 하나를 함께 쓴다. 가로로 이어진
+    앞 점(자식 쪽 꺾는 점 등)은 옮기지 않는다. 맞춰서 연달아 같아진 점은 하나로 줄인다(길이 0인 구간을 그리지 않게)."""
     pts, i = list(via), len(via) - 1
-    while i >= 0 and abs(pts[i][0] - x) <= AIM_EPS:
+    while i >= 0 and abs(pts[i][0] - x) <= AIM_EPS and (i == len(via) - 1 or via[i][1] != via[i + 1][1]):
         pts[i], i = (x, pts[i][1]), i - 1
     return tuple(p for j, p in enumerate(pts) if j == 0 or p != pts[j - 1])
 
@@ -1005,7 +1005,10 @@ def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> 
     """같은 부모로 공유 줄기를 받는 관계 종류가 둘 오면 종류마다 향하는 점(PlacedBox.aims)을 정한다 — 요소가 향하게 한 점(anchor)에서
     가로로 AIM_SPLIT/2씩 양쪽에, 도구가 받는 관계 차례(클래스도는 상속, 실체화)대로 왼쪽부터 둔다. 그 점을 향하는 선은 _aim이
     고른다. 끝 삼각형들이 아래 변과 위 변의 곧은 부분에 나란히 들지 않는 좁은 모양에는 정하지 않는다 — 정한 점은 어느 쪽에서 오는
-    선이든 쓸 수 있다. 세 종류 이상은 나누지 않는다(그 요령을 도구 설명에 쓰지 않았다 — guide._trunk)."""
+    선이든 쓸 수 있다. 공유 줄기 종류를 둘 받는 도구에서만 나눈다(셋 이상 받는 도구의 요령은 도구 설명에 쓰지 않았다 —
+    guide._trunk)."""
+    if sum(t.trunk for t in spec.relations.values()) != 2:
+        return placed
     kinds: dict[str, set[str]] = {}
     for r in diagram.relations:
         if spec.relations[r.kind].trunk and r.source != r.target:
