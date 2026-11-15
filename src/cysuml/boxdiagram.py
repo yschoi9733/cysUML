@@ -654,7 +654,7 @@ class _Reader(Reader):
             if e.parent not in seen:
                 self._missing(where, e.parent, seen)
             elif e.parent == e.key:
-                self.fail(where, "제 자신 안에 둘 수 없다")
+                self.fail(where, "자기 자신 안에 둘 수 없다")
             elif e.parent not in by_key:
                 continue  # 그 요소가 다른 곳이 틀려 읽히지 않았다(그 문제는 이미 알렸다)
             elif not self.spec.shapes[by_key[e.parent].kind].holds:
