@@ -286,14 +286,14 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
            "향한다.",
            "그러니 위 두 점의 [부모 가운데 x, y] 대신 상속 자식은 [상속 향하는 점의 x, 줄기 높이 y]를, 실체화 자식은 [실체화 향하는 "
            "점의 x, 줄기 높이 y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 하나만 준다).",
-           "    - 상속 자식이 모두 상속 향하는 점보다 왼쪽(같은 x 포함)에, 실체화 자식이 모두 실체화 향하는 점보다 오른쪽(같은 x "
-           "포함)에 있으면 두 줄기를 같은 높이 y에 둔다.",
-           f"아니면 같은 높이에서 두 줄기가 포개지니, 한 종류의 줄기를 y + {split}(자식 쪽)에 둔다. 그때 위 줄기 종류의 자식 가운데 "
-           f"x가 다른 종류의 향하는 점 x에서 {guide.TRUNK_NEAR}px 안이면 세로 줄끼리 포개지니 그 자식을 옮긴다.",
-           f"    - 줄기를 y와 y + {split} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 위 줄기 y를 부모 아래 {edge}에서 "
+           "    - 상속 자식의 가운데 x가 모두 실체화 향하는 점과 실체화 자식들보다 왼쪽에 있고, 실체화 자식의 가운데 x가 모두 상속 "
+           "향하는 점보다 오른쪽에 있으면 두 가로 줄기가 겹치지 않으니 같은 높이 y에 둔다.",
+           f"아니면 같은 높이에서 두 가로 줄기가 포개지니, 한 종류의 줄기를 y + {split}(자식 쪽)에 둔다. 그때 위 줄기 종류의 자식 "
+           f"가운데 x가 다른 종류의 향하는 점 x에서 {guide.TRUNK_NEAR}px 안이면 세로 줄끼리 포개지니 그 자식을 옮긴다.",
+           f"    - 줄기를 y와 y + {split} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 아래 줄기를 자식 {noun}들의 위 {edge}보다 "
+           f"{guide.TRUNK_CLEAR}px 이상 위에 둔다. 종류마다 향하는 점이 있으면 위 줄기 y도 부모 아래 {edge}에서 "
            f"{boxdiagram.TRIANGLE[0] + guide.TRUNK_CLEAR}px(삼각형 길이 + {guide.TRUNK_CLEAR}) 이상 떼어 다른 종류의 삼각형 밑을 "
-           f"지나지 않게 하고, 아래 줄기를 자식 {noun}들의 위 {edge}보다 {guide.TRUNK_CLEAR}px 이상 위에 둔다 — 부모와 자식 사이를 "
-           f"{guide.TRUNK_ROOM}px 이상 띄우고 y를 가운데쯤에 두면 둘 다 맞는다.",
+           f"지나지 않게 한다 — 부모와 자식 사이를 {guide.TRUNK_ROOM}px 이상 띄우고 y를 가운데쯤에 두면 둘 다 맞는다.",
            f"    - 결과의 부모 자리 뒤에 종류마다 향하는 점이 덧붙지 않으면(부모 아래 {edge}" + ("이" if edge == "변" else "가")
            + f" {narrow}px보다 좁아 삼각형 둘이 나란히 들지 않을 때 등) 한 종류만 위대로 아래 {edge} 가운데에 모으고, 다른 종류는 "
            f"옆 {edge}{to} 들인다.",
@@ -466,11 +466,17 @@ def test_two_kinds_to_one_parent_given_as_the_description_says_pass(tmp_path, na
     assert [(k, x) for k, (x, _) in aims.items()] == [("상속", 270 - half), ("실체화", 270 + half)]
 
 
-@pytest.mark.parametrize("kinds", [(R, R, G, G), (G, R, G, R), (G, G, R, R)])
-def test_two_kinds_at_one_height_overlap_unless_each_kind_keeps_to_its_side(tmp_path, kinds):
-    # 설명의 "아니면 같은 높이에서 두 줄기가 포개진다" — 마지막 줄 (상속 왼쪽, 실체화 오른쪽)만 같은 높이로 합격한다
-    same, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", kinds)
-    if kinds == (G, G, R, R):
+@pytest.mark.parametrize("kinds, lefts, passes", [
+    ((G, G, R, R), LEFTS, True),
+    ((G, G, R), (0, 200, 400), True),  # 상속 자식 C1(가운데 270)이 두 점(255·285) 사이여도 실체화 점·자식보다 왼쪽이면 된다
+    ((R, R, G, G), LEFTS, False),
+    ((G, R, G, R), LEFTS, False),
+])
+def test_two_kinds_at_one_height_overlap_unless_each_kind_keeps_to_its_side(tmp_path, kinds, lefts, passes):
+    # 설명의 같은 높이 조건 — 상속 자식이 모두 실체화 점·자식보다 왼쪽이고 실체화 자식이 모두 상속 점보다 오른쪽이면 합격, 아니면
+    # 두 가로 줄기가 포개진다
+    same, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", kinds, lefts=lefts)
+    if passes:
         assert same.startswith("합격"), same
     else:
         assert same.startswith("불합격") and "선끼리 포개진다" in same, same

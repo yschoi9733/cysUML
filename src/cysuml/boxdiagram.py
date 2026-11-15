@@ -1014,10 +1014,8 @@ def split_kinds(spec: Spec) -> tuple[str, ...]:
 
 
 def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> tuple[PlacedBox, ...]:
-    """같은 부모로 split_kinds의 두 종류가 다 오면 종류마다 향하는 점(PlacedBox.aims)을 정한다 — 요소가 향하게 한 점(anchor)에서
-    가로로 AIM_SPLIT/2씩 양쪽에, split_kinds 차례(클래스도는 상속, 실체화)대로 왼쪽부터 둔다. 그 점을 향하는 선은 _aim이 고른다. 끝
-    삼각형들이 아래 변과 위 변의 곧은 부분에 나란히 들지 않는 좁은 모양에는 정하지 않는다 — 정한 점은 어느 쪽에서 오는 선이든 쓸 수
-    있다."""
+    """같은 부모로 split_kinds의 두 종류가 다 오면 종류마다 향하는 점(PlacedBox.aims)을 정한다. 위·아래 변을 함께 보는 것은 정한
+    점을 어느 쪽에서 오는 선이든 쓸 수 있게 하려는 것이다."""
     split = split_kinds(spec)
     if not split:
         return placed

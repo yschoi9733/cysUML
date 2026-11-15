@@ -288,14 +288,14 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
                   f"가운데를 향한다. 그러니 위 두 점의 [부모 가운데 x, y] 대신 {first} 자식은 [{first} 향하는 점의 x, 줄기 높이 y]를, "
                   f"{second} 자식은 [{second} 향하는 점의 x, 줄기 높이 y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 "
                   f"x와 같으면 그 점 하나만 준다).",
-                  f"    - {first} 자식이 모두 {first} 향하는 점보다 왼쪽(같은 x 포함)에, {second} 자식이 모두 {second} 향하는 점보다 "
-                  f"오른쪽(같은 x 포함)에 있으면 두 줄기를 같은 높이 y에 둔다. 아니면 같은 높이에서 두 줄기가 포개지니, 한 종류의 줄기를 "
-                  f"y + {TRUNK_SPLIT}(자식 쪽)에 둔다. 그때 위 줄기 종류의 자식 가운데 x가 다른 종류의 향하는 점 x에서 {TRUNK_NEAR}px "
-                  f"안이면 세로 줄끼리 포개지니 그 자식을 옮긴다.",
-                  f"    - 줄기를 y와 y + {TRUNK_SPLIT} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 위 줄기 y를 부모 아래 {edge}에서 "
-                  f"{fmt_num(longest + TRUNK_CLEAR)}px({head} 길이 + {TRUNK_CLEAR}) 이상 떼어 다른 종류의 {head} 밑을 지나지 않게 하고, "
-                  f"아래 줄기를 자식 {noun}들의 위 {edge}보다 {TRUNK_CLEAR}px 이상 위에 둔다 — 부모와 자식 사이를 {TRUNK_ROOM}px 이상 "
-                  f"띄우고 y를 가운데쯤에 두면 둘 다 맞는다.",
+                  f"    - {first} 자식의 가운데 x가 모두 {second} 향하는 점과 {second} 자식들보다 왼쪽에 있고, {second} 자식의 가운데 x가 "
+                  f"모두 {first} 향하는 점보다 오른쪽에 있으면 두 가로 줄기가 겹치지 않으니 같은 높이 y에 둔다. 아니면 같은 높이에서 두 "
+                  f"가로 줄기가 포개지니, 한 종류의 줄기를 y + {TRUNK_SPLIT}(자식 쪽)에 둔다. 그때 위 줄기 종류의 자식 가운데 x가 다른 "
+                  f"종류의 향하는 점 x에서 {TRUNK_NEAR}px 안이면 세로 줄끼리 포개지니 그 자식을 옮긴다.",
+                  f"    - 줄기를 y와 y + {TRUNK_SPLIT} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 아래 줄기를 자식 {noun}들의 위 "
+                  f"{edge}보다 {TRUNK_CLEAR}px 이상 위에 둔다. 종류마다 향하는 점이 있으면 위 줄기 y도 부모 아래 {edge}에서 "
+                  f"{fmt_num(longest + TRUNK_CLEAR)}px({head} 길이 + {TRUNK_CLEAR}) 이상 떼어 다른 종류의 {head} 밑을 지나지 않게 한다 — "
+                  f"부모와 자식 사이를 {TRUNK_ROOM}px 이상 띄우고 y를 가운데쯤에 두면 둘 다 맞는다.",
                   f"    - 결과의 부모 자리 뒤에 종류마다 향하는 점이 덧붙지 않으면(부모 아래 {edge}{josa(edge, '이', '가')} "
                   f"{narrow}px보다 좁아 {head} 둘이 나란히 들지 않을 때 등) 한 종류만 위대로 아래 {edge} 가운데에 모으고, 다른 종류는 "
                   f"옆 {edge}{to} 들인다. 세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {TRUNK_SIDE}로 정하고, 그 종류의 "
