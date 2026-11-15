@@ -146,7 +146,7 @@ SYSTEM = SystemShape()
 
 SHAPES = {"actor": ACTOR, "use_case": USE_CASE, "system": SYSTEM}
 RELATIONS = {
-    "association": CLASS_RELATIONS["association"],
+    "association": RelationType("연관", navigable=True, multiplicity=True, reflexive=False),
     "dependency": CLASS_RELATIONS["dependency"],
     "generalization": RelationType("일반화", end=TRIANGLE_HEAD, trunk=True, role="자식", reflexive=False),
 }
@@ -344,7 +344,7 @@ class _Plan:
         if not good:
             return f"{'. '.join(dict.fromkeys(p for p in problems if p))}. {drop}"
         # 막힌 바꿈은 앞에 따로 적는다 — 권하는 말 뒤에 붙이면 그 말의 조건처럼 읽힌다
-        blocked = "".join(f"{o[3]}{B.josa(o[3], '은', '는')} 안 된다 — {p}. " for o, p in zip(options, problems) if p)
+        blocked = "".join(f"{o[3]}{B.josa(o[3], '은', '는')} 안 된다({p}). " for o, p in zip(options, problems) if p)
         said = [o[0] for o in good[:-1]]
         said.append(f"{good[-1][0]}, 아니면 {drop}" if maybe else good[-1][1])
         return blocked + ", ".join(said)
@@ -412,8 +412,6 @@ def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str
     where = f"같은 시스템 경계({_show(subject)}) 안의" if subject is not None else "시스템 경계 밖의"
     problem = (f"{where} 유즈케이스끼리 잇는 연관이다({ends}) — 같은 시스템 경계 안이거나 둘 다 경계 밖인 유즈케이스는 연관으로 "
                "잇지 않는다")
-    if a == b:
-        return path, f"{problem}. 자기 자신과 잇는 연관은 지운다"
     inc, ext = ("dependency", a, b, "include"), ("dependency", a, b, "extend")
     no_inc, no_ext = plan.clash(inc), plan.clash(ext)
     for edge, why in ((inc, no_inc), (ext, no_ext)):
@@ -423,18 +421,17 @@ def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str
     if no_inc is None and no_ext is None:
         how = f"포함·확장이면 {change} 'include'나 'extend'로 하고"
     elif no_inc is None:
-        how = f"포함이면 {change} 'include'로 하고(«extend»는 안 된다 — {no_ext})"
+        how = f"«extend»는 안 된다({no_ext}). 포함이면 {change} 'include'로 하고"
     elif no_ext is None:
-        how = f"확장이면 {change} 'extend'로 하고(«include»는 안 된다 — {no_inc})"
+        how = f"«include»는 안 된다({no_inc}). 확장이면 {change} 'extend'로 하고"
     else:
-        return path, f"{problem}. «include»는 안 된다 — {no_inc}. «extend»도 안 된다 — {no_ext}. 이 연관을 지운다"
+        return path, f"{problem}. «include»는 안 된다({no_inc}). «extend»도 안 된다({no_ext}). 이 연관을 지운다"
     return path, f"{problem}. {how}, 아니면 이 연관을 지운다"
 
 
 def _actors_fix(plan: _Plan, path: str, rel: B.Relation, what: str) -> str:
-    """액터끼리 잇는 관계(what — 연관·관계)의 고치는 법. 액터끼리는 일반화만 긋는다."""
-    if rel.source == rel.target:
-        return f"자기 자신과 잇는 {what}{B.josa(what, '은', '는')} 지운다"
+    """액터끼리 잇는 관계(what — 연관·관계)의 고치는 법. 액터끼리는 일반화만 긋는다. 자기 자신으로 가는 연관·일반화는 관계 종류가
+    먼저 막는다(RELATIONS의 reflexive)."""
     if rel.kind == "generalization":  # «include»·«extend»를 단 일반화
         options = [("액터 사이 일반화를 뜻했으면 stereotype을 빼고", "", ("generalization", rel.source, rel.target, None),
                     "일반화")]
@@ -448,7 +445,7 @@ def _actors_fix(plan: _Plan, path: str, rel: B.Relation, what: str) -> str:
 def _step_fix(plan: _Plan, path: str, rel: B.Relation, s: str, t: str) -> str:
     """«include»·«extend»를 유즈케이스 사이의 의존이 아닌 관계에 달았을 때의 고치는 법."""
     a, b, stereotype = rel.source, rel.target, _stereo(rel)
-    if a == b and s == t:  # 유즈케이스가 자기 자신을 포함·확장하는 의존은 _explain이 본다
+    if a == b:  # 유즈케이스가 자기 자신을 포함·확장하는 의존은 _explain이 본다
         if rel.kind == "dependency" and s == "actor":  # 액터의 자기 의존은 받는다(시스템 경계에는 관계를 잇지 않는다)
             return plan.offer(path, "관계", [("의존을 뜻했으면 stereotype을 빼고", "", ("dependency", a, a, None), "의존")],
                               maybe=True)
