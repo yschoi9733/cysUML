@@ -1000,12 +1000,17 @@ def _flat(p: PlacedBox, x: float, side: int) -> bool:
     return True
 
 
+def trunk_kinds(spec: Spec) -> tuple[str, ...]:
+    """공유 줄기를 받는 관계 종류(도구가 받는 차례). 도구 설명(guide)도 이것을 쓴다."""
+    return tuple(k for k, t in spec.relations.items() if t.trunk)
+
+
 def split_kinds(spec: Spec) -> tuple[str, ...]:
-    """종류마다 향하는 점을 나눌 공유 줄기 관계 종류 둘(도구가 받는 차례 — 이 차례로 왼쪽부터 점을 둔다). 공유 줄기 종류를 둘 받는
-    도구만 나누고, 그 밖이면 빈 튜플이다(셋 이상 받는 도구의 요령은 도구 설명에 쓰지 않았다). 엔진(_split_aims)과 도구 설명(guide)이
-    함께 쓴다."""
-    kinds = tuple(k for k, t in spec.relations.items() if t.trunk)
-    return kinds if len(kinds) == 2 else ()
+    """종류마다 향하는 점을 나눌 공유 줄기 관계 종류 둘(도구가 받는 차례 — 이 차례로 왼쪽부터 점을 둔다). 공유 줄기 종류를 둘 받고
+    둘 다 끝 모양이 삼각형인 도구만 나누고, 그 밖이면 빈 튜플이다 — 셋 이상의 요령은 도구 설명에 쓰지 않았고, 좁은 모양 판정
+    (AIM_EDGE·_flat)은 삼각형 크기로 셈한다. 엔진(_split_aims)과 도구 설명(guide)이 함께 쓴다."""
+    kinds = trunk_kinds(spec)
+    return kinds if len(kinds) == 2 and all(spec.relations[k].end is TRIANGLE_HEAD for k in kinds) else ()
 
 
 def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> tuple[PlacedBox, ...]:

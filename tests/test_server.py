@@ -279,12 +279,13 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     away = f"(부모의 모양 밖 이름이 오른쪽에 있으면 처음부터 다음 문장의 왼쪽 x2로 왼쪽 {edge}에 들인다)" if outside else ""
     split = guide.TRUNK_SPLIT
     two = (f"    - 같은 부모로 상속·실체화가 함께 오면 종류마다 향하는 점이 정해진다 — 상속은 가운데에서 왼쪽으로 {half}px, 실체화는 "
-           f'오른쪽으로 {half}px이고, 결과의 그 부모 자리 뒤에 "상속 향하는 점 x, y, 실체화 향하는 점 x, y"로 덧붙는다.',
+           f'오른쪽으로 {half}px이고, 결과의 그 부모 자리 뒤에 "상속 향하는 점 x, y, 실체화 향하는 점 x, y"로 덧붙는다(덧붙은 값을 '
+           "그대로 쓴다).",
            "상속 선은 상속 향하는 점, 실체화 선은 실체화 향하는 점 바로 아래(x가 같게)에 마지막 꺾는 "
            "점을 두면 그 점을 향해 곧게 들어가 두 종류의 삼각형이 나란히 놓이고, 그 밖의 선(꺾는 점이 없는 선도)은 그대로 가운데를 "
            "향한다.",
-           "그러니 위 두 점의 [부모 가운데 x, y] 대신 상속 자식은 [상속 향하는 점 x, y]를, 실체화 자식은 [실체화 향하는 점 x, y]를 "
-           "주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 하나만 준다).",
+           "그러니 위 두 점의 [부모 가운데 x, y] 대신 상속 자식은 [상속 향하는 점의 x, 줄기 높이 y]를, 실체화 자식은 [실체화 향하는 "
+           "점의 x, 줄기 높이 y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 하나만 준다).",
            "    - 상속 자식이 모두 상속 향하는 점보다 왼쪽(같은 x 포함)에, 실체화 자식이 모두 실체화 향하는 점보다 오른쪽(같은 x "
            "포함)에 있으면 두 줄기를 같은 높이 y에 둔다.",
            f"아니면 같은 높이에서 두 줄기가 포개지니, 한 종류의 줄기를 y + {split}(자식 쪽)에 둔다. 그때 위 줄기 종류의 자식 가운데 "
@@ -307,7 +308,7 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
     # 가운데는 그 도구의 결과에 덧붙는 것으로 셈한다 — 패키지를 받는 도구는 향하는 점, 모양 밖 이름이 있는 도구(유즈케이스도의
     # 액터·컴포넌트도의 막대사탕)는 모양 자리
     aims = any(boxdiagram.aims_off_center(s) for s in spec.shapes.values())
-    assert ("향하는 점이 덧붙어 있으면 그 점을 쓴다" in text) == aims == ("package" in spec.shapes)
+    assert ('관계 이름이 붙지 않은 "향하는 점 x, y"가 덧붙어 있으면 그 점을 쓴다' in text) == aims == ("package" in spec.shapes)
     assert ("모양 자리가 덧붙어 있으면 모양 자리로 셈한다" in text) == outside
     assert ('모양 밖 이름은 name_side "left"·"right"로 옆에 쓴다 — 위·아래면 줄기가 이름을 지난다' in text) == outside
 
@@ -613,7 +614,7 @@ def test_new_tools_tell_what_the_result_adds_to_the_places_of_their_shapes():
     assert guide.places_result(packagediagram.SPEC).startswith(guide.PLACES_RESULT + "\n" + guide.OUTSIDE_PLACES + "\n" + aim)
     # 상속·실체화를 함께 받는 도구는 종류마다 향하는 점을 덧붙인다고 끝에 적는다 — 클래스도 결과 설명도 같은 글을 쓴다
     kinds = ('  같은 부모로 상속·실체화가 함께 오는 {}는 그 뒤에 종류마다 향하는 점을 "상속 향하는 점 x, y, 실체화 향하는 점 x, '
-             'y"로 덧붙인다(마지막 꺾는 점을 그 점 바로 아래나 위에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 종류마다 그 점으로 '
+             'y"로 덧붙인다(마지막 꺾는 점을 그 점 바로 아래에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 종류마다 그 점으로 '
              "모을 때 쓴다. 모양이 좁아 두 종류의 삼각형이 나란히 들지 않으면 덧붙지 않는다).")
     assert guide.places_result(packagediagram.SPEC).endswith("\n" + kinds.format("요소"))
     class_aims = kinds.format("상자")

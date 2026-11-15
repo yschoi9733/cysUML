@@ -19,7 +19,7 @@ from typing import Iterable, Optional
 
 from .boxcheck import KINDS, bend_away
 from .boxdiagram import (AIM_EDGE, AIM_SPLIT, ARROW, ARROW_HEAD, ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec,
-                         Words, aims_off_center, josa, split_kinds)
+                         Words, aims_off_center, josa, split_kinds, trunk_kinds)
 from .canvas import MIN_SCALE, SCALE
 from .report import fmt_num
 
@@ -111,8 +111,8 @@ def _holds(spec: Spec) -> bool:
 
 
 def _trunk_types(spec: Spec) -> list[RelationType]:
-    """공유 줄기를 받는 관계 종류(도구가 받는 차례 — 둘이면 split_kinds와 같은 차례다)."""
-    return [t for t in spec.relations.values() if t.trunk]
+    """공유 줄기를 받는 관계 종류(boxdiagram.trunk_kinds 차례)."""
+    return [spec.relations[k] for k in trunk_kinds(spec)]
 
 
 def kind_aim(label: str, x: str, y: str) -> str:
@@ -129,7 +129,7 @@ def trunk_aims(spec: Spec) -> str:
     noun, labels = spec.words.noun, _joined(t.label for t in types)
     shown = ", ".join(kind_aim(t.label, "x", "y") for t in types)
     return (f"  같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오는 {noun}{josa(noun, '은', '는')} 그 뒤에 종류마다 향하는 "
-            f"점을 \"{shown}\"로 덧붙인다(마지막 꺾는 점을 그 점 바로 아래나 위에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 "
+            f"점을 \"{shown}\"로 덧붙인다(마지막 꺾는 점을 그 점 바로 아래에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 "
             f"종류마다 그 점으로 모을 때 쓴다. 모양이 좁아 두 종류의 삼각형이 나란히 들지 않으면 덧붙지 않는다).")
 
 
@@ -263,7 +263,7 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
     ga = josa(head, "이", "가")
     outside = _outside(spec)
     shape = " — 모양 자리가 덧붙어 있으면 모양 자리로 셈한다(반 픽셀이면 정수로 내린다)" if outside else ""
-    aim = ". 향하는 점이 덧붙어 있으면 그 점을 쓴다" if _aiming(spec) else ""
+    aim = ". 관계 이름이 붙지 않은 \"향하는 점 x, y\"가 덧붙어 있으면 그 점을 쓴다" if _aiming(spec) else ""
     middle = f"결과의 {noun} 자리에서 왼 + 폭/2, 위 + 높이/2{shape}{aim}"
     edges = "(모양 자리가 덧붙어 있으면 모양 자리의 변)" if outside else ""
     sides = '(모양 밖 이름은 name_side "left"·"right"로 옆에 쓴다 — 위·아래면 줄기가 이름을 지난다)' if outside else ""
@@ -283,12 +283,12 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
         away = f"(부모의 모양 밖 이름이 오른쪽에 있으면 처음부터 다음 문장의 왼쪽 x2로 왼쪽 {edge}에 들인다)" if outside else ""
         lines += [f"    - 같은 부모로 {first}·{second}{josa(second, '이', '가')} 함께 오면 종류마다 향하는 점이 정해진다 — "
                   f"{first}{josa(first, '은', '는')} 가운데에서 왼쪽으로 {half}px, {second}{josa(second, '은', '는')} 오른쪽으로 "
-                  f"{half}px이고, 결과의 그 부모 자리 뒤에 \"{first} 향하는 점 x, y, {second} 향하는 점 x, y\"로 덧붙는다. {first} 선은 "
-                  f"{first} 향하는 점, {second} 선은 {second} 향하는 점 바로 아래(x가 같게)에 마지막 꺾는 "
+                  f"{half}px이고, 결과의 그 부모 자리 뒤에 \"{first} 향하는 점 x, y, {second} 향하는 점 x, y\"로 덧붙는다(덧붙은 값을 "
+                  f"그대로 쓴다). {first} 선은 {first} 향하는 점, {second} 선은 {second} 향하는 점 바로 아래(x가 같게)에 마지막 꺾는 "
                   f"점을 두면 그 점을 향해 곧게 들어가 두 종류의 {head}{ga} 나란히 놓이고, 그 밖의 선(꺾는 점이 없는 선도)은 그대로 "
-                  f"가운데를 향한다. 그러니 위 두 점의 [부모 가운데 x, y] 대신 {first} 자식은 [{first} 향하는 점 x, y]를, {second} "
-                  f"자식은 [{second} 향하는 점 x, y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 하나만 "
-                  f"준다).",
+                  f"가운데를 향한다. 그러니 위 두 점의 [부모 가운데 x, y] 대신 {first} 자식은 [{first} 향하는 점의 x, 줄기 높이 y]를, "
+                  f"{second} 자식은 [{second} 향하는 점의 x, 줄기 높이 y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 "
+                  f"x와 같으면 그 점 하나만 준다).",
                   f"    - {first} 자식이 모두 {first} 향하는 점보다 왼쪽(같은 x 포함)에, {second} 자식이 모두 {second} 향하는 점보다 "
                   f"오른쪽(같은 x 포함)에 있으면 두 줄기를 같은 높이 y에 둔다. 아니면 같은 높이에서 두 줄기가 포개지니, 한 종류의 줄기를 "
                   f"y + {TRUNK_SPLIT}(자식 쪽)에 둔다. 그때 위 줄기 종류의 자식 가운데 x가 다른 종류의 향하는 점 x에서 {TRUNK_NEAR}px "

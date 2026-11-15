@@ -767,8 +767,11 @@ def test_three_trunk_kinds_are_not_split_and_the_description_says_nothing_of_poi
         d = draw(boxes, [rel(k, child, "P") for k, child in zip(kinds, "ABC")], spec)
         assert d.layout.by_key["P"].aims == (), kinds
     assert "종류마다 향하는 점" not in guide.relation_fields(spec) and guide.trunk_aims(spec) == ""
-    # 엔진과 도구 설명이 함께 쓰는 판정: 두 종류를 받는 도구만 그 차례로, 나머지는 빈 튜플
+    # 엔진과 도구 설명이 함께 쓰는 판정: 두 종류를 받고 둘 다 끝 모양이 삼각형인 도구만 그 차례로, 나머지는 빈 튜플(좁은 모양
+    # 판정이 삼각형 크기로 셈한다)
     assert B.split_kinds(SPEC) == ("generalization", "realization") and B.split_kinds(spec) == ()
+    other_end = B.Spec(SHAPES, {**RELATIONS, "realization": B.RelationType("실체화", end=B.FILLED_DIAMOND, trunk=True)})
+    assert B.trunk_kinds(other_end) == ("generalization", "realization") and B.split_kinds(other_end) == ()
 
 
 def test_a_bend_joined_sideways_to_the_stem_is_not_moved():
