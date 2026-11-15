@@ -343,7 +343,8 @@ def test_shared_trunk_of_other_relations_fails(kind_a, kind_b):
     r = tree(kind_a, kind_b)
     assert kinds(r) == ["line_overlap"]
     # 고치는 법은 점을 따르지 않은 선이 걸렸을 때만 결과에 덧붙은 그 종류의 점을 알린다
-    aims = '결과의 부모 자리 뒤에 덧붙은 점("상속 향하는 점 180, 24", "실체화 향하는 점 210, 24") 바로 아래에 둔다'
+    aims = ('상속·실체화 선은 마지막 꺾는 점을 결과의 부모 자리 뒤에 덧붙은 같은 종류의 점("상속 향하는 점 180, 24", "실체화 향하는 점 210, 24")'
+            ' 바로 아래에 둔다')
     assert (aims in r.failures[0].hint) == (kind_b == "realization"), r.failures[0].hint
     if kind_b == "realization":
         d = C.render({"classes": [box("P", 150, 0), box("C1", 0, 200), box("C2", 300, 200)],

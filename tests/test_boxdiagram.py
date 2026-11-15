@@ -768,12 +768,13 @@ def test_a_line_from_a_child_a_little_off_the_point_rises_upright_and_shares_the
 
 
 def test_overlap_hint_names_the_point_a_line_did_not_follow():
-    # 상속은 제 점(230)을 따르고, 실체화는 가운데(245) 바로 아래에서 곧게 와 가운데로 간다 — 두 삼각형이 겹치는 항목의 고치는 법이
-    # 따르지 않은 실체화의 점만 알린다
+    # 상속은 상속 점(230)을 따르고, 실체화는 가운데(245) 바로 아래에서 곧게 와 가운데로 간다 — 두 삼각형이 겹치는 항목의 고치는
+    # 법이 따르지 않은 실체화의 점만, 종류 이름을 붙여 알린다
     d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 200, 200)],
              [rel("generalization", "A", "P", via=[[45, 120], [230, 120]]), rel("realization", "B", "P")])
     (f,) = [f for f in K.check(d).failures if f.kind == "head_overlap"]
-    assert '덧붙은 점("실체화 향하는 점 260, 24") 바로 아래에 둔다' in f.hint and "상속 향하는 점" not in f.hint
+    assert f.hint.endswith(' 실체화 선은 마지막 꺾는 점을 결과의 부모 자리 뒤에 덧붙은 같은 종류의 점("실체화 향하는 점 260, 24") '
+                           '바로 아래에 둔다.')
 
 
 def test_overlap_hint_says_right_above_the_point_for_a_parent_drawn_below():
@@ -781,7 +782,7 @@ def test_overlap_hint_says_right_above_the_point_for_a_parent_drawn_below():
     d = draw([el("class", "P", 200, 300), el("class", "A", 0, 100), el("class", "B", 200, 100)],
              [rel("generalization", "A", "P", via=[[45, 200], [230, 200]]), rel("realization", "B", "P")])
     (f,) = [f for f in K.check(d).failures if f.kind == "head_overlap"]
-    assert '덧붙은 점("실체화 향하는 점 260, 324") 바로 위에 둔다' in f.hint and "바로 아래" not in f.hint
+    assert '같은 종류의 점("실체화 향하는 점 260, 324") 바로 위에 둔다' in f.hint and "바로 아래" not in f.hint
 
 
 def test_overlap_hint_says_nothing_of_the_points_for_a_line_entering_a_side_edge():
@@ -795,6 +796,45 @@ def test_overlap_hint_says_nothing_of_the_points_for_a_line_entering_a_side_edge
     failures = K.check(d).failures
     assert any(f.kind == "line_overlap" for f in failures)
     assert all("향하는 점" not in f.hint for f in failures)
+
+
+def test_overlap_hint_says_nothing_of_the_points_where_lines_meet_far_from_the_parent():
+    # 실체화 선은 가운데(245)로 가 P에서는 상속 삼각형과 겹치고, B 위 세로 구간에서는 D->B 연관 선과 포개진다 — 그 점을 따르면
+    # 풀리는 것은 P에서 겹친 것뿐이라, 먼 포개짐의 고치는 법에는 점을 붙이지 않는다
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 600, 300), el("class", "D", 600, 0)],
+             [rel("generalization", "A", "P", via=[[45, 120], [230, 120]]),
+              rel("realization", "B", "P", via=[[645, 150], [245, 150]]), rel("association", "D", "B")])
+    failures = K.check(d).failures
+    (head,) = [f for f in failures if f.kind == "head_overlap"]
+    (far,) = [f for f in failures if f.kind == "line_overlap"]
+    assert '같은 종류의 점("실체화 향하는 점 260, 24") 바로 아래에 둔다' in head.hint
+    assert "향하는 점" not in far.hint
+
+
+def test_a_bend_moved_onto_the_point_and_into_a_box_names_where_it_was_moved():
+    # A의 왼쪽 변(229) 바로 왼쪽에 준 꺾는 점(228, 210)은 상속 점의 x(230)로 맞추면 A 안에 든다 — 오류 글이 맞춘 자리도 적어, A 밖에
+    # 준 점을 안이라고 하는 것처럼 읽히지 않게 한다
+    with pytest.raises(InputError) as e:
+        draw([el("class", "P", 200, 0), el("class", "A", 229, 200), el("class", "B", 400, 200)],
+             [rel("generalization", "A", "P", via=[[228, 210]]), rel("realization", "B", "P")])
+    assert "꺾는 점 (228.0, 210.0)(상속 향하는 점의 x에 맞추면 (230.0, 210.0))이 from" in str(e.value)
+
+
+def test_a_start_shape_is_drawn_toward_the_start_the_line_was_given():
+    # 자식에서부터 곧게 올린 선(출발 끝을 230으로 옮김)의 from 쪽 끝 모양도 옮긴 점(230, 224)을 받는다 — 옛 anchor(231.76)를 받으면
+    # 소켓처럼 그 점을 보고 그리는 모양이 선에서 비켜난다
+    seen = []
+
+    def mark(c, tip, frm, at, o):
+        seen.append(at)
+        return c.line((tip, frm), owner=o)
+
+    marked = B.RelationType("상속", end=B.TRIANGLE_HEAD, start=B.EndShape("표시", 0, mark), trunk=True, role="자식",
+                            reflexive=False)
+    draw([el("class", "P", 200, 0), el("class", "A", 186.76, 200), el("class", "B", 400, 200)],
+         [rel("generalization", "A", "P"), rel("realization", "B", "P")],
+         B.Spec(SHAPES, {**RELATIONS, "flow": FLOW, "generalization": marked}))
+    assert seen and set(seen) == {(230, 224)}
 
 
 def test_a_stem_of_bends_under_the_point_is_set_upright_without_a_zero_length_piece():
