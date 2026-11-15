@@ -450,13 +450,15 @@ class Label:
 @dataclass(frozen=True)
 class PlacedRelation:
     """owner는 그 관계를 그린 기록의 owner다 — 보통 "출발->도착"이고, 같은 이름이 앞에 있으면 "#2"·"#3"을 붙인다. aim은 이 선이
-    도착 요소의 anchor 대신 향하는 종류마다의 점이다(_aim — 없으면 None)."""
+    도착 요소의 anchor 대신 향하는 종류마다의 점이다(_aim — 없으면 None). start는 출발 요소에서 선을 낸 점이다(_from_at — 없으면
+    출발 요소의 anchor)."""
 
     relation: Relation
     owner: str
     points: tuple[Point, ...]
     labels: tuple[Label, ...]
     aim: Optional[Point] = None
+    start: Optional[Point] = None
 
 
 @dataclass(frozen=True)
@@ -1038,25 +1040,27 @@ class _Spots:
 
 
 def _end_shape(r: Relation, t: RelationType, key: str) -> Optional[EndShape]:
-    """선 처음(from)이나 끝(to)에 그리는 모양 — 입력 확인(_route)과 그리기(_draw_relation)가 함께 쓴다. 고정 모양이 있는 종류는 그
-    쪽 방향(navigable)을 읽기에서 받지 않으므로 둘 중 하나다."""
+    """선 처음(from)이나 끝(to)에 그리는 모양. 고정 모양이 있는 종류는 그 쪽 방향(navigable)을 읽기에서 받지 않으므로 둘 중
+    하나다."""
     fixed = t.start if key == "from" else t.end
     return fixed or (ARROW_HEAD if t.navigable and r.navigable in (key, "both") else None)
 
 
 def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType, w: Words,
-           aim: Optional[Point] = None) -> tuple[Optional[tuple[Point, ...]], list[str]]:
+           aim: Optional[Point] = None) -> tuple[Optional[tuple[Point, ...]], list[str], Point]:
     """관계선의 점들(선 끝은 요소가 향하게 한 점(anchor — 보통 테두리 가운데. 도착 요소에서 종류마다 정한 점(aim, _aim이 고른다)을
     향하는 선은 그 점)에서 첫·마지막 꺾는 점으로, 꺾는 점이 없으면 다른 요소의 그 점으로 가는 선이 테두리와 만나는 곳)과, 그렇게 그을
-    수 없으면 그 까닭들. aim을 향하는 선은 끝 꺾는 점들의 x를 aim의 x로 맞추고(_snap), 출발 끝은 _from_at이 정한다."""
+    수 없으면 그 까닭들, 그리고 출발 요소에서 선을 낸 점(_from_at — from 쪽 끝 모양도 이 점을 받는다). aim을 향하는 선은 끝 꺾는
+    점들의 x를 aim의 x로 맞춘다(_snap)."""
     cb = aim or b.anchor
     assert cb is not None
-    via = r.via if aim is None else _snap(r.via, aim[0])
+    via = r.via if aim is None else _snap(r.via, aim)
     ca = _from_at(a, via, aim)
 
     def given(j: int, q: Point) -> str:
         """입력의 꺾는 점 j. 종류 점의 x로 맞춘 점(q)이 다르면 맞춘 자리도 적는다 — 테두리와 견준 것은 맞춘 자리다."""
-        moved = f"({t.label} 향하는 점의 x에 맞추면 {tuple(map(float, q))})" if tuple(r.via[j]) != tuple(q) else ""
+        moved = (f"({t.label} 향하는 점의 x에 맞추면 ({fmt_num(q[0])}, {fmt_num(q[1])}))"
+                 if tuple(r.via[j]) != tuple(q) else "")
         return f"{r.via[j]}{moved}"
 
     if via:
@@ -1066,16 +1070,16 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType, 
                     for p, p_, j, q, key in ((start, a, 0, via[0], "from"), (end, b, len(r.via) - 1, via[-1], "to"))
                     if p is None]
         if problems:
-            return None, problems
+            return None, problems, ca
     else:
         start, end = a.border.exit(ca, cb), b.border.exit(cb, ca)
         if start is None or end is None or (end[0] - start[0]) * (cb[0] - ca[0]) + (end[1] - start[1]) * (cb[1] - ca[1]) <= 0:
             return None, [f"{path}: {w.noun} {_show(r.source)}와 {_show(r.target)}가 겹치거나 맞닿아 둘 사이에 선을 그을 자리가 "
-                          f"없다 — 떼어 놓거나 {w.noun} 밖을 도는 꺾는 점(via)을 준다"]
+                          f"없다 — 떼어 놓거나 {w.noun} 밖을 도는 꺾는 점(via)을 준다"], ca
     assert start is not None and end is not None
     points = (start, *via, end)
     if start == end:
-        return None, [f"{path}: 선의 두 끝이 같은 점 {start}이다 — 첫·마지막 꺾는 점을 {w.noun}의 다른 쪽으로 옮긴다"]
+        return None, [f"{path}: 선의 두 끝이 같은 점 {start}이다 — 첫·마지막 꺾는 점을 {w.noun}의 다른 쪽으로 옮긴다"], ca
     problems = []
     # 선 끝은 테두리 위에 있으므로, 테두리에서 EDGE_SLACK 안쪽으로 줄인 것을 지나면 선이 끝 요소 안으로 들어간 것이다.
     # 요소가 선 위에 그려지면 그 부분은 가려지므로 선이 엉뚱한 곳에서 시작하는 것처럼 보인다.
@@ -1112,22 +1116,25 @@ def _route(r: Relation, a: PlacedBox, b: PlacedBox, path: str, t: RelationType, 
                                 "떼어 놓는다")
     if sum(lengths) > MAX_LINE:
         problems.append(f"{path}: 선 길이 {fmt_num(sum(lengths))}가 {MAX_LINE}을 넘는다 — {w.noun}를 가까이 모은다")
-    return (None if problems else _shorten(points, *gaps)), problems
+    return (None if problems else _shorten(points, *gaps)), problems, ca
 
 
-def _snap(via: tuple[Point, ...], x: float) -> tuple[Point, ...]:
-    """종류마다 정한 점으로 올라가는 끝 세로 줄을 그 점의 x로 맞춘다 — 결과 글의 반올림 안에서 받은 점이라, 맞춰야 세로 줄이 곧게
-    서고 같은 종류의 선들이 삼각형 하나를 함께 쓴다."""
+def _snap(via: tuple[Point, ...], aim: Point) -> tuple[Point, ...]:
+    """종류마다 정한 점(aim)으로 올라가는 끝 세로 줄을 그 점의 x로 맞춘다 — x가 AIM_EPS 안인 꺾는 점은 몇 px 셈 실수까지 그 점을
+    뜻한 것으로 보고, 맞춰야 세로 줄이 곧게 서고 같은 종류의 선들이 삼각형 하나를 함께 쓴다. 세로 줄은 마지막 꺾는 점에서 거슬러
+    가며 그 점에서 멀어지는 쪽으로만 이어진 점들이다 — 가로로 이어지거나 위아래가 뒤집히면(지그재그) 멈춰, 받은 선이 되짚어 가는
+    선으로 바뀌지 않게 한다."""
     pts, i = list(via), len(via) - 1
-    while i >= 0 and abs(pts[i][0] - x) <= AIM_EPS and (i == len(via) - 1 or via[i][1] != via[i + 1][1]):
-        pts[i], i = (x, pts[i][1]), i - 1
+    away = via[-1][1] - aim[1] if via else 0.0  # 마지막 꺾는 점이 그 점에서 떨어진 쪽(아래면 양수)
+    while i >= 0 and abs(pts[i][0] - aim[0]) <= AIM_EPS and (i == len(via) - 1 or (via[i][1] - via[i + 1][1]) * away > 0):
+        pts[i], i = (aim[0], pts[i][1]), i - 1
     return tuple(p for j, p in enumerate(pts) if j == 0 or p != pts[j - 1])
 
 
 def _from_at(a: PlacedBox, via: tuple[Point, ...], aim: Optional[Point]) -> Point:
     """출발 요소 a에서 선이 나가는 점. 종류 점(aim)을 따르는 선이 꺾는 점 없이, 또는 첫 꺾는 점이 그 x에 맞춰져(_snap) 올라가고 a의
     anchor가 그 x에서 AIM_EPS 안이면 그 x의 점이다 — 자식에서부터 곧게 올라가 끝 삼각형이 그 점에 정확히 앉아 같은 종류 선들과
-    하나로 모인다. 그 밖이면 anchor다. 선을 내는 _route와 끝 모양을 그리는 _draw_relation이 함께 쓴다."""
+    하나로 모인다. 그 밖이면 anchor다(첫 꺾는 점만 그 x이고 a가 멀면 선을 옮기지 않는다)."""
     ca = a.anchor
     assert ca is not None
     if aim is not None and (not via or via[0][0] == aim[0]):
@@ -1225,14 +1232,14 @@ def _flat(p: PlacedBox, x: float, side: int) -> bool:
 
 
 def trunk_kinds(spec: Spec) -> tuple[str, ...]:
-    """공유 줄기를 받는 관계 종류(도구가 받는 차례). 도구 설명(guide)도 이것을 쓴다."""
+    """공유 줄기를 받는 관계 종류(도구가 받는 차례)."""
     return tuple(k for k, t in spec.relations.items() if t.trunk)
 
 
 def split_kinds(spec: Spec) -> tuple[str, ...]:
     """종류마다 향하는 점을 나눌 공유 줄기 관계 종류 둘(도구가 받는 차례 — 이 차례로 왼쪽부터 점을 둔다). 공유 줄기 종류를 둘 받고
     둘 다 끝 모양이 삼각형인 도구만 나누고, 그 밖이면 빈 튜플이다 — 셋 이상의 요령은 도구 설명에 쓰지 않았고, 좁은 모양 판정
-    (AIM_EDGE·_flat)은 삼각형 크기로 셈한다. 엔진(_split_aims)과 도구 설명(guide)이 함께 쓴다."""
+    (AIM_EDGE·_flat)은 삼각형 크기로 셈한다."""
     kinds = trunk_kinds(spec)
     return kinds if len(kinds) == 2 and all(spec.relations[k].end is TRIANGLE_HEAD for k in kinds) else ()
 
@@ -1270,8 +1277,7 @@ def _aim(r: Relation, a: PlacedBox, b: PlacedBox) -> Optional[Point]:
 
 
 def kind_aim(label: str, x: str, y: str) -> str:
-    """결과 글의 자리 뒤에 덧붙는 종류마다 향하는 점 하나("상속 향하는 점 x, y") — 결과 글(server), 그 설명(guide.trunk_aims),
-    검사의 고치는 법(boxcheck)이 함께 쓴다."""
+    """결과 글의 자리 뒤에 덧붙는 종류마다 향하는 점 하나("상속 향하는 점 x, y")."""
     return f"{label} 향하는 점 {x}, {y}"
 
 
@@ -1287,21 +1293,21 @@ def layout(diagram: Diagram) -> Layout:
     routes = []
     aims = [_aim(r, by_key[r.source], by_key[r.target]) for r in diagram.relations]
     for i, (r, aim) in enumerate(zip(diagram.relations, aims)):
-        points, found = _route(r, by_key[r.source], by_key[r.target], _at("relations", i), spec.relations[r.kind],
-                               spec.words, aim)
+        points, found, start = _route(r, by_key[r.source], by_key[r.target], _at("relations", i), spec.relations[r.kind],
+                                      spec.words, aim)
         problems += found
-        routes.append(points)
+        routes.append((points, start))
     if problems:
         raise InputError(problems)
     used = set(by_key)
     bare = []
-    for r, points, aim in zip(diagram.relations, routes, aims):
+    for r, (points, start), aim in zip(diagram.relations, routes, aims):
         owner = base = f"{r.source}->{r.target}"
         n = 2
         while owner in used:
             owner, n = f"{base}#{n}", n + 1
         used.add(owner)
-        bare.append(PlacedRelation(r, owner, points, (), aim))
+        bare.append(PlacedRelation(r, owner, points, (), aim, start))
     sketch = Canvas()  # 선 끝 모양을 그림판과 똑같이 얻으려고 선만 한 번 그려 본다
     for p in bare:
         _draw_relation(sketch, p, spec.relations[p.relation.kind], by_key)
@@ -1354,8 +1360,8 @@ def _draw_relation(c: Canvas, r: PlacedRelation, t: RelationType, by_key: Mappin
     """선과 선 끝 모양(from 쪽, to 쪽 차례)을 그리고 그 기록과 끝 모양마다의 이름·끝 점을 돌려준다. 끝 모양은 끝 요소가 향하게 한
     점(_route가 선 끝을 낸 점)도 받는다."""
     pts, o, rel = r.points, r.owner, r.relation
-    first, last = _from_at(by_key[rel.source], pts[1:-1], r.aim), r.aim or by_key[rel.target].anchor
-    assert last is not None
+    first, last = r.start or by_key[rel.source].anchor, r.aim or by_key[rel.target].anchor
+    assert first is not None and last is not None
     line = c.line(pts, dash=t.dash, owner=o)
     ends = [(s, tip, frm, at) for key, tip, frm, at in (("from", pts[0], pts[1], first), ("to", pts[-1], pts[-2], last))
             if (s := _end_shape(rel, t, key)) is not None]  # (모양, 끝 점, 그 앞 점, 끝 요소의 점)

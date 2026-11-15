@@ -817,7 +817,16 @@ def test_a_bend_moved_onto_the_point_and_into_a_box_names_where_it_was_moved():
     with pytest.raises(InputError) as e:
         draw([el("class", "P", 200, 0), el("class", "A", 229, 200), el("class", "B", 400, 200)],
              [rel("generalization", "A", "P", via=[[228, 210]]), rel("realization", "B", "P")])
-    assert "꺾는 점 (228.0, 210.0)(상속 향하는 점의 x에 맞추면 (230.0, 210.0))이 from" in str(e.value)
+    assert "꺾는 점 (228.0, 210.0)(상속 향하는 점의 x에 맞추면 (230, 210))이 from" in str(e.value)
+
+
+def test_a_zigzag_of_bends_near_the_point_is_not_folded_into_one_stem():
+    # 상속 점(180) 가까이의 세 꺾는 점은 아래로(100→150) 갔다가 위로(150→80) 오는 지그재그다 — 그 점에서 멀어지는 쪽으로 이어진 끝
+    # 두 점만 세로 줄로 맞추고, 앞 점(184, 100)은 그대로 둬 받은 선이 되짚어 가는 선이 되지 않는다
+    d = draw([el("class", "P", 150, 0), el("class", "A", -100, 200), el("class", "B", 400, 200)],
+             [rel("generalization", "A", "P", via=[[-55, 100], [184, 100], [176, 150], [182, 80]]), rel("realization", "B", "P")])
+    assert d.layout.relations[0].points[2:] == ((184, 100), (180, 150), (180, 80), (180, 48))
+    assert K.check(d).passed
 
 
 def test_a_start_shape_is_drawn_toward_the_start_the_line_was_given():
