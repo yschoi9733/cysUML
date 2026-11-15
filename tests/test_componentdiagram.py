@@ -420,11 +420,17 @@ def error_paths(read, data):
     ([TO_CLASS], "Shop", ["elements[0].foo", "relations[0].to"]),  # to인 A는 읽혀 to 검사가 돈다
     ([rel("requires", "Pay", "A")], "A", ["elements[2].foo", "relations[0].from"]),  # from인 Pay는 읽혀 from 검사가 돈다
     ([TO_CLASS], "A", ["elements[2].foo"]),  # 읽히지 않은 끝의 검사만 건너뛴다
-    ([rel("requires", "Shop", "Shop", via=[[-50, -50], [-50, 50]])], None, ["relations[0].to"]),
-    ([rel("requires", "Shop", "Shop", via=[[-50, -50]])], None, ["relations[0]"]),  # 엔진이 넘기지 않는 소켓
 ])
 def test_wrong_socket_ends_come_with_the_other_input_errors(relations, broken, paths):
     assert error_paths(C.parse, socket_ends(relations, broken)) == paths
+
+
+@pytest.mark.parametrize("via", [[], [[-50, -50]], [[-50, -50], [-50, 50]]])
+def test_socket_to_itself_is_one_error_on_the_first_call_however_it_bends(via):
+    with pytest.raises(InputError) as e:
+        C.parse(socket_ends([rel("requires", "Shop", "Shop", via=via)]))
+    assert e.value.problems == ("relations[0]: 소켓은 자기 자신으로 갈 수 없다 — from과 to를 다른 요소로 고친다",)
+    assert "(상속·실체화·소켓은 꺾는 점이 있어도 자기 자신으로 갈 수 없다)" in C.TOOL
 
 
 def test_shared_engine_reads_check_socket_ends_too():

@@ -75,12 +75,13 @@ def _socket(c: Canvas, tip: Point, frm: Point, at_: Point, o: str) -> Line:
 # 이 흔한 꺾음은 입력에서 먼저 막아 꺾는 점을 얼마나 뗄지 알린다
 SOCKET_HEAD = EndShape("소켓 반원", SOCKET_GAP, _socket, gap=SOCKET_GAP)
 REQUIRES = "requires"
-RELATIONS = {**CLASS_RELATIONS, REQUIRES: RelationType("소켓", end=SOCKET_HEAD, role="인터페이스를 쓰는 쪽")}
+# 소켓은 원이 아닌 쪽에서 원으로 긋는 선이라 자기 자신으로는 바르게 이을 수 없다
+RELATIONS = {**CLASS_RELATIONS, REQUIRES: RelationType("소켓", end=SOCKET_HEAD, role="인터페이스를 쓰는 쪽", reflexive=False)}
 
 
 class ComponentRules(ClassRules):
     """클래스도 관계 규칙에 소켓 잇기 규칙을 더한 것 — 소켓은 인터페이스를 쓰는 쪽에서 제공 인터페이스 원으로 긋는다. 끝 하나가
-    읽히지 않으면 그 끝의 검사만 건너뛴다 — from 검사와 to 검사는 서로 다른 끝만 본다. 자기 자신으로 가는 소켓도 본다."""
+    읽히지 않으면 그 끝의 검사만 건너뛴다 — from 검사와 to 검사는 서로 다른 끝만 본다."""
 
     def check(self, r: Reader, spec: Spec, elements: list[tuple[str, Element]],
               relations: list[tuple[str, B.Relation]]) -> list[Notice]:
