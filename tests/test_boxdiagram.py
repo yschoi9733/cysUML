@@ -358,7 +358,7 @@ def test_wrong_element_input(element, expected):
     ([el("class", "A", 0, 0), el("class", "B", 20, 44, **{"in": "A"})], [], "elements[1].in: elements[0]('class')는 안에 "
                                                                             "요소를 둘 수 없다 — 안에 요소를 두는 종류: 'package' · 'room'"),
     ([el("package", "P", 0, 0, **{"in": "Q"})], [], "elements[0].in: 열쇠가 'Q'인 요소가 없다"),
-    ([el("package", "P", 0, 0, **{"in": "P"})], [], "elements[0].in: 제 자신 안에 둘 수 없다"),
+    ([el("package", "P", 0, 0, **{"in": "P"})], [], "elements[0].in: 자기 자신 안에 둘 수 없다"),
     ([el("package", "P", 0, 0, **{"in": "Q"}), el("package", "Q", 0, 0, **{"in": "P"})], [],
      "elements[0].in: in이 고리를 이룬다('P' → 'Q' → 'P')"),
     ([el("package", "P", 0, 0), el("class", "C", 20, 44, **{"in": "P"})], [rel("dependency", "C", "P")],
@@ -415,7 +415,7 @@ def test_only_elements_in_a_loop_are_told_about_it():
     # A가 제 자신 안에 있으면 A만 알린다 — A 안의 B는 고리가 아니다
     with pytest.raises(InputError) as e:
         draw([el("package", "A", 0, 0, **{"in": "A"}), el("package", "B", 20, 44, **{"in": "A"})])
-    assert e.value.problems == ("elements[0].in: 제 자신 안에 둘 수 없다",)
+    assert e.value.problems == ("elements[0].in: 자기 자신 안에 둘 수 없다",)
 
 
 def test_class_diagram_tool_keeps_its_own_input():
@@ -559,7 +559,7 @@ def test_slanted_line_whose_triangle_goes_into_the_name_area_fails():
     r = report(elements, [rel("generalization", "X", "작업", via=[[-165, -70]])])
     (f,) = r.failures
     assert f.kind == "head_under_own_box" and f.elements == ("X->작업", "작업")
-    assert "선 끝 모양이 그 요소 안으로 들어간다" in f.problem and "삼각형" in f.problem
+    assert "선 끝 모양이 그 끝의 요소 안으로 들어간다" in f.problem and "삼각형" in f.problem
 
 
 def test_line_through_the_inside_of_its_end_outer_element_is_an_input_error():
