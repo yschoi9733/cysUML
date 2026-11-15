@@ -833,13 +833,13 @@ def test_an_input_that_cannot_be_encoded_is_still_valid_json():
 
 
 def test_calls_saving_the_same_name_at_the_same_time_leave_a_matching_pair(tmp_path, monkeypatch):
-    # 첫 부름이 그림을 바꿔 넣고 입력 파일을 바꿔 넣기 전에 오래 멈춘다. 저장을 한 번에 하나씩 하지 않으면 그 사이 뒤 부름들이 두
-    # 파일을 다 바꿔 넣고, 마지막에 첫 부름의 입력 파일이 뒤 부름의 그림과 짝지어진다
-    real, held = os.replace, []
+    # 관계가 있는 부름(하나뿐이고 먼저 그린다)이 그림을 바꿔 넣고 입력 파일을 바꿔 넣기 전에 오래 멈춘다. 저장을 한 번에 하나씩
+    # 하지 않으면 그 사이 뒤 부름들이 두 파일을 다 바꿔 넣고, 마지막에 그 부름의 입력 파일이 뒤 부름의 그림과 짝지어진다. 멈출 부름은
+    # 차례가 아니라 내용으로 고른다 — 느린 기계에서 그리는 차례가 바뀌어도 관계 없는 부름끼리만 멈춰 경합을 놓치지 않게
+    real = os.replace
 
     def replace(src, dst):
-        if str(dst).endswith(".cysuml.json") and not held:
-            held.append(dst)
+        if str(dst).endswith(".cysuml.json") and b'"places"' in Path(src).read_bytes():
             time.sleep(0.3)
         real(src, dst)
     monkeypatch.setattr(server.os, "replace", replace)

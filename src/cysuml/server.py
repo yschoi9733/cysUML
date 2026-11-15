@@ -2,7 +2,7 @@
 
 도구는 그린 PNG와 그 입력 파일(guide.INPUT_SUFFIX)을 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이
 너무 커서 PNG로 못 그리거나, 저장할 폴더에 쓸 수 없으면 저장하지 않고 오류 결과(isError)로 돌려준다 — AI가 읽고 고칠 수 있게 예외
-대신 결과로 낸다.
+대신 결과로 낸다. 그림은 바꿔 넣었는데 입력 파일에서 멈춘 때만 그림이 바뀐 채 오류가 되고, 오류 글이 그렇다고 알린다.
 새 그림의 도구 설명은 그 그림 모듈이 guide의 공용 조각으로 만든다(처음부터 있던 두 도구의 설명은 여기 있다). 상자 그림(공용 엔진
 boxdiagram이 그리는 그림) 도구는 _box_tool 하나로 등록한다.
 """
@@ -208,11 +208,16 @@ def _record(tool: str, name: str, data: dict, scale: float) -> bytes:
 
     def one(v: Any) -> str:
         return json.dumps(v, ensure_ascii=False)
-    # README 예시처럼 목록의 항목 하나를 한 줄에 쓴다 — 읽기 쉽고, 커밋하면 고친 항목만 diff에 나온다
-    fields = [f"  {one(k)}: [\n" + ",\n".join(f"    {one(x)}" for x in v) + "\n  ]" if isinstance(v, list) and v
-              else f"  {one(k)}: {one(v)}" for k, v in record.items()]
+
+    def field(key: str, value: Any) -> str:
+        # README 예시처럼 목록의 항목 하나를 한 줄에 쓴다 — 읽기 쉽고, 커밋하면 고친 항목만 diff에 나온다
+        if not (isinstance(value, list) and value):
+            return f"  {one(key)}: {one(value)}"
+        items = ",\n".join(f"    {one(item)}" for item in value)
+        return f"  {one(key)}: [\n{items}\n  ]"
+    text = "{\n" + ",\n".join(field(k, v) for k, v in record.items()) + "\n}\n"
     # 짝 없는 서로게이트는 parsing이 거르지만, 남더라도 \ud800 꼴 JSON 이스케이프로 쓴다
-    return ("{\n" + ",\n".join(fields) + "\n}\n").encode("utf-8", "backslashreplace")
+    return text.encode("utf-8", "backslashreplace")
 
 
 def _stage(path: Path, data: bytes) -> Path:
@@ -277,8 +282,9 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
         if done:
             return None, (f"입력 파일을 저장하지 못했다 — {where}에 그림 {image.name}은(는) 새로 썼지만 {kept.name}을(를) 쓸 수 "
                           f"없다({reason}). {left}. 막은 것을 풀고 같은 입력으로 다시 그린다.")
-        return None, (f"그림을 저장하지 못했다 — {where}에 {at.name}을(를) 쓸 수 없다({reason}). "
-                      "쓸 수 있는 폴더를 out_dir에 절대 경로로 준다.")
+        return None, (f"그림을 저장하지 못했다 — {where}에 {at.name}을(를) 쓸 수 없다({reason}). 다른 프로그램(그림 뷰어 등)이 "
+                      "그 파일을 잡고 있으면 닫고 같은 입력으로 다시 그리고, 폴더에 쓸 수 없으면 쓸 수 있는 폴더를 out_dir에 절대 "
+                      "경로로 준다.")
     finally:
         for tmp, path in staged:
             if path not in done:
