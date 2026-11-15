@@ -157,7 +157,7 @@ def test_description_names_the_failure_kinds_of_each_tool_in_check_order():
     # 클래스도 도구는 요소를 상자, 테두리를 변이라고 부른다(그 도구의 입력·결과·검사 글과 같은 말)
     class_names = guide.kind_names(classcheck.KINDS, boxdiagram.BOX_WORDS)
     assert ", ".join(class_names) + "." in server.CLASS_TOOL
-    assert {"상자끼리 겹치거나 붙음", "선이 자기 끝 상자 변에 붙어 감", "선 끝 모양이 그 선의 다른 끝 상자 변에 붙음",
+    assert {"상자끼리 겹치거나 붙음", "선이 끝 상자 변에 붙어 감", "선 끝 모양이 그 선의 다른 끝 상자 변에 붙음",
             "선 끝 모양이 그 끝의 상자 안으로 들어감"} <= set(class_names)
     assert not any("요소" in n or "테두리" in n for n in class_names)
     assert not any(n in server.CLASS_TOOL for n in guide.kind_names(boxcheck.NESTED_KINDS, boxdiagram.BOX_WORDS))
