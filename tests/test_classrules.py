@@ -229,7 +229,8 @@ def test_notices_come_only_after_the_input_is_right():
 def test_every_tool_that_takes_the_class_relations_checks_their_rules():
     modules = [C, P, CD, D, usecasediagram, statediagram, activitydiagram]
     takers = [m for m in modules if m.SPEC.relations.get("generalization") is C.RELATIONS["generalization"]]
-    assert takers == [C, P, CD, D] and all(m.SPEC.rules is C.RULES for m in takers)
+    assert takers == [C, P, CD, D] and all(m.SPEC.rules is C.RULES for m in (C, P, D))
+    assert isinstance(CD.SPEC.rules, C.ClassRules) and type(CD.SPEC.rules) is not C.ClassRules
 
 
 @pytest.mark.parametrize("module", [P, D])
