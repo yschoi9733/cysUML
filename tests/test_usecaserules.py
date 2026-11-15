@@ -197,11 +197,13 @@ DEPENDENCY_ON_SYSTEM = "— 시스템 경계에는 관계를 잇지 않는다(�
 
 @pytest.mark.parametrize("relation, elements, ends, fix, fixed", [
     (rel("dependency", "고객", "sys"), BASE, "to 'sys': 'system'",
-     "액터가 유즈케이스를 쓰는 것이면 kind를 'association'으로 바꾸고 시스템 경계 쪽 끝을 그 유즈케이스로 고치고",
+     "액터가 유즈케이스를 쓰는 것이면 kind를 'association'으로 바꾸고 시스템 경계 쪽 끝을 그 유즈케이스로 고치고, 의존을 뜻했으면 "
+     "시스템 경계 쪽 끝만 유즈케이스로 고치고",
      rel("association", "고객", "주문한다")),
     # 다른 stereotype을 달아도 같다 — stereotype은 어느 관계에든 달지만 시스템 경계는 관계의 끝이 되지 않는다
     (rel("dependency", "sys", "은행", stereotype="trace"), BASE, "from 'sys': 'system'",
-     "액터가 유즈케이스를 쓰는 것이면 kind를 'association'으로 바꾸고 시스템 경계 쪽 끝을 그 유즈케이스로 고치고",
+     "액터가 유즈케이스를 쓰는 것이면 kind를 'association'으로 바꾸고 시스템 경계 쪽 끝을 그 유즈케이스로 고치고, 의존을 뜻했으면 "
+     "시스템 경계 쪽 끝만 유즈케이스로 고치고",
      rel("association", "결제한다", "은행")),
     (rel("dependency", "문의한다", "sys"), [*BASE, OUTSIDE], "to 'sys': 'system'",
      "시스템 경계 쪽 끝을 액터나 유즈케이스로 고치고", rel("dependency", "문의한다", "주문한다")),
@@ -213,6 +215,16 @@ def test_a_dependency_touching_a_system_is_an_input_error(relation, elements, en
         f"relations[0]: 의존이 시스템 경계에 닿는다({ends}) {DEPENDENCY_ON_SYSTEM}{fix}{PICK}, 아니면 이 의존을 지운다",)
     if fixed is not None:
         reads([fixed], elements)
+
+
+def test_include_on_an_association_between_use_cases_of_different_subjects_may_just_drop_the_stereotype():
+    # 주체가 다른 유즈케이스끼리는 연관을 받으니 stereotype만 빼도 된다
+    other = [OTHER_SYSTEM, inside("pay", "use_case", "승인한다", 740, 60)]
+    (p,) = problems([rel("association", "결제한다", "승인한다", stereotype="include")], [*BASE, *other])
+    assert p.endswith(", 연관을 뜻했으면 stereotype을 빼고, 아니면 이 관계를 지운다")
+    reads([rel("association", "결제한다", "승인한다")], [*BASE, *other])
+    (p,) = problems([rel("dependency", "고객", "sys")])
+    reads([rel("dependency", "고객", "주문한다")])  # 액터에서 유즈케이스로 가는 의존은 받는다
 
 
 def test_a_system_depending_on_itself_with_include_is_told_to_go():
