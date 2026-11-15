@@ -295,12 +295,15 @@ def test_line_through_the_outside_name_of_another_element_fails():
     assert kinds(r) == ["line_through_box"] and r.failures[0].elements == ("A->B", "Payment")
 
 
-def test_element_or_label_on_the_outside_name_fails():
+def test_element_or_label_on_the_outside_name_fails(monkeypatch):
     assert kinds(report([dot("Payment", 0, 0), el("class", "A", 0, 34)])) == ["box_overlap"]
-    # 관계 이름 자리 둘(선 y=24 가운데 위아래) 가운데 아래는 상자 C가 막고, 위에는 Payment 이름(선에서 9px)이 있다
-    r = report([dot("Payment", 165, -28), el("class", "A", 0, 0), el("class", "B", 300, 0), el("class", "C", 150, 29)],
-               [rel("association", "A", "B", name="has")])
-    (f,) = r.failures
+    # 관계 이름 자리 둘(선 y=24 가운데 위아래) 가운데 아래는 상자 C가 막고, 위에는 Payment 이름(선에서 9px)이 있다. 선을 따라
+    # 옮기면 빈 곳이 있어 합격하고, 가운데에만 두면(옮길 자리가 없을 때) 이름 칸에 겹쳐 불합격이다
+    scene = ([dot("Payment", 165, -28), el("class", "A", 0, 0), el("class", "B", 300, 0), el("class", "C", 150, 29)],
+             [rel("association", "A", "B", name="has")])
+    assert report(*scene).passed
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    (f,) = report(*scene).failures
     assert f.kind == "text_on_box" and f.elements == ("A->B", "Payment")
 
 

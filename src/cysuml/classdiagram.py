@@ -14,7 +14,8 @@ from . import boxdiagram as B
 from . import text as T
 from .boxdiagram import (ARROW, ARROW_HEAD, BOX_WORDS, DASH, DIAMOND, FILLED_DIAMOND, LABEL_CLEAR, MULT_DISTANCES,
                          MULT_ENOUGH, NAME_GAP, OPEN_DIAMOND, TRIANGLE, TRIANGLE_HEAD, Diagram, Drawing, Element, Label,
-                         Layout, PlacedBox, RelationType, Rules, Shape, Spec, draw, layout, name_spots)
+                         Layout, PlacedBox, RelationType, Rules, Shape, Spec, draw, end_of, ends_of, fail_loops, layout,
+                         name_spots, parent_path)
 from .canvas import SCALE, Canvas
 from .parsing import InputError, Reader
 from .parsing import at as _at
@@ -264,11 +265,6 @@ def _base(kind: str) -> str:
     return SAME_KIND.get(kind, kind)
 
 
-def _end(side: str, key: str, kind: str) -> str:
-    """오류·알림 글에서 관계의 한 끝: from 'Circle': 'class'. 이름 바로 뒤에 조사를 붙이지 않는다(영어 이름은 받침을 알 수 없다)."""
-    return f"{side} {_show(key)}: {kind!r}"
-
-
 def _same_kind(a: str, b: str) -> bool:
     return _base(a) == _base(b)
 
@@ -292,23 +288,6 @@ def _elsewhere(spec: Spec, rel: B.Relation, s: str, t: str, realized: set[tuple[
     if (rel.target, rel.source) in realized:
         return f"{where} — 거꾸로 가는 실체화가 이미 있다. 이 실체화를 지운다."
     return f"{where} — 방향이 거꾸로면 from과 to를 바꾼다."
-
-
-def _cycle(parents: dict[str, list[str]], start: str, goal: str) -> Optional[list[str]]:
-    """parents(자식 → 부모들)의 상속을 따라 start에서 goal로 가는 가장 짧은 길(양 끝 포함). 없으면 None."""
-    came: dict[str, Optional[str]] = {start: None}
-    queue = [start]
-    for key in queue:
-        if key == goal:
-            path = [key]
-            while (up := came[path[-1]]) is not None:
-                path.append(up)
-            return path[::-1]
-        for parent in parents.get(key, ()):
-            if parent not in came:
-                came[parent] = key
-                queue.append(parent)
-    return None
 
 
 class ClassRules(Rules):
@@ -338,18 +317,7 @@ class ClassRules(Rules):
                     inherits.append((path, rel))
             elif rel.kind == REALIZATION:
                 realizations.append((path, rel, s, t))
-        loops: set[frozenset[tuple[str, str]]] = set()
-        for path, rel in inherits:
-            back = _cycle(parents, rel.target, rel.source)
-            if back is None:
-                continue
-            ring = [rel.source, *back]
-            edges = frozenset(zip(ring, ring[1:]))
-            if edges in loops:  # 고리(그 고리를 이루는 상속들)마다 입력에서 먼저 나온 상속에서 한 번 알린다
-                continue
-            loops.add(edges)
-            r.fail(path, f"상속이 고리를 이룬다({' → '.join(_show(k) for k in ring)}) — 조상을 다시 상속할 수 없다. 고리 안의 "
-                         "상속 하나를 지우거나 from·to를 바꾼다")
+        fail_loops(r, inherits, parents, "상속", "조상을 다시 상속할 수 없다")
         found = (self._realization(spec, parents, realized, *x) for x in realizations)  # 고치는 법이 상속·실체화 전부를 보고 고른다
         return [n for n in found if n is not None]
 
@@ -375,7 +343,7 @@ class ClassRules(Rules):
             return True
         icons = "·".join(k for k in ICONS if k in spec.shapes)
         same = "class와 abstract는 같은 종류로 친다" + (f", 아이콘 표기({icons})도 기본 표기와 같은 종류로 친다" if icons else "")
-        r.fail(path, f"상속의 두 끝 종류가 다르다({_end('from', rel.source, s)}, {_end('to', rel.target, t)}) — 상속은 같은 "
+        r.fail(path, f"상속의 두 끝 종류가 다르다({ends_of(rel, s, t)}) — 상속은 같은 "
                      f"종류끼리 긋는다({same}). {fix or 'from·to나 요소의 kind를 고친다'}")
         return False
 
@@ -388,7 +356,7 @@ class ClassRules(Rules):
             """이 실체화를 상속으로 바꾸면 안 되는 까닭 — 같은 상속이 이미 있거나(겹쳐 그린다), to가 이미 from을 상속한다(고리)."""
             if rel.target in parents.get(rel.source, ()):
                 return "같은 from·to의 generalization이 이미 있다"
-            if _cycle(parents, rel.target, rel.source) is not None:
+            if parent_path(parents, rel.target, rel.source) is not None:
                 return (f"to({_show(rel.target)})가 이미 from({_show(rel.source)})을 상속해 generalization으로 바꾸면 고리가 "
                         "된다")
             return None
@@ -396,7 +364,7 @@ class ClassRules(Rules):
         # 거꾸로 가는 실체화도 있으면 둘 다 상속으로 바꾸면 고리가 된다 — 하나만 바꾸라고 한다
         mutual = "거꾸로 가는 실체화도 있다 — 둘 가운데 하나를 지우고 남은 것의 " if (rel.target, rel.source) in realized else ""
         if s in INTERFACES:
-            problem = f"실체화를 하는 쪽이 인터페이스다({_end('from', rel.source, s)})."
+            problem = f"실체화를 하는 쪽이 인터페이스다({end_of('from', rel.source, s)})."
             if s == t == "interface":
                 why = blocked()
                 hint = (f"{why} — 이 실체화를 지운다." if why else
@@ -408,10 +376,10 @@ class ClassRules(Rules):
             problem, hint = f"{name}({_show(rel.source)}){B.josa(name, '은', '는')} 실체화하지 않는다.", f"{fix}."
         elif (d := REALIZED.get(_base(t))) and d.others and not _realizable(s, t) and not _same_kind(s, t):
             # 대상은 실체화가 가는 종류인데 하는 쪽 종류가 아니다(아티팩트 -> 컴포넌트)
-            problem = f"실체화를 하는 쪽이 to를 실현하지 않는 종류다({_end('from', rel.source, s)}, {_end('to', rel.target, t)})."
+            problem = f"실체화를 하는 쪽이 to를 실현하지 않는 종류다({ends_of(rel, s, t)})."
             hint = f"{d.others} — {d.by_artifact if _base(s) == 'artifact' else ''}다른 뜻이면 dependency를 쓴다."
         elif not _realizable(s, t):
-            problem = f"실체화가 가는 쪽이 인터페이스가 아니다({_end('to', rel.target, t)})."
+            problem = f"실체화가 가는 쪽이 인터페이스가 아니다({end_of('to', rel.target, t)})."
             if not _same_kind(s, t):
                 hint = _elsewhere(spec, rel, s, t, realized)
             elif why := blocked():
@@ -425,7 +393,7 @@ class ClassRules(Rules):
         return Notice(path, (rel.source, rel.target), problem, hint)
 
     def guide(self, spec: Spec) -> str:
-        """따옴표 친 종류 이름 바로 뒤에는 받침에 따라 갈리는 조사(은·는·이·가·을·를·으로·로)를 붙이지 않는다(_end와 같은 까닭).
+        """따옴표 친 종류 이름 바로 뒤에는 받침에 따라 갈리는 조사(은·는·이·가·을·를·으로·로)를 붙이지 않는다(end_of와 같은 까닭).
         서술하는 '이고'·'인'은 어느 말 뒤에도 쓸 수 있어 괜찮다."""
         def quoted(kinds) -> str:
             return "·".join(f'"{k}"' for k in dict.fromkeys(kinds) if k in spec.shapes)

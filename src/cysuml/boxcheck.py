@@ -18,8 +18,8 @@ import operator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
-from .boxdiagram import (ARROW_BEND, ARROW_HEAD, BOX_WORDS, LABEL_CLEAR, NEST_PAD, Drawing, HeadMark, Layout, NameZone, PlacedBox,
-                         PlacedRelation, Words, josa)
+from .boxdiagram import (ARROW_BEND, ARROW_HEAD, BOX_WORDS, LABEL_CLEAR, NEST_PAD, PLACE_EPS, Drawing, HeadMark, Layout, NameZone,
+                         PlacedBox, PlacedRelation, Words, josa)
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
                    grow, hits, inside, meets, outline, overlap, span)
@@ -35,7 +35,6 @@ PARALLEL_SIN = 0.05  # 두 선분 사이 각의 사인이 이 안이면(약 3°)
 LINE_EPS = 1e-6  # 점이 선에서 이 안이면 선 위로 본다(엇갈림이 아니라 맞닿음)
 HEAD_HIDE = 2  # 선 끝 모양이 제 끝 요소 안으로 이만큼 넘게 들어가면 가려진(들어간) 것으로 본다(살짝 들어가는 건 테두리 밑으로 일부러 넣은 것)
 OWN_MARGIN = 0.5  # 선이 제 삼각형·마름모는 그 안쪽으로 이만큼 넘게 들어가야 지난 것으로 본다(테두리에 닿거나 따라가면 이어진 것)
-PLACE_EPS = 1e-3  # 여러 선이 걸린 자리가 이 안으로 같으면 한 자리로 묶는다
 
 ROLES = {"name": "이름", "from_multiplicity": "from 쪽 다중도", "to_multiplicity": "to 쪽 다중도"}
 KINDS = (  # 불합격 종류(이 차례로 낸다)
@@ -379,7 +378,8 @@ def _box_overlaps(boxes: list[_Box], lay: Layout, w: Words) -> Iterator[Finding]
             for outer, inner in ((a, b), (b, a)):
                 o = outer.placed.inner  # 안의 요소를 두는 칸에 든 요소만 — 칸 밖(패키지 탭 오른쪽 등)이면 in을 줘도 걸린다
                 if (lay.spec.extended and o is not None and o[0] <= inner.rect[0] and o[1] <= inner.rect[1]
-                        and inner.rect[2] <= o[2] and inner.rect[3] <= o[3]):
+                        and inner.rect[2] <= o[2] and inner.rect[3] <= o[3]
+                        and lay.spec.rules.nests(outer.placed.box.kind, inner.placed.box.kind)):
                     hint += (f" {inner.name}{josa(inner.name, '을', '를')} {outer.name} 안에 두려면 {inner.name}의 in에 "
                              f"{outer.name}{josa(outer.name, '을', '를')} 준다.")
             yield Finding("box_overlap", (a.name, b.name), between(pa, pb), f"{what}: {a.title}, {b.title}.", hint)

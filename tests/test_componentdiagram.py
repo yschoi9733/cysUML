@@ -8,12 +8,14 @@ from pathlib import Path
 import pytest
 
 from cysuml import boxcheck as K
+from cysuml import boxdiagram as B
 from cysuml import componentdiagram as C
 from cysuml import geom as G
-from cysuml import server
+from cysuml import guide, server
 from cysuml.boxdiagram import LABEL_LINE, HeadMark, NameZone
 from cysuml.canvas import Ellipse, Line, Polygon, Text
 from cysuml.parsing import InputError
+from cysuml.text import text_width
 
 README = Path(__file__).resolve().parent.parent / "README.md"
 
@@ -141,13 +143,58 @@ def test_line_through_the_name_of_an_interface_fails():
     assert kinds(own) == ["line_through_name"] and own.failures[0].elements == ("C->Api", "Api")
 
 
-def test_element_or_label_on_the_name_of_an_interface_fails():
+def test_element_or_label_on_the_name_of_an_interface_fails(monkeypatch):
     assert kinds(report([el("lollipop", "Api", 0, 0), el("class", "A", 0, 34)])) == ["box_overlap"]
-    # 관계 이름 자리 둘(선 가운데 위아래) 가운데 아래는 상자 C가 막고, 위에는 Api 이름이 있다
-    r = report([el("lollipop", "Api", 172, -28), el("class", "A", 0, 0), el("class", "B", 300, 0),
-                el("class", "C", 150, 29)], [rel("association", "A", "B", name="has")])
-    (f,) = r.failures
+    # 관계 이름 자리 둘(선 가운데 위아래) 가운데 아래는 상자 C가 막고, 위에는 Api 이름이 있다. 선을 따라 옮기면 빈 곳이 있어
+    # 합격하고, 가운데에만 두면(옮길 자리가 없을 때) Api 이름에 겹쳐 불합격이다
+    scene = ([el("lollipop", "Api", 172, -28), el("class", "A", 0, 0), el("class", "B", 300, 0), el("class", "C", 150, 29)],
+             [rel("association", "A", "B", name="has")])
+    assert report(*scene).passed
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    (f,) = report(*scene).failures
     assert f.kind == "text_on_box" and f.elements == ("A->B", "Api")
+
+
+@pytest.mark.parametrize("stereotype, name", [("manifest", None), ("executionEnvironment", None), (None, ["주문 서버 배포 경로"]),
+                                              ("internet", ["HTTPS", "port 443"])])
+@pytest.mark.parametrize("side", ["left", "right", "below", "above"])
+@pytest.mark.parametrize("outward", [False, True], ids=["in", "out"])
+def test_element_outside_a_package_with_room_for_the_label_passes_either_way(stereotype, name, side, outward):
+    # 두 겹 패키지 안의 Svc와 밖의 jar를 요령의 간격(guide.LABEL_ROOM)만큼 띄우면, 선 방향(밖→안, 안→밖)과 jar를 Svc 변의 어디에
+    # 두든 합격한다. 위에서는 Svc를 이름 탭 오른쪽에 두어 선이 탭을 지나지 않게 한다
+    elements = [el("package", "orders", 0, 0), el("package", "core", 100, 44, **{"in": "orders"}),
+                el("component", "Svc", 120, 88, **{"in": "core"})]
+    d = draw(elements)
+    pkg, svc = placed(d, "orders").rect, placed(d, "Svc").rect
+    lines = ([f"«{stereotype}»"] if stereotype else []) + (name or [])
+    w = max(text_width(s) for s in lines)
+    gap = w + 15 if side in ("left", "right") else LABEL_LINE * len(lines) + w / 4 + 25
+    edge = svc[3] - svc[1] if side in ("left", "right") else svc[2] - svc[0]
+    more = {k: v for k, v in (("stereotype", stereotype), ("name", name)) if v}
+    for offset in range(0, int(edge) + 1, 30):
+        left, top = {"left": (pkg[0] - gap - 90, svc[1] + offset), "right": (pkg[2] + gap, svc[1] + offset),
+                     "below": (svc[0] + offset, pkg[3] + gap), "above": (svc[0] + offset, pkg[1] - gap - 48)}[side]
+        ends = ("Svc", "jar") if outward else ("jar", "Svc")
+        r = report([*elements, el("artifact", "jar", left, top)], [rel("dependency", *ends, **more)])
+        assert r.passed, (offset, r.summary())
+
+
+def test_label_from_outside_a_package_moves_off_its_border_at_the_basic_spacing():
+    # 패키지 안 컴포넌트로 «manifest»를 긋는 아티팩트를 패키지 오른쪽에 기본 간격(80px)만큼 띄워 두면, 선 가운데의 이름 자리는
+    # 패키지 테두리에 걸린다. 도구가 선을 따라 빈 자리로 옮겨 합격한다
+    elements = [el("package", "orders", 0, 0), el("component", "OrderService", 20, 52, **{"in": "orders"})]
+    d = draw(elements)
+    pkg, svc = placed(d, "orders").rect, placed(d, "OrderService").rect
+    jar = el("artifact", "order.jar", pkg[2] + 80, svc[1] + 10)
+    d = draw([*elements, jar], [rel("dependency", "order.jar", "OrderService", stereotype="manifest")])
+    assert K.check(d).passed, K.check(d).summary()
+    (r,) = d.layout.relations
+    (label,) = r.labels
+    assert (label.x, label.y) not in B.name_spots(r.points, label.lines)
+    assert "넉넉히 떼어 놓는다" not in C.TIPS and guide.LABEL_ROOM in C.TIPS
+    # 요령의 간격(아래면 줄 수 × 15 + 글자 폭 ÷ 4 + 25px)만큼 아래에 두어도 합격한다
+    below = el("artifact", "order.jar", svc[0] + 10, pkg[3] + 15 + text_width("«manifest»") / 4 + 25)
+    assert report([*elements, below], [rel("dependency", "order.jar", "OrderService", stereotype="manifest")]).passed
 
 
 @pytest.mark.parametrize("gap, passed", [(20, False), (30, False), (40, True), (90, True)])
@@ -393,6 +440,51 @@ def test_socket_input_errors():
     with pytest.raises(InputError) as e:
         draw(users, [rel("requires", "U", "Api", to_multiplicity="1", navigable="to")])
     assert [p.split(":")[0] for p in e.value.problems] == ["relations[0].to_multiplicity", "relations[0].navigable"]
+
+
+SOCKET_ENDS = [el("component", "Shop", 0, 0), el("lollipop", "Pay", 300, 0), el("class", "A", 0, 200),
+               el("interface", "I", 300, 200)]
+TO_CLASS = rel("requires", "Shop", "A")  # 소켓이 원이 아닌 클래스로 간다
+
+
+def socket_ends(relations, broken=None):
+    """소켓 끝 확인 입력 — broken 이름의 요소에는 모르는 필드를 더해 그 요소가 읽히지 않게 한다."""
+    return {"elements": [{**e, "foo": 1} if e["name"] == broken else e for e in SOCKET_ENDS], "relations": relations}
+
+
+def error_paths(read, data):
+    with pytest.raises(InputError) as e:
+        read(data)
+    return [p.split(":")[0] for p in e.value.problems]
+
+
+@pytest.mark.parametrize("relations, broken, paths", [
+    ([TO_CLASS], None, ["relations[0].to"]),
+    ([TO_CLASS, rel("generalization", "A", "I")], None, ["relations[1]", "relations[0].to"]),
+    ([rel("dependency", "A", "I", foo=1), TO_CLASS], None, ["relations[0].foo", "relations[1].to"]),
+    ([TO_CLASS], "I", ["elements[3].foo", "relations[0].to"]),
+    ([TO_CLASS], "Shop", ["elements[0].foo", "relations[0].to"]),  # to인 A는 읽혀 to 검사가 돈다
+    ([rel("requires", "Pay", "A")], "A", ["elements[2].foo", "relations[0].from"]),  # from인 Pay는 읽혀 from 검사가 돈다
+    ([TO_CLASS], "A", ["elements[2].foo"]),  # 읽히지 않은 끝의 검사만 건너뛴다
+])
+def test_wrong_socket_ends_come_with_the_other_input_errors(relations, broken, paths):
+    assert error_paths(C.parse, socket_ends(relations, broken)) == paths
+
+
+@pytest.mark.parametrize("via", [[], [[-50, -50]], [[-50, -50], [-50, 50]]])
+def test_socket_to_itself_is_one_error_on_the_first_call_however_it_bends(via):
+    with pytest.raises(InputError) as e:
+        C.parse(socket_ends([rel("requires", "Shop", "Shop", via=via)]))
+    assert e.value.problems == ("relations[0]: 소켓은 자기 자신으로 갈 수 없다 — from과 to를 다른 요소로 고친다",)
+    assert "(상속·실체화·소켓은 꺾는 점이 있어도 자기 자신으로 갈 수 없다)" in C.TOOL
+
+
+def test_shared_engine_reads_check_socket_ends_too():
+    assert error_paths(lambda data: B.parse(C.SPEC, data), socket_ends([TO_CLASS])) == ["relations[0].to"]
+
+
+def test_socket_to_a_ball_reads():
+    assert [r.kind for r in C.parse(socket_ends([rel("requires", "Shop", "Pay")])).relations] == ["requires"]
 
 
 # ---------------------------------------------------------------- 아이콘 표기와 소켓을 함께 쓴 그림
