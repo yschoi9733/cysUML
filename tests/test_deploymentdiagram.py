@@ -4,6 +4,7 @@ import string
 import pytest
 
 from cysuml import boxcheck as K
+from cysuml import boxdiagram as B
 from cysuml import deploymentdiagram as D
 from cysuml import guide
 from cysuml.canvas import Line, Text
@@ -217,6 +218,20 @@ LABELS = {  # 선 글자 → (선 만들기, 줄)
 }
 
 
+SIDE_GAP, VERTICAL_GAP = 80, 60  # 요령의 요소 사이 기본 간격(가로·세로)
+
+
+def test_tips_send_from_outside_a_node_with_room_for_the_label():
+    assert "가로 80px·세로 60px쯤에서 시작하고" in D.TIPS and guide.LABEL_ROOM in D.TIPS
+    assert "도구가 선을 따라 노드 테두리를 비킨 자리에 놓으니, 가장 바깥 노드와는 그 글자가 들어갈 만큼 띄우면 된다" in D.TIPS
+    assert "옆이면 가장 긴 줄의 글자 폭 + 15px, 아래·위면 글자 줄 수 × 15 + 가장 긴 줄의 글자 폭 ÷ 4 + 25px 이상" in guide.LABEL_ROOM
+    assert '어림은 넉넉한 값이라, «deploy» 한 줄은 실제로는 요소 사이 기본 간격("요소 사이는" 항목)에도 들어간다' in D.TIPS
+
+
+def basic_gap(side):
+    return VERTICAL_GAP if side == "below" else SIDE_GAP
+
+
 def estimate(s):
     """요령의 선 글자 폭 어림: 영문·숫자·ASCII 기호 한 글자 11px(W·@·%는 14px), 한글 12px, 그 밖의 글자 14px."""
     def one(c):
@@ -245,32 +260,41 @@ def test_label_width_estimate_of_the_tip_is_an_upper_bound_for_every_character()
     for label in ("«deploy»", "«internet»", "HTTPS", "AMQP", "MQTT", "SMTP", "SOAP", "CORBA", "WWW", "user@host",
                   "100%", "port 443", "웹 소켓", "애플리케이션", "gRPC → 日本 キュー"):
         assert text_width(label) <= estimate(label), label
-    assert "영문·숫자·ASCII 기호 한 글자 11px(W·@·%는 14px), 한글 12px, 그 밖의 글자 14px로 어림하고" in D.TIPS
+    assert "영문·숫자·ASCII 기호 한 글자 11px(W·@·%는 14px), 한글 12px, 그 밖의 글자 14px로 넉넉히 어림하고" in guide.LABEL_ROOM
 
 
-def side_gaps(outer, lines, end="Tomcat", measure=estimate):
-    """요령의 간격: (왼쪽, 오른쪽, 아래). 옆은 가장 바깥 노드 테두리 ~ 끝 요소 거리 + 가장 긴 줄의 폭(measure로 잰다) + 20, 아래는
-    그 거리 + 40 + 줄이 늘 때마다 15."""
-    d = draw(outer)
-    o, i = placed(d, outer[0]["name"]).rect, placed(d, end).rect
-    width = max(measure(s) for s in lines)
-    return i[0] - o[0] + width + 20, o[2] - i[2] + width + 20, o[3] - i[3] + 40 + 15 * (len(lines) - 1)
+def label_room(side, lines, measure=text_width):
+    """요령의 간격: 옆이면 가장 긴 줄의 글자 폭(measure로 잰다) + 15, 아래·위면 줄 수 × 15 + 가장 긴 줄의 글자 폭 ÷ 4 + 25."""
+    w = max(measure(s) for s in lines)
+    return w + 15 if side in ("left", "right") else 15 * len(lines) + w / 4 + 25
 
 
-def above_gap(lines):
-    """요령의 위쪽 간격: 80 + 줄이 늘 때마다 15."""
-    return 80 + 15 * (len(lines) - 1)
-
-
-def sent_from(outer, sender, side, gap, make, end="Tomcat", offset=20):
-    """가장 바깥 노드의 side 쪽으로 gap 떨어진 자리에 sender를 두고 끝 요소 end로 make 선을 그은 검사 결과. 옆이면 sender의 top을
-    끝 요소 윗변 + offset에, 아래면 left를 끝 요소 왼변 + offset에 둔다(요령대로 끝 요소 높이·가로 자리 안)."""
+def sender_at(outer, sender, side, gap, end="Tomcat", offset=20):
+    """가장 바깥 노드의 side 쪽으로 gap 떨어진 자리에 둔 sender. 옆이면 sender의 top을 끝 요소 윗변 + offset에, 아래면 left를 끝 요소
+    왼변 + offset에 둔다(요령대로 끝 요소 높이·가로 자리 안)."""
     d = draw(outer)
     o, i = placed(d, outer[0]["name"]).rect, placed(d, end).rect
     w, _ = size_of(sender)
     left, top = {"left": (o[0] - gap - w, i[1] + offset), "right": (o[2] + gap, i[1] + offset),
                  "below": (i[0] + offset, o[3] + gap)}[side]
-    return report([{**sender, "left": left, "top": top}, *outer], [make(sender["name"], end)])
+    return {**sender, "left": left, "top": top}
+
+
+def sent_from(outer, sender, side, gap, make, end="Tomcat", offset=20):
+    """sender_at 자리에서 끝 요소 end로 make 선을 그은 검사 결과."""
+    return report([sender_at(outer, sender, side, gap, end, offset), *outer], [make(sender["name"], end)])
+
+
+def moved_off_the_middle(drawing):
+    """선 하나뿐인 그림에서 이름 글자가 가운데 후보 둘이 아닌 자리(선을 따라 옮긴 자리)에 놓였는지."""
+    (r,) = drawing.layout.relations
+    (label,) = r.labels
+    return (label.x, label.y) not in B.name_spots(r.points, label.lines)
+
+
+def middle_only(monkeypatch):
+    """선을 따라 더 볼 자리를 없애 이름 글자를 가운데 후보에만 둔다(옮기기 전 도구와 같다)."""
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
 
 
 @pytest.mark.parametrize("label", LABELS)
@@ -279,9 +303,9 @@ def test_line_into_a_nested_node_from_above_crosses_the_outer_name_but_not_from_
     sender = el("artifact", "order.war", 60, -140)
     r = report([sender, *OUTER], [make("order.war", "Tomcat")])
     assert ("line_through_name", ("order.war->Tomcat", "App Server")) in [(f.kind, f.elements) for f in r.failures]
-    for side, gap in zip(("left", "right", "below"), side_gaps(OUTER, lines)):
-        r = sent_from(OUTER, sender, side, gap, make)
-        assert r.passed, (side, gap, r.summary())
+    for side in ("left", "right", "below"):
+        r = sent_from(OUTER, sender, side, basic_gap(side), make)
+        assert r.passed, (side, r.summary())
 
 
 # 세 겹: App Server 안 Docker 안 Tomcat 안 Svc
@@ -293,78 +317,92 @@ DEEP = [device("App Server", 0, 0),
 
 @pytest.mark.parametrize("outer, end", [(OUTER, "Svc"), (DEEP, "Tomcat"), (DEEP, "Svc")])
 @pytest.mark.parametrize("label", ["deploy", "two-lines"])
-def test_side_or_below_sender_reaches_a_deeper_end_with_the_gap_measured_to_that_end(outer, end, label):
-    # 끝 요소가 노드 안 노드의 요소이거나 더 깊어도, 간격을 가장 바깥 노드 테두리에서 끝 요소까지로 재고 보내는 요소를 끝 요소
-    # 높이·가로 자리에 두면 합격한다(끝을 품은 노드들의 이름도 지나지 않는다)
+def test_side_or_below_sender_reaches_a_deeper_end_at_the_basic_spacing(outer, end, label):
+    # 끝 요소가 노드 안 노드의 요소이거나 더 깊어도, 보내는 요소를 끝 요소 높이·가로 자리에 두고 가장 바깥 노드와 기본 간격만큼
+    # 띄우면 합격한다(끝을 품은 노드들의 이름도 지나지 않고, 선 글자는 선을 따라 노드 테두리를 비킨다)
     make, lines = LABELS[label]
     sender = el("artifact", "a.war", 0, 0)
-    for side, gap in zip(("left", "right", "below"), side_gaps(outer, lines, end)):
+    for side in ("left", "right", "below"):
         for offset in (0, 20):
-            r = sent_from(outer, sender, side, gap, make, end, offset)
+            r = sent_from(outer, sender, side, basic_gap(side), make, end, offset)
             assert r.passed, (side, offset, r.summary())
-    assert "그 노드 테두리에서 끝 요소까지의 거리" in D.TIPS and "끝 요소와 같은 높이로" in D.TIPS
+    assert "끝 요소와 같은 높이로" in D.TIPS and "끝 요소와 같은 가로 자리로" in D.TIPS
 
 
 def test_side_sender_picks_the_side_with_nothing_in_the_way():
     # Server 안에 A(왼쪽)와 B(오른쪽). 왼쪽에서 B로 보내면 선이 A를 지나고, 길이 빈 오른쪽·아래에서 보내면 합격한다
     server = [device("Server", 0, 0), inside("Server", "artifact", "A", 20, 66), inside("Server", "artifact", "B", 200, 66)]
     sender = el("artifact", "x.war", 0, 0)
-    gaps = dict(zip(("left", "right", "below"), side_gaps(server, ("«deploy»",), "B")))
-    r = sent_from(server, sender, "left", gaps["left"], deploy, "B")
+    r = sent_from(server, sender, "left", SIDE_GAP, deploy, "B")
     assert ("line_through_box", ("x.war->B", "A")) in [(f.kind, f.elements) for f in r.failures]
     for side in ("right", "below"):
-        assert sent_from(server, sender, side, gaps[side], deploy, "B").passed, side
+        assert sent_from(server, sender, side, basic_gap(side), deploy, "B").passed, side
     assert "끝 요소까지 가는 길에 다른 요소가 없는 쪽을 고른다" in D.TIPS
 
 
 def test_bend_from_above_does_not_reach_a_deeper_end():
     # 꺾는 점 처방은 끝 요소가 가장 바깥 노드 바로 안의 노드일 때만 통한다. 더 깊으면 안쪽 노드(Tomcat) 이름을 지난다
-    sender = above(OUTER, el("artifact", "w", 0, 0), -50, 80)
+    sender = above(OUTER, el("artifact", "w", 0, 0), -50, VERTICAL_GAP)
     assert report([sender, *OUTER], [deploy("w", "Tomcat", via=tip_bend(OUTER, sender))]).passed
     r = report([sender, *OUTER], [deploy("w", "Svc", via=tip_bend(OUTER, sender))])
     assert ("line_through_name", ("w->Svc", "Tomcat")) in [(f.kind, f.elements) for f in r.failures]
     assert "끝 요소가 더 깊으면 위에 두지 않는다" in D.TIPS
 
 
-@pytest.mark.parametrize("name, label, left", [("order.war", "deploy", 305), ("w", "two-lines", 330)])
+@pytest.mark.parametrize("name, label, left", [("order.war", "deploy", 286), ("w", "two-lines", 297)])
 def test_sender_near_the_top_right_corner_moves_20px_off_the_bevel(name, label, left):
     # 바깥 노드(오른변 260) 오른쪽 위에서 꺾는 점으로 가는 선이 45°쯤이면 오른쪽 위 모서리의 비스듬한 두께 띠 선을 따라간다.
     # 보내는 요소를 어느 쪽으로든 20px 옮기면 합격한다
     make, lines = LABELS[label]
 
     def sent(at):
-        sender = above(OUTER, el("artifact", name, 0, 0), at, above_gap(lines))
+        sender = above(OUTER, el("artifact", name, 0, 0), at, VERTICAL_GAP)
         return report([sender, *OUTER], [make(name, "Tomcat", via=tip_bend(OUTER, sender))])
     assert ("line_along_container", (f"{name}->Tomcat", "App Server")) in [(f.kind, f.elements) for f in sent(left).failures]
     assert sent(left - 20).passed and sent(left + 20).passed
     assert "비스듬한 두께 띠 선을 따라가 불합격하면, 보내는 요소를 옆으로 20px쯤 옮긴다" in D.TIPS
 
 
+LONG = {  # 기본 간격(가로 80px)보다 넓은 선 글자 → (선 만들기, 줄)
+    "env": (lambda s, t, **more: rel("dependency", s, t, stereotype="executionEnvironment", **more), ("«executionEnvironment»",)),
+    "korean": (lambda s, t, **more: path(s, t, name="주문 서버 배포 경로", **more), ("주문 서버 배포 경로",)),
+    "two-long": (lambda s, t, **more: path(s, t, stereotype="executionEnvironment", name="HTTPS", **more),
+                 ("«executionEnvironment»", "HTTPS")),
+}
+
+
+@pytest.mark.parametrize("outer", [OUTER, DEEP], ids=["one-deep", "three-deep"])
+@pytest.mark.parametrize("label", [*LABELS, *LONG])
 @pytest.mark.parametrize("side", ["left", "right", "below"])
-def test_side_or_below_sender_closer_than_the_tip_puts_the_label_on_the_outer_border(side):
-    # 안쪽 노드가 바깥 노드 왼쪽 테두리에서 140px 들어가 있다. 선 글자는 선 가운데쯤에 놓이므로, 요령의 간격(옆은 실제 글자 폭
-    # — 불합격 항목에 나오는 폭 — 으로 잰 것)보다 30px 가까이 두면 글자가 바깥 노드 테두리에 걸리고 요령대로 띄우면 합격한다
-    # (옆은 20px 가까워도 걸리고, 아래 +40은 여유를 둔 값이다)
-    outer = [device("App", 0, 0), el("node", "Tomcat", 140, 66, stereotype="executionEnvironment", **{"in": "App"}),
-             inside("Tomcat", "component", "Svc", 160, 132)]
+def test_sender_with_room_for_the_label_passes_and_a_long_label_needs_more_than_the_basic_spacing(outer, label, side):
+    # 요령의 간격(옆이면 가장 긴 줄의 글자 폭 + 15px, 아래면 줄 수 × 15 + 글자 폭 ÷ 4 + 25px)이면 보내는 요소를 끝 요소 변의 어디에
+    # 두든 합격한다(아래에서 비스듬한 선은 넓은 글자가 구간 방향으로 더 차지한다). 80px보다 넓은 글자는 옆에서 기본 간격만 띄우면
+    # 글자가 들어갈 빈 자리가 없어 불합격이다
+    make, lines = {**LABELS, **LONG}[label]
     sender = el("artifact", "a.war", 0, 0)
-    gap = dict(zip(("left", "right", "below"), side_gaps(outer, ("«deploy»",), measure=text_width)))[side]
-    offset = 40 if side == "below" else 20
-    (f,) = sent_from(outer, sender, side, gap - 30, deploy, offset=offset).failures
-    assert f.kind == "text_on_box" and f.elements == ("a.war->Tomcat", "App")
-    assert sent_from(outer, sender, side, gap, deploy, offset=offset).passed
-    assert "거리 + 선 글자 폭(가장 긴 줄) + 20px" in D.TIPS and "끝 요소 아랫변까지의 거리 + 40px 이상" in D.TIPS
+    end = placed(draw(outer), "Tomcat").rect
+    edge = end[3] - end[1] if side != "below" else end[2] - end[0]
+    for offset in range(0, int(edge) + 1, 30):
+        for measure in (text_width, estimate):  # 그리기 전에 어림한 폭으로 띄워도(더 넓다) 합격한다
+            r = sent_from(outer, sender, side, label_room(side, lines, measure), make, offset=offset)
+            assert r.passed, (offset, measure.__name__, r.summary())
+    if label in LONG and side != "below":
+        assert set(kinds(sent_from(outer, sender, side, SIDE_GAP, make))) == {"text_on_box"}
 
 
-def test_label_of_three_lines_from_below_needs_15px_more_for_each_extra_line():
-    # «internet»·HTTPS·port 443 세 줄 글자는 아래 간격 + 40만으로는 바깥 노드 아랫변에 걸리고, 줄마다 15px를 더하면 합격한다
-    make, lines = LABELS["three-lines"]
-    sender = el("artifact", "a.war", 0, 0)
-    gap = side_gaps(OUTER, lines)[2]
-    (f,) = sent_from(OUTER, sender, "below", gap - 30, make, offset=40).failures
-    assert f.kind == "text_on_box" and f.elements == ("a.war->Tomcat", "App Server")
-    assert sent_from(OUTER, sender, "below", gap, make, offset=40).passed
-    assert "보내는 요소가 아래나 위일 때 간격에 한 줄마다 15px를 더한다" in D.TIPS
+@pytest.mark.parametrize("side, label, offset", [("left", "deploy", 20), ("right", "deploy", 20), ("below", "three-lines", 40)])
+def test_label_whose_middle_spots_sit_on_a_node_border_moves_along_the_line_and_passes(monkeypatch, side, label, offset):
+    # 세 겹 노드 안 Tomcat으로 기본 간격에서 보내면 선 가운데의 이름 자리 둘이 다 끝을 품은 노드 테두리에 걸린다(가운데에만 두면
+    # 불합격). 도구가 선을 따라 빈 자리로 옮겨 합격한다 — 아래에서 보내는 세 줄 글자도 같다
+    make, lines = LABELS[label]
+    data = ([sender_at(DEEP, el("artifact", "a.war", 0, 0), side, basic_gap(side), offset=offset), *DEEP],
+            [make("a.war", "Tomcat")])
+    d = draw(*data)
+    assert K.check(d).passed, K.check(d).summary()
+    assert moved_off_the_middle(d)
+    with monkeypatch.context() as m:
+        middle_only(m)
+        assert kinds(report(*data)) == ["text_on_box"]
 
 
 CLUSTER = [device("Application Server Cluster", 0, 0),
@@ -387,10 +425,10 @@ def above(outer, sender, left, gap):
 @pytest.mark.parametrize("outer, left", [(OUTER, -50), (OUTER, 190), (CLUSTER, -140), (CLUSTER, 280)])
 @pytest.mark.parametrize("label", LABELS)
 def test_sender_above_beside_the_name_follows_the_tip_with_one_bend(outer, left, label):
-    # 이름 칸 바로 위는 아니지만 곧은 선이 이름 칸을 지나는 자리(바깥 노드 윗변에서 요령의 간격만큼 위)에서, 요령의 꺾는 점을
+    # 이름 칸 바로 위는 아니지만 곧은 선이 이름 칸을 지나는 자리(바깥 노드 윗변에서 기본 간격만큼 위)에서, 요령의 꺾는 점을
     # 하나 주면 합격한다. 이름이 길어 이름 칸 옆 앞면이 34px뿐이라 꺾는 점이 앞면 밖에 놓여도 같다
     make, lines = LABELS[label]
-    sender = above(outer, el("artifact", "order.war", 0, 0), left, above_gap(lines))
+    sender = above(outer, el("artifact", "order.war", 0, 0), left, VERTICAL_GAP)
     assert "line_through_name" in kinds(report([sender, *outer], [make("order.war", "Tomcat")]))
     holder = placed(draw(outer), outer[0]["name"])
     ((x, _),) = via = tip_bend(outer, sender)
@@ -402,18 +440,31 @@ def test_sender_above_beside_the_name_follows_the_tip_with_one_bend(outer, left,
     assert "꺾는 점이 앞면 밖(두께 띠나 노드 밖)에 놓여도 된다" in D.TIPS
 
 
+@pytest.mark.parametrize("outer, left", [(OUTER, -50), (OUTER, 190), (CLUSTER, -140), (CLUSTER, 280)])
+@pytest.mark.parametrize("label", [*LABELS, *LONG])
+def test_label_above_with_the_bend_passes_with_room_for_it(outer, left, label):
+    # 위에 둘 때도 요령의 간격(줄 수 × 15 + 글자 폭 ÷ 4 + 25px)이면 세 줄 글자와 80px보다 넓은 글자도 합격한다
+    make, lines = {**LABELS, **LONG}[label]
+    sender = above(outer, el("artifact", "order.war", 0, 0), left, label_room("above", lines))
+    r = report([sender, *outer], [make("order.war", "Tomcat", via=tip_bend(outer, sender))])
+    assert r.passed, r.summary()
+
+
 @pytest.mark.parametrize("left", [-20, 190])
-@pytest.mark.parametrize("label, near", [("deploy", 60), ("two-lines", 80)])
-def test_sender_above_closer_than_the_tip_puts_the_label_on_the_outer_border_even_with_the_bend(left, label, near):
-    # 요령의 꺾는 점을 줘도, 한 줄 글자는 바깥 노드 윗변에서 60px(기본 세로 간격)만, 두 줄 글자는 한 줄 기준 80px만 떼면 선
-    # 글자가 바깥 노드 테두리에 걸린다. 요령대로(80px, 줄마다 15px 더) 떼면 합격한다
+@pytest.mark.parametrize("label", ["deploy", "two-lines"])
+def test_label_above_with_the_bend_moves_off_the_outer_border_at_the_basic_spacing(monkeypatch, left, label):
+    # 요령의 꺾는 점을 주고 바깥 노드 윗변에서 기본 간격(60px)만 떼면 선 가운데의 이름 자리 둘이 다 바깥 노드 테두리에 걸린다
+    # (가운데에만 두면 불합격). 도구가 선을 따라 빈 자리로 옮겨 합격한다
     make, lines = LABELS[label]
-    sender = el("artifact", "w", 0, 0)
-    close, far = above(OUTER, sender, left, near), above(OUTER, sender, left, above_gap(lines))
-    (f,) = report([close, *OUTER], [make("w", "Tomcat", via=tip_bend(OUTER, close))]).failures
+    sender = above(OUTER, el("artifact", "w", 0, 0), left, VERTICAL_GAP)
+    data = ([sender, *OUTER], [make("w", "Tomcat", via=tip_bend(OUTER, sender))])
+    d = draw(*data)
+    assert K.check(d).passed and moved_off_the_middle(d)
+    with monkeypatch.context() as m:
+        middle_only(m)
+        (f,) = report(*data).failures
     assert f.kind == "text_on_box" and f.elements == ("w->Tomcat", "App Server")
-    assert report([far, *OUTER], [make("w", "Tomcat", via=tip_bend(OUTER, far))]).passed
-    assert "바깥 노드 윗변에서 80px 이상 떼어(선 글자가 여러 줄이면 한 줄마다 15px 더)" in D.TIPS
+    assert "바깥 노드 윗변에서" not in D.TIPS  # 위에 둘 때도 기본 간격 밖에 따로 떼는 거리가 없다
 
 
 def test_returned_places_draw_the_same_picture():

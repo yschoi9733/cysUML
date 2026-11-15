@@ -250,10 +250,11 @@ def test_text_clearance_matches_label_placement():
 # ---------------------------------------------------------------- 선 글자가 상자에·선 글자끼리 겹친다
 
 
-def boxed_in_name(c_bottom):
-    """A→B 가로선(y=24) 가운데 위아래에 상자 C·D(선에서 5px)를 두어 이름 놓을 자리를 막는다. C의 아래 변은 c_bottom."""
-    return report([box("A", 0, 0), box("B", 300, 0), box("C", 120, c_bottom - 59, width=140, height=59),
-                   box("D", 120, 29, width=140)],
+def boxed_in_name(c_bottom, left=95, width=190):
+    """A→B 가로선(y=24, x 90~300) 위아래에 상자 C·D(선에서 5px)를 두어 이름 놓을 자리를 막는다. C의 아래 변은 c_bottom, C·D는
+    x left부터 width 폭이다 — 기본값은 A와 B 쪽 화살촉 사이를 다 덮어 선을 따라 옮길 자리도 없다."""
+    return report([box("A", 0, 0), box("B", 300, 0), box("C", left, c_bottom - 59, width=width, height=59),
+                   box("D", left, 29, width=width)],
                   [rel("association", "A", "B", name="has")])
 
 
@@ -261,11 +262,16 @@ def test_label_with_no_room_lands_on_a_box_and_fails():
     r = boxed_in_name(19)
     (f,) = r.failures
     assert f.kind == "text_on_box" and f.elements == ("A->B", "C")
-    assert "이름 'has'" in f.problem and "상자 C(120, -40, 140×59)" in f.problem and f.hint == K.LABEL_HINT
+    assert "이름 'has'" in f.problem and "상자 C(95, -40, 190×59)" in f.problem and f.hint == K.LABEL_HINT
 
 
 def test_label_with_room_above_the_line_passes():
     assert boxed_in_name(-10).passed
+
+
+def test_label_blocked_only_in_the_middle_moves_along_the_line_and_passes():
+    # C·D가 선 가운데(x 120~260)만 막으면 이름은 선을 따라 그 옆 빈 곳으로 옮겨 합격한다
+    assert boxed_in_name(19, left=120, width=140).passed
 
 
 def test_labels_of_stacked_relations_overlap():

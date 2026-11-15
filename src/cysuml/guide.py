@@ -17,7 +17,8 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from .boxcheck import KINDS, bend_away
-from .boxdiagram import ARROW, ARROW_HEAD, ELEMENT_WORDS, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec, Words, aims_off_center, josa
+from .boxdiagram import (ARROW, ARROW_HEAD, ELEMENT_WORDS, LABEL_LINE, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec, Words,
+                          aims_off_center, josa)
 from .canvas import MIN_SCALE, SCALE
 from .report import fmt_num
 
@@ -166,6 +167,13 @@ NESTING = f"""요소 안에 요소 두기(중첩):
 - 선의 끝 요소를 품은 바깥 요소는 그 선이 안을 지나거나 테두리를 건너도 된다. 다만 테두리를 따라가거나 이름 칸을 지나면 \
 불합격이다. 그 선의 글자도 바깥 요소 안에 놓일 수 있다. 그 밖의 요소는 선이 지나가면 불합격이다.
 - 품은 요소와 그 안의 요소는 선으로 잇지 않는다."""
+
+# 바깥 요소 밖의 요소와 안의 요소 사이 간격. 배치도·컴포넌트도에서 잰 합격 간격(아래·위는 선이 비스듬하면 글자 폭에도 달린다)을
+# 여유를 두고 덮는 값이다
+LABEL_ROOM = (f"옆이면 가장 긴 줄의 글자 폭 + 15px, 아래·위면 글자 줄 수 × {LABEL_LINE:g} + 가장 긴 줄의 글자 폭 ÷ 4 + 25px "
+              "이상이다. 글자 폭은 영문·숫자·ASCII 기호 한 글자 11px(W·@·%는 14px), 한글 12px, 그 밖의 글자 14px로 넉넉히 어림하고, "
+              "불합격 항목에 글자 자리(폭×높이)가 나오면 그 폭으로 고친다")
+
 
 def _joined(words: Iterable[str]) -> str:
     return "·".join(dict.fromkeys(words))
