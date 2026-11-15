@@ -224,12 +224,13 @@ class UseCaseRules(Rules):
                 inherits.append((path, rel))
             elif (stereotype := _stereo(rel)) in steps:
                 steps[stereotype].append((path, rel))
-        given = {name: {k: list(v) for k, v in graph.items()} for name, graph in plan.graphs.items()}  # 고치는 법을 더하기 전
+        # 고리는 고치는 법을 계획에 더하기 전의 입력으로 본다 — 알린 차례는 _InOrder가 입력 차례로 다시 놓는다
+        graphs = plan.graphs
+        fail_loops(r, inherits, graphs["generalization"], "일반화", "조상이 다시 자식이 될 수 없다")
+        fail_loops(r, steps["include"], graphs["include"], "«include»", "유즈케이스는 저를 포함하는 유즈케이스를 다시 포함할 수 없다")
+        fail_loops(r, steps["extend"], graphs["extend"], "«extend»", "유즈케이스는 저를 확장하는 유즈케이스를 다시 확장할 수 없다")
         for fault, path, rel, s, t in faults:  # 앞 오류의 고치는 법이 만들 관계까지 보고 고른다
             r.fail(*_explain(plan, fault, path, rel, s, t, subject(rel.source)[1]))
-        fail_loops(r, inherits, given["generalization"], "일반화", "조상이 다시 자식이 될 수 없다")
-        fail_loops(r, steps["include"], given["include"], "«include»", "유즈케이스는 저를 포함하는 유즈케이스를 다시 포함할 수 없다")
-        fail_loops(r, steps["extend"], given["extend"], "«extend»", "유즈케이스는 저를 확장하는 유즈케이스를 다시 확장할 수 없다")
         r.flush(out)
         return []
 
@@ -253,8 +254,8 @@ class UseCaseRules(Rules):
 
 
 def _fault(rel: B.Relation, s: str, t: str, subject: Callable[[str], tuple[bool, Optional[str]]]) -> Optional[str]:
-    """관계가 어긋난 규칙의 이름(_explain이 이 이름으로 오류 글을 고른다). 어긋나지 않았으면 None — 일반화·«include» 고리는 따로
-    본다. 주체를 알 수 없는 유즈케이스끼리의 연관은 보지 않는다(품은 요소의 문제는 이미 알렸다)."""
+    """관계가 어긋난 규칙의 이름(_explain이 이 이름으로 오류 글을 고른다). 어긋나지 않았으면 None — 일반화·«include»·«extend»
+    고리는 따로 본다. 주체를 알 수 없는 유즈케이스끼리의 연관은 보지 않는다(품은 요소의 문제는 이미 알렸다)."""
     if _step(rel):
         if rel.kind == "dependency" and s == t == "use_case":
             return "self_step" if rel.source == rel.target else None
@@ -313,8 +314,12 @@ class _Plan:
         kind, a, b, _ = edge
         if (key := _same(edge)) in self.edges:
             what = "두 끝을 잇는" if kind == "association" else "같은 from·to의"
+            if kind == "dependency":  # 의존은 stereotype이 다르면 다른 관계다 — 밝히지 않으면 다른 stereotype의 의존도 막힌 것으로 읽힌다
+                what += f" {f'«{edge[3]}» ' if edge[3] else 'stereotype 없는 '}"
+            else:
+                what += " "
             origin = self.edges[key]
-            return f"{what} {kind}{KIND_JOSA[kind]} {'이미 있다' if origin is None else f'생긴다({origin}의 고치는 법)'}"
+            return f"{what}{kind}{KIND_JOSA[kind]} {'이미 있다' if origin is None else f'생긴다({origin}의 고치는 법)'}"
         graph = _graph(edge)
         if graph is not None and (back := parent_path(self.graphs[graph], b, a)) is not None:
             label = "일반화" if graph == "generalization" else f"«{graph}»"
@@ -389,14 +394,13 @@ def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str
         how = plan.offer(path, "일반화", [("액터가 유즈케이스를 쓰는 것이면 kind를 'association'으로 바꾸고", "",
                                          ("association", a, b, None), "연관")], maybe=True)
         return path, f"일반화의 두 끝 종류가 다르다({ends}) — 일반화는 액터끼리, 유즈케이스끼리 긋는다. {how}"
+    systems = ", ".join(end_of(side, key, kind) for side, key, kind in (("from", a, s), ("to", b, t)) if kind == "system")
     if fault == "system_association":
-        systems = ", ".join(end_of(side, key, kind) for side, key, kind in (("from", a, s), ("to", b, t)) if kind == "system")
         other = {"actor": "그 액터가 쓰는 유즈케이스로", "use_case": "그 유즈케이스를 쓰는 액터로"}.get(_other(s, t) or "")
         how = f"시스템 경계 쪽 끝을 {other} 고치고" if other else "from·to를 액터와 유즈케이스로 고치고"
         return path, (f"연관이 시스템 경계에 닿는다({systems}) — 연관은 액터와 유즈케이스 사이에 긋는다. {how}{PICK}, 아니면 이 연관을 "
                       "지운다")
     if fault == "system_dependency":
-        systems = ", ".join(end_of(side, key, kind) for side, key, kind in (("from", a, s), ("to", b, t)) if kind == "system")
         other = _other(s, t)
         how = ("액터가 유즈케이스를 쓰는 것이면 kind를 'association'으로 바꾸고 시스템 경계 쪽 끝을 그 유즈케이스로 고치고"
                if other == "actor" else "시스템 경계 쪽 끝을 액터나 유즈케이스로 고치고" if other else "from·to를 액터나 유즈케이스로 고치고")
@@ -422,8 +426,6 @@ def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str
         how = f"포함이면 {change} 'include'로 하고(«extend»는 안 된다 — {no_ext})"
     elif no_ext is None:
         how = f"확장이면 {change} 'extend'로 하고(«include»는 안 된다 — {no_inc})"
-    elif no_inc == no_ext:
-        return path, f"{problem}. {no_ext}. 이 연관을 지운다"
     else:
         return path, f"{problem}. «include»는 안 된다 — {no_inc}. «extend»도 안 된다 — {no_ext}. 이 연관을 지운다"
     return path, f"{problem}. {how}, 아니면 이 연관을 지운다"
@@ -437,7 +439,7 @@ def _actors_fix(plan: _Plan, path: str, rel: B.Relation, what: str) -> str:
         options = [("액터 사이 일반화를 뜻했으면 stereotype을 빼고", "", ("generalization", rel.source, rel.target, None),
                     "일반화")]
     else:
-        drop = " stereotype을 빼고" if rel.stereotype else ""
+        drop = " stereotype을 빼고" if _step(rel) else ""
         options = [(f"한 액터가 다른 액터의 한 종류면{drop} kind를 'generalization'으로 바꾸고(from이 자식)", "",
                     ("generalization", rel.source, rel.target, None), "일반화")]
     return plan.offer(path, what, options, maybe=True)
@@ -474,8 +476,13 @@ def _step_fix(plan: _Plan, path: str, rel: B.Relation, s: str, t: str) -> str:
                                             ("한 액터가 다른 액터의 한 종류면 stereotype을 빼고 kind를 'generalization'으로 "
                                              "바꾸고(from이 자식)", "", ("generalization", a, b, None), "일반화")], maybe=True)
         return _actors_fix(plan, path, rel, "관계")  # 일반화(stereotype만 틀렸다)나 연관(액터끼리 연관도 틀렸다)
+    association = ("association", a, b, None)
+    if rel.kind == "dependency":  # 액터와 유즈케이스 사이 의존은 받는다 — stereotype만 빼도 된다
+        how = plan.offer(path, "관계", [("연관이면 kind를 'association'으로 바꾸고 stereotype을 빼고", "", association, "연관"),
+                                       ("의존을 뜻했으면 stereotype만 빼고", "", ("dependency", a, b, None), "의존")], maybe=True)
+        return f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. {how}"
     change = "stereotype을 뺀다" if rel.kind == "association" else "kind를 'association'으로 바꾸고 stereotype을 뺀다"
-    how = plan.offer(path, "관계", [("", change, ("association", a, b, None), "연관")], maybe=False)
+    how = plan.offer(path, "관계", [("", change, association, "연관")], maybe=False)
     return f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. {how}"
 
 
