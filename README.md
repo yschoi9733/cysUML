@@ -240,13 +240,13 @@ figure's own place comes after it. The check is the same as for package diagrams
 through an actor's name or the name at the top of the system boundary. Generalization lines to one parent may share
 one trunk, as inheritance lines do in class diagrams.
 
-Elements and relations must follow UML notation, and the tool rejects the input otherwise: an actor stays outside the
-system boundary, no relation of any kind ends on the system boundary, an association joins an actor and a use case
-or two use cases of different system boundaries (never two actors, two use cases of the same system boundary, or two
-use cases both outside any boundary), a
-generalization joins two actors or two use cases and never runs in a cycle or back to itself, and «include» and
-«extend» go only on dependencies between use cases, where a use case never includes or extends itself and neither
-includes nor extends run in a cycle.
+Elements and relations must follow UML notation, and the tool rejects the input otherwise. An actor stays outside the
+system boundary, and no relation of any kind ends on the system boundary. An association joins an actor and a use
+case, or two use cases whose boundaries differ (different boundaries, or one inside a boundary and one outside); it
+never joins two actors, two use cases of the same boundary, or two use cases both outside any boundary. A
+generalization joins two actors or two use cases and never runs in a cycle or back to itself. «include» and «extend»
+go only on dependencies between use cases; a use case never includes or extends itself, and neither includes nor
+extends run in a cycle.
 
 ### State diagrams
 
@@ -432,9 +432,10 @@ uvx cysuml
   쪽)에 쓴다. 결과는 패키지도와 같고, 액터는 이름까지 덮는 자리 뒤에 사람 모양 자리를 함께 돌려준다. 검사는 패키지도와 같고,
   선이 액터 이름이나 시스템 경계 이름을 지나도 불합격이다. 같은 부모로 가는 일반화 선은 클래스도의 상속처럼 한 줄기로 모아도 된다.
   요소와 관계는 UML 표기를 따라야 하고, 어기면 그리지 않고 입력 오류로 돌려준다 — 액터는 시스템 경계 밖에 두고, 시스템 경계에는
-  어떤 관계도 잇지 않고, 연관은 액터와 유즈케이스 사이나 서로 다른 시스템 경계의 유즈케이스 사이에 긋고(액터끼리, 같은 시스템 경계
-  안이거나 둘 다 경계 밖인 유즈케이스끼리는 잇지 않는다), 일반화는 액터끼리·유즈케이스끼리 고리를 이루거나 자기 자신으로 가지 않게 긋고, «include»·«extend»는 유즈케이스
-  사이의 의존에만 단다. 유즈케이스는 자기 자신을 포함하거나 확장하지 않고, «include»끼리·«extend»끼리는 고리를 이루지 않는다.
+  어떤 관계도 잇지 않는다. 연관은 액터와 유즈케이스 사이나 경계가 다른 유즈케이스 사이(서로 다른 경계이거나 한쪽만 경계 안)에
+  긋고, 액터끼리나 같은 시스템 경계 안이거나 둘 다 경계 밖인 유즈케이스끼리는 잇지 않는다. 일반화는 액터끼리·유즈케이스끼리 고리를
+  이루거나 자기 자신으로 가지 않게 긋는다. «include»·«extend»는 유즈케이스 사이의 의존에만 달고, 유즈케이스는 자기 자신을
+  포함하거나 확장하지 않으며, «include»끼리·«extend»끼리는 고리를 이루지 않는다.
 - **상태도**는 `draw_state_diagram`으로 그린다. 시작·끝 점, 상태, 선택 마름모를 전이로 잇는다. 상태의 `entry /`·`do /`·`exit /`
   줄은 `actions`에 주면 받은 그대로 쓰고, 상태 안에 상태를 넣을 때는 `in`으로 품은 상태를 가리킨다. 이름이 없는 시작·끝 점과
   선택은 `id`를 주어 전이가 가리키게 한다. 전이 글자(`name`)도 대괄호·빗금까지 받은 그대로 쓴다. 결과는 패키지도와 같다. 선이 그

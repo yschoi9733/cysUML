@@ -244,7 +244,7 @@ class UseCaseRules(Rules):
             "  - 규칙: 시스템 경계에는 관계를 잇지 않는다 — 경계는 시스템의 범위를 그린 것이라, 시스템 경계가 끝인 관계는 종류와 "
             "상관없이 입력 오류다.",
             "  - 규칙: 연관은 액터와 유즈케이스 사이에 긋는다. 액터끼리 잇는 연관, 같은 시스템 경계 안이거나 둘 다 경계 밖인 "
-            "유즈케이스끼리 잇는 연관은 입력 오류다(서로 다른 시스템 경계의 유즈케이스끼리는 받는다).",
+            "유즈케이스끼리 잇는 연관은 입력 오류다(서로 다른 시스템 경계이거나 한쪽만 경계 안인 유즈케이스끼리는 받는다).",
             "  - 규칙: 일반화는 액터끼리, 유즈케이스끼리 긋는다. 종류가 다른 일반화, 고리를 이루는 일반화(A의 부모가 B이고 B의 부모가 "
             "다시 A인 것 — 여러 단계도)는 입력 오류다.",
             '  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — 다른 '
@@ -370,7 +370,8 @@ class _InOrder(Reader):
             r.fail(path, message)
 
 
-PICK = "(자기 자신으로 가거나, 고리를 이루거나, 이미 있는 관계와 같아지지 않게 고른다)"  # 사람이 고르는 끝을 권할 때 — 고를 요소를 몰라 계획으로 볼 수 없다
+PICK = "(자기 자신으로 가거나, 고리를 이루거나, 이미 있는 관계와 같아지지 않게 고른다)"
+UNASSOCIATE = "(다중도·navigable이 있으면 뺀다)"  # 연관을 다른 종류로 바꾸라고 할 때 — 그 칸은 연관만 받는다  # 사람이 고르는 끝을 권할 때 — 고를 요소를 몰라 계획으로 볼 수 없다
 
 
 def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str,
@@ -417,7 +418,7 @@ def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str
     for edge, why in ((inc, no_inc), (ext, no_ext)):
         if why is None:
             plan.add(edge, path)
-    change = "kind를 'dependency'로 바꾸고 stereotype을"
+    change = f"kind를 'dependency'로 바꾸고{UNASSOCIATE} stereotype을"
     if no_inc is None and no_ext is None:
         how = f"포함·확장이면 {change} 'include'나 'extend'로 하고"
     elif no_inc is None:
@@ -437,7 +438,8 @@ def _actors_fix(plan: _Plan, path: str, rel: B.Relation, what: str) -> str:
                     "일반화")]
     else:
         drop = " stereotype을 빼고" if _step(rel) else ""
-        options = [(f"한 액터가 다른 액터의 한 종류면{drop} kind를 'generalization'으로 바꾸고(from이 자식)", "",
+        fields = ", 다중도·navigable이 있으면 뺀다" if rel.kind == "association" else ""  # UNASSOCIATE를 괄호 하나로
+        options = [(f"한 액터가 다른 액터의 한 종류면{drop} kind를 'generalization'으로 바꾸고(from이 자식{fields})", "",
                     ("generalization", rel.source, rel.target, None), "일반화")]
     return plan.offer(path, what, options, maybe=True)
 
@@ -457,7 +459,7 @@ def _step_fix(plan: _Plan, path: str, rel: B.Relation, s: str, t: str) -> str:
             return plan.offer(path, "관계", [(f"{meant} kind를 'dependency'로 바꾸고", "", dependency, "의존"),
                                             ("일반화를 뜻했으면 stereotype을 빼고", "", ("generalization", a, b, None), "일반화")],
                               maybe=True)
-        return plan.offer(path, "관계", [("", "kind를 'dependency'로 바꾼다", dependency, "의존")], maybe=False)
+        return plan.offer(path, "관계", [("", f"kind를 'dependency'로 바꾼다{UNASSOCIATE}", dependency, "의존")], maybe=False)
     if "system" in (s, t):
         other = _other(s, t)
         if other == "actor":
@@ -465,7 +467,8 @@ def _step_fix(plan: _Plan, path: str, rel: B.Relation, s: str, t: str) -> str:
             return (f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 "
                     f"고치고{PICK}{change} stereotype을 빼고, 아니면 이 관계를 지운다")
         where = "시스템 경계 쪽 끝을 유즈케이스로" if other == "use_case" else "from·to를 유즈케이스로"
-        change = "" if rel.kind == "dependency" else " kind를 'dependency'로 바꾸고"
+        change = ("" if rel.kind == "dependency" else
+                  f" kind를 'dependency'로 바꾸고{UNASSOCIATE if rel.kind == 'association' else ''}")
         return f"{where} 고치고{PICK}{change}, 아니면 이 관계를 지운다"
     if s == t == "actor":
         if rel.kind == "dependency":  # 액터 사이 의존은 받는다 — stereotype만 빼도 된다

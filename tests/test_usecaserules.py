@@ -67,7 +67,7 @@ ISSUE_CASES = [  # (요소, 관계, 오류, 고치는 법대로 고친 요소, �
      BASE, [rel("association", "고객", "주문한다")]),
     (BASE, [rel("association", "주문한다", "결제한다", stereotype="include")],
      f"relations[0].stereotype: {INCLUDE_ONLY}(이 관계는 'association', from '주문한다': 'use_case', to '결제한다': "
-     "'use_case') — kind를 'dependency'로 바꾼다",
+     "'use_case') — kind를 'dependency'로 바꾼다(다중도·navigable이 있으면 뺀다)",
      BASE, [rel("dependency", "주문한다", "결제한다", stereotype="include")]),
     (BASE, [rel("dependency", "고객", "주문한다", stereotype="include")],
      f"relations[0].stereotype: {INCLUDE_ONLY}(이 관계는 'dependency', from '고객': 'actor', to '주문한다': 'use_case') — "
@@ -248,7 +248,7 @@ CARD = el("actor", "카드사", 560, 200, name_side="right")
 
 @pytest.mark.parametrize("relations, fix", [
     ([rel("association", "고객", "은행")],
-     "한 액터가 다른 액터의 한 종류면 kind를 'generalization'으로 바꾸고(from이 자식), 아니면 이 연관을 지운다"),
+     "한 액터가 다른 액터의 한 종류면 kind를 'generalization'으로 바꾸고(from이 자식, 다중도·navigable이 있으면 뺀다), 아니면 이 연관을 지운다"),
     ([rel("generalization", "고객", "은행"), rel("association", "은행", "고객")],
      "일반화로 두면 고리가 된다('은행' → '고객' → '은행'). 이 연관을 지운다"),
     # 일반화로 바꾸면 여러 단계 고리가 된다
@@ -278,7 +278,7 @@ LOOP_BACK = "일반화로 두면 고리가 된다('은행' → '고객' → '은
 ])
 def test_a_later_error_is_not_told_to_close_a_loop_with_the_fix_of_an_earlier_one(second, fix):
     first, then = problems([rel("association", "고객", "은행"), second])
-    assert first.endswith("kind를 'generalization'으로 바꾸고(from이 자식), 아니면 이 연관을 지운다")
+    assert first.endswith("kind를 'generalization'으로 바꾸고(from이 자식, 다중도·navigable이 있으면 뺀다), 아니면 이 연관을 지운다")
     assert then.endswith(f" {fix}")
     reads([rel("generalization", "고객", "은행")])
 
@@ -287,7 +287,7 @@ def test_errors_whose_fixes_would_close_a_loop_of_three_are_told_to_go():
     found = problems([rel("association", "고객", "은행"), rel("association", "은행", "카드사"), rel("association", "카드사", "고객")],
                      [*BASE, CARD])
     ends = ["— 액터는 유즈케이스와 연관으로 잇는다. 한 액터가 다른 액터의 한 종류면 kind를 'generalization'으로 바꾸고(from이 "
-            "자식), 아니면 이 연관을 지운다"] * 2 + [
+            "자식, 다중도·navigable이 있으면 뺀다), 아니면 이 연관을 지운다"] * 2 + [
         "— 액터는 유즈케이스와 연관으로 잇는다. 일반화로 두면 고리가 된다('카드사' → '고객' → '은행' → '카드사' — "
         "relations[0]·relations[1]의 고치는 법을 따르면). 이 연관을 지운다"]
     assert len(found) == 3 and all(p.endswith(end) for p, end in zip(found, ends)), found
@@ -317,7 +317,8 @@ def test_two_use_case_generalizations_with_extend_the_other_way_round_get_one_fi
 
 def test_two_use_case_associations_the_other_way_round_do_not_become_includes_of_each_other():
     first, then = problems([rel("association", "주문한다", "결제한다"), rel("association", "결제한다", "주문한다")])
-    assert first.endswith("포함·확장이면 kind를 'dependency'로 바꾸고 stereotype을 'include'나 'extend'로 하고, 아니면 이 연관을 지운다")
+    assert first.endswith("포함·확장이면 kind를 'dependency'로 바꾸고(다중도·navigable이 있으면 뺀다) stereotype을 'include'나 "
+                          "'extend'로 하고, 아니면 이 연관을 지운다")
     loop = "고리가 된다('결제한다' → '주문한다' → '결제한다' — relations[0]의 고치는 법을 따르면)"
     assert then.endswith(f"«include»는 안 된다(«include»로 두면 {loop}). «extend»도 안 된다(«extend»로 두면 {loop}). 이 연관을 "
                          "지운다")
@@ -334,7 +335,8 @@ def test_the_same_relation_twice_is_not_offered():
 def test_association_between_use_cases_of_one_subject_is_an_input_error():
     assert problems([rel("association", "주문한다", "결제한다", stereotype="trace")]) == (
         "relations[0]: 같은 시스템 경계('sys') 안의 유즈케이스끼리 잇는 연관이다(from '주문한다': 'use_case', to '결제한다': "
-        f"'use_case') — {SAME_SYSTEM}. 포함·확장이면 kind를 'dependency'로 바꾸고 stereotype을 'include'나 'extend'로 하고, 아니면 "
+        f"'use_case') — {SAME_SYSTEM}. 포함·확장이면 kind를 'dependency'로 바꾸고(다중도·navigable이 있으면 뺀다) stereotype을 "
+        "'include'나 'extend'로 하고, 아니면 "
         "이 연관을 지운다",)
     bare = [el("use_case", "A", 0, 0), el("use_case", "B", 300, 0)]
     (p,) = problems([rel("association", "A", "B")], bare)
@@ -346,17 +348,19 @@ def test_association_between_use_cases_of_one_subject_is_an_input_error():
 def test_association_between_use_cases_joined_by_another_kind_is_told_to_become_a_dependency(other):
     # 다른 관계와 선이 포개지는 것은 검사가 알리고 꺾는 점으로 푼다 — 지우라고 하지 않는다
     (p,) = problems([other, rel("association", "주문한다", "결제한다")])
-    assert p.endswith(f"{SAME_SYSTEM}. 포함·확장이면 kind를 'dependency'로 바꾸고 stereotype을 'include'나 'extend'로 하고, 아니면 이 "
+    assert p.endswith(f"{SAME_SYSTEM}. 포함·확장이면 kind를 'dependency'로 바꾸고(다중도·navigable이 있으면 뺀다) stereotype을 "
+                      "'include'나 'extend'로 하고, 아니면 이 "
                       "연관을 지운다")
 
 
 def test_association_between_use_cases_already_included_may_only_extend():
     (p,) = problems([rel("dependency", "주문한다", "결제한다", stereotype="include"), rel("association", "주문한다", "결제한다")])
-    assert p.endswith("«include»는 안 된다(같은 from·to의 «include» dependency가 이미 있다). 확장이면 kind를 'dependency'로 바꾸고 "
+    assert p.endswith("«include»는 안 된다(같은 from·to의 «include» dependency가 이미 있다). 확장이면 kind를 'dependency'로 "
+                      "바꾸고(다중도·navigable이 있으면 뺀다) "
                       "stereotype을 'extend'로 하고, 아니면 이 연관을 지운다")
     (p,) = problems([rel("dependency", "주문한다", "결제한다", stereotype="extend"), rel("association", "주문한다", "결제한다")])
     assert p.endswith(f"{SAME_SYSTEM}. «extend»는 안 된다(같은 from·to의 «extend» dependency가 이미 있다). 포함이면 kind를 "
-                      "'dependency'로 바꾸고 stereotype을 'include'로 하고, 아니면 이 연관을 지운다")
+                      "'dependency'로 바꾸고(다중도·navigable이 있으면 뺀다) stereotype을 'include'로 하고, 아니면 이 연관을 지운다")
 
 
 def test_association_between_use_cases_that_can_become_neither_tells_both_reasons():
@@ -379,7 +383,24 @@ def test_association_between_use_cases_that_would_close_an_include_loop_may_only
     (p,) = problems([rel("dependency", "결제한다", "환불한다", stereotype="include"),
                      rel("dependency", "환불한다", "주문한다", stereotype="include"), rel("association", "주문한다", "결제한다")], three)
     assert p.endswith(f"{SAME_SYSTEM}. «include»는 안 된다(«include»로 두면 고리가 된다('주문한다' → '결제한다' → '환불한다' → "
-                      "'주문한다')). 확장이면 kind를 'dependency'로 바꾸고 stereotype을 'extend'로 하고, 아니면 이 연관을 지운다")
+                      "'주문한다')). 확장이면 kind를 'dependency'로 바꾸고(다중도·navigable이 있으면 뺀다) stereotype을 'extend'로 하고, 아니면 이 연관을 지운다")
+
+
+@pytest.mark.parametrize("relation, fixed", [
+    (rel("association", "주문한다", "결제한다", to_multiplicity="1", navigable="to"),
+     rel("dependency", "주문한다", "결제한다", stereotype="include")),
+    (rel("association", "고객", "은행", from_multiplicity="*"), rel("generalization", "고객", "은행")),
+    (rel("association", "주문한다", "결제한다", stereotype="include", navigable="to"),
+     rel("dependency", "주문한다", "결제한다", stereotype="include")),
+])
+def test_turning_an_association_into_another_kind_says_to_drop_its_multiplicity_and_navigable(relation, fixed):
+    # 다중도·navigable은 연관만 받는다 — 빼라고 하지 않으면 고치는 법을 따른 입력이 다시 걸린다
+    (p,) = problems([relation])
+    assert "다중도·navigable이 있으면 뺀다" in p, p
+    reads([fixed])
+    with pytest.raises(InputError):  # 빼지 않고 종류만 바꾸면 다시 걸린다
+        U.parse({"elements": BASE, "relations": [{**relation, "kind": fixed["kind"], **(
+            {"stereotype": fixed["stereotype"]} if "stereotype" in fixed else {})}]})
 
 
 def test_association_between_use_cases_of_different_subjects_reads():
@@ -416,8 +437,8 @@ REFUND = inside("sys", "use_case", "환불한다", 480, 160)
       rel("association", "주문한다", "결제한다", stereotype="include")], "같은 from·to의 «include» dependency가 이미 있다. 이 관계를 지운다"),
     # 종류·stereotype이 다른 관계와 선이 포개지는 것은 꺾는 점으로 푼다
     ([rel("dependency", "주문한다", "결제한다", stereotype="trace"),
-      rel("association", "주문한다", "결제한다", stereotype="include")], "kind를 'dependency'로 바꾼다"),
-    ([rel("association", "결제한다", "주문한다", stereotype="include")], "kind를 'dependency'로 바꾼다"),
+      rel("association", "주문한다", "결제한다", stereotype="include")], "kind를 'dependency'로 바꾼다(다중도·navigable이 있으면 뺀다)"),
+    ([rel("association", "결제한다", "주문한다", stereotype="include")], "kind를 'dependency'로 바꾼다(다중도·navigable이 있으면 뺀다)"),
     ([rel("association", "고객", "주문한다", stereotype="Include")],
      "액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. stereotype을 뺀다"),
     ([rel("association", "고객", "주문한다"), rel("association", "고객", "주문한다", stereotype="include")],
@@ -476,7 +497,7 @@ def test_include_loops_are_input_errors():
     (rel("dependency", "문의한다", "sys", stereotype="include"), f"시스템 경계 쪽 끝을 유즈케이스로 고치고{PICK}, 아니면 이 관계를 지운다",
      rel("dependency", "문의한다", "주문한다", stereotype="include")),
     (rel("association", "문의한다", "sys", stereotype="include"),
-     f"시스템 경계 쪽 끝을 유즈케이스로 고치고{PICK} kind를 'dependency'로 바꾸고, 아니면 이 관계를 지운다",
+     f"시스템 경계 쪽 끝을 유즈케이스로 고치고{PICK} kind를 'dependency'로 바꾸고(다중도·navigable이 있으면 뺀다), 아니면 이 관계를 지운다",
      rel("dependency", "문의한다", "주문한다", stereotype="include")),
     (rel("dependency", "pay", "sys", stereotype="extend"), f"from·to를 유즈케이스로 고치고{PICK}, 아니면 이 관계를 지운다",
      rel("dependency", "문의한다", "주문한다", stereotype="extend")),
@@ -509,7 +530,7 @@ def test_tool_description_states_the_rules():
                  "  - 규칙: 시스템 경계에는 관계를 잇지 않는다 — 경계는 시스템의 범위를 그린 것이라, 시스템 경계가 끝인 관계는 "
                  "종류와 상관없이 입력 오류다.",
                  "  - 규칙: 연관은 액터와 유즈케이스 사이에 긋는다. 액터끼리 잇는 연관, 같은 시스템 경계 안이거나 둘 다 경계 밖인 "
-                 "유즈케이스끼리 잇는 연관은 입력 오류다(서로 다른 시스템 경계의 유즈케이스끼리는 받는다).",
+                 "유즈케이스끼리 잇는 연관은 입력 오류다(서로 다른 시스템 경계이거나 한쪽만 경계 안인 유즈케이스끼리는 받는다).",
                  "  - 규칙: 일반화는 액터끼리, 유즈케이스끼리 긋는다. 종류가 다른 일반화, 고리를 이루는 일반화(A의 부모가 B이고 B의 "
                  "부모가 다시 A인 것 — 여러 단계도)는 입력 오류다.",
                  '  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — '
