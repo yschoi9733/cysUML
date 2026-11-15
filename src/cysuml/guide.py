@@ -127,7 +127,7 @@ def trunk_aims(spec: Spec) -> str:
         return ""
     noun, labels = spec.words.noun, _joined(t.label for t in types)
     shown = ", ".join(kind_aim(t.label, "x", "y") for t in types)
-    return (f"  같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오는 {noun}{josa(noun, '은', '는')} 그 뒤에 종류마다 향하는 "
+    return (f"  같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오는 {noun}{josa(noun, '은', '는')} 그 {noun}의 자리 뒤에 종류마다 향하는 "
             f"점을 \"{shown}\"로 덧붙인다(마지막 꺾는 점을 그 점 바로 아래에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 "
             f"종류마다 그 점으로 모을 때 쓴다. 모양이 좁아 두 종류의 삼각형이 나란히 들지 않으면 덧붙지 않는다).")
 
