@@ -346,7 +346,12 @@ class _Plan:
         def edges(o) -> list[Edge]:
             return o[2] if isinstance(o[2], list) else [o[2]]
 
-        problems = [next((p for p in map(self.clash, edges(o)) if p), None) for o in options]
+        def problem(o) -> Optional[str]:
+            found = list(dict.fromkeys(p for p in map(self.clash, edges(o)) if p))
+            # 두 방향(_either)이 다 막혔으면 거꾸로의 까닭도 적는다 — 하나만 적으면 뒤집으면 되는 것으로 읽힌다
+            return None if not found else found[0] if len(found) == 1 else f"{found[0]}. from·to를 바꿔도 {found[1]}"
+
+        problems = [problem(o) for o in options]
         good = [o for o, p in zip(options, problems) if p is None]
         for o in good:
             for edge in edges(o):
@@ -388,6 +393,7 @@ class _InOrder(Reader):
 PICK = "(자기 자신으로 가거나, 고리를 이루거나, 이미 있는 관계와 같아지지 않게 고른다)"  # 사람이 고르는 끝을 권할 때 — 고를 요소를 몰라 계획으로 볼 수 없다
 UNASSOCIATE = "(다중도·navigable이 있으면 뺀다)"  # 연관을 다른 종류로 바꾸라고 할 때 — 그 칸은 연관만 받는다
 FLIP = "뜻에 맞게 from·to를 바꿔도 된다"
+ACTOR_TO_USE_CASE = "액터와 유즈케이스는 stereotype 없는 연관으로 잇는다."
 
 
 def _either(plan: _Plan, clause: str, edge: Edge, name: str, side: str, extra: str = "") -> tuple[str, str, list[Edge], str]:
@@ -403,7 +409,7 @@ def _either(plan: _Plan, clause: str, edge: Edge, name: str, side: str, extra: s
         return f"{clause}(from이 {side}{extra} — from·to를 바꾸면 안 된다: {behind})", "", [edge], name
     if behind is None:
         return f"{clause}(from이 {side}{extra} — 그대로는 안 되고 from·to를 바꿔야 한다: {ahead})", "", [back], name
-    return clause, "", [edge], name
+    return clause, "", [edge, back], name  # offer가 두 방향의 막힌 까닭을 함께 적는다
 
 
 def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str,
@@ -414,7 +420,8 @@ def _explain(plan: _Plan, fault: str, path: str, rel: B.Relation, s: str, t: str
         what = "포함" if _stereo(rel) == "include" else "확장"
         return path, f"유즈케이스는 자기 자신을 {what}할 수 없다(«{_stereo(rel)}») — 이 관계를 지운다"
     if fault == "step":
-        where = path if "system" in (s, t) else _at(path, "stereotype")  # 경계가 끼면 고칠 곳은 stereotype보다 경계 쪽 끝이다
+        # 고칠 곳: 경계가 끼면 경계 쪽 끝(관계 자리), 유즈케이스끼리면 kind, 그 밖에는 stereotype을 단 자리
+        where = path if "system" in (s, t) else _at(path, "kind" if s == t == "use_case" else "stereotype")
         return where, (f"«include»·«extend»는 유즈케이스 사이의 dependency에만 단다(이 관계는 {rel.kind!r}, "
                                          f"{ends}) — {_step_fix(plan, path, rel, s, t)}")
     if fault == "system_generalization":
@@ -468,7 +475,7 @@ def _actors_fix(plan: _Plan, path: str, rel: B.Relation, what: str) -> str:
                     "일반화")]
     else:
         drop = " stereotype을 빼고" if _step(rel) else ""
-        fields = ", 다중도·navigable이 있으면 뺀다" if rel.kind == "association" else ""  # UNASSOCIATE를 from 괄호에 함께
+        fields = f", {UNASSOCIATE[1:-1]}" if rel.kind == "association" else ""  # UNASSOCIATE를 from 괄호에 함께
         clause = f"한 액터가 다른 액터의 한 종류면{drop} kind를 'generalization'으로 바꾸고"
         options = [_either(plan, clause, ("generalization", rel.source, rel.target, None), "일반화", "자식", fields)]
     return plan.offer(path, what, options, maybe=True)
@@ -489,12 +496,14 @@ def _step_fix(plan: _Plan, path: str, rel: B.Relation, s: str, t: str) -> str:
             return plan.offer(path, "관계", [(f"{meant} kind를 'dependency'로 바꾸고", "", dependency, "의존"),
                                             ("일반화를 뜻했으면 stereotype을 빼고", "", ("generalization", a, b, None), "일반화")],
                               maybe=True)
-        return plan.offer(path, "관계", [("", f"kind를 'dependency'로 바꾼다{UNASSOCIATE}", dependency, "의존")], maybe=False)
+        side = "포함하는 쪽" if stereotype == "include" else "확장하는 쪽"
+        return plan.offer(path, "관계", [_either(plan, "kind를 'dependency'로 바꾸고", dependency, "의존", side,
+                                                f", {UNASSOCIATE[1:-1]}")], maybe=True)
     if "system" in (s, t):
         other = _other(s, t)
         if other == "actor":
             change = "" if rel.kind == "association" else " kind를 'association'으로 바꾸고"
-            return (f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 "
+            return (f"{ACTOR_TO_USE_CASE} 시스템 경계 쪽 끝을 그 액터가 쓰는 유즈케이스로 "
                     f"고치고{PICK}{change} stereotype을 빼고, 아니면 이 관계를 지운다")
         where = "시스템 경계 쪽 끝을 유즈케이스로" if other == "use_case" else "from·to를 유즈케이스로"
         change = ("" if rel.kind == "dependency" else
@@ -510,10 +519,10 @@ def _step_fix(plan: _Plan, path: str, rel: B.Relation, s: str, t: str) -> str:
     if rel.kind == "dependency":  # 액터와 유즈케이스 사이 의존은 받는다 — stereotype만 빼도 된다
         how = plan.offer(path, "관계", [("연관이면 kind를 'association'으로 바꾸고 stereotype을 빼고", "", association, "연관"),
                                        ("의존을 뜻했으면 stereotype만 빼고", "", ("dependency", a, b, None), "의존")], maybe=True)
-        return f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. {how}"
+        return f"{ACTOR_TO_USE_CASE} {how}"
     change = "stereotype을 뺀다" if rel.kind == "association" else "kind를 'association'으로 바꾸고 stereotype을 뺀다"
     how = plan.offer(path, "관계", [("", change, association, "연관")], maybe=False)
-    return f"액터와 유즈케이스는 stereotype 없는 연관으로 잇는다. {how}"
+    return f"{ACTOR_TO_USE_CASE} {how}"
 
 
 RULES = UseCaseRules()
