@@ -735,9 +735,9 @@ def test_lines_given_the_side_edge_recipe_are_drawn_as_before():
 
 
 @pytest.mark.parametrize("dx, follows", [(0, True), (B.AIM_EPS / 2, True), (-B.AIM_EPS / 2, True), (B.AIM_EPS * 2, False)])
-def test_a_line_follows_its_kinds_point_only_from_a_bend_right_under_it(dx, follows):
-    # 결과 글은 점을 소수 한 자리로 적으니 AIM_EPS 안이면 그 점 바로 아래로 보고, 마지막 꺾는 점의 x를 그 점에 맞춰 끝 구간을
-    # 세운다. 꺾는 점 없는 선은 자식 가운데가 바로 아래여도 따르지 않는다(AI가 그 점을 쓰려고 준 선이 아니다)
+def test_a_line_follows_its_kinds_point_only_from_right_under_it(dx, follows):
+    # 마지막 꺾는 점이 그 점에서 AIM_EPS 안이면 그 점을 쓰려던 선으로 보고 x를 맞춰 끝 구간을 세운다. 꺾는 점 없이 곧게 잇는 선은
+    # 자식 가운데가 AIM_EPS 안이면 따른다
     half = B.AIM_SPLIT / 2
     d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200)],
              [rel("generalization", "A", "P", via=[[45, 120], [245 - half + dx, 120]]), rel("realization", "B", "P")])
@@ -745,9 +745,22 @@ def test_a_line_follows_its_kinds_point_only_from_a_bend_right_under_it(dx, foll
     assert a.aim == ((245 - half, 24) if follows else None)
     if follows:
         assert a.points[-2:] == ((245 - half, 120), (245 - half, 48))
-    straight = draw([el("class", "P", 200, 0), el("class", "A", 200 - half, 200), el("class", "B", 400, 200)],
+    straight = draw([el("class", "P", 200, 0), el("class", "A", 200 - half + dx, 200), el("class", "B", 400, 200)],
                     [rel("generalization", "A", "P"), rel("realization", "B", "P")])
-    assert straight.layout.relations[0].aim is None
+    s = straight.layout.relations[0]
+    assert s.aim == ((245 - half, 24) if follows else None)
+    if dx == 0:
+        assert s.points == ((245 - half, 200), (245 - half, 48))  # 자식 바로 위로 곧게
+    assert B.AIM_EPS < B.AIM_SPLIT / 4  # 가운데(점에서 AIM_SPLIT/2)를 뜻한 선과 헷갈리지 않는다
+
+
+def test_overlap_hint_names_the_point_a_line_did_not_follow():
+    # 상속은 제 점(230)을 따르고, 실체화는 가운데(245) 바로 아래에서 곧게 와 가운데로 간다 — 두 삼각형이 겹치는 항목의 고치는 법이
+    # 따르지 않은 실체화의 점만 알린다
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 200, 200)],
+             [rel("generalization", "A", "P", via=[[45, 120], [230, 120]]), rel("realization", "B", "P")])
+    (f,) = [f for f in K.check(d).failures if f.kind == "head_overlap"]
+    assert '덧붙은 점("실체화 향하는 점 260, 24") 바로 아래에 둔다' in f.hint and "상속 향하는 점" not in f.hint
 
 
 def test_a_stem_of_bends_under_the_point_is_set_upright_without_a_zero_length_piece():

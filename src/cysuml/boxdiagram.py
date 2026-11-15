@@ -45,9 +45,9 @@ ARROW_BEND = 20
 # (가운데에서 양쪽으로 반씩). 삼각형 폭 18보다 넉넉해 변에 나란히 놓인 두 삼각형 사이가 12px 남는다
 AIM_SPLIT = 30
 AIM_EDGE = AIM_SPLIT + 2 * TRIANGLE[1]  # 두 종류의 점을 정하는 가장 좁은 아래·위 변(가운데를 향하는 모양에서). 도구 설명이 알린다
-# 마지막 꺾는 점이 종류마다 향하는 점 바로 아래·위인지 볼 때의 여유 — 결과 글이 그 점을 소수 한 자리로 적고, 반 픽셀 가운데에서 셈한
-# 점을 정수로 옮겨 적기도 한다. 맞춘 세로 줄(_snap)이 이만큼 움직여도 눈에 띄지 않는다
-AIM_EPS = 0.5
+# 마지막 꺾는 점(꺾는 점이 없으면 출발 요소의 점)이 종류마다 향하는 점 바로 아래·위인지 볼 때의 여유. 몇 px 셈 실수는 그 점을 쓰려던
+# 선으로 받되, 가운데(그 점에서 AIM_SPLIT/2)를 뜻한 선과 헷갈리지 않게 그 한가운데(AIM_SPLIT/4)보다 작게 둔다
+AIM_EPS = 5
 SIDE_EPS = 1e-6     # 선이 아래·위 변에 닿는지 볼 때의 여유
 MAX_LINE = 200_000  # 관계선 하나의 길이 상한 — 그림판 점선 칸 수 상한(MAX_DASHES × 무늬)보다 넉넉히 작게
 EDGE_SLACK = 0.5    # 선이 끝 요소 안을 지나는지 볼 때 테두리에서 이만큼 안쪽부터 "안"으로 친다(테두리를 따라 가는 선은 괜찮다)
@@ -1238,13 +1238,20 @@ def _split_aims(spec: Spec, diagram: Diagram, placed: tuple[PlacedBox, ...]) -> 
     return tuple(out)
 
 
-def _aim(r: Relation, b: PlacedBox) -> Optional[Point]:
-    """도착 요소 b에서 선 r이 향하는 종류마다의 점(PlacedBox.aims). 없으면 None(anchor를 향한다). AI가 그 점을 쓰려고 마지막 꺾는
-    점을 그 점 바로 아래·위에 준 선만 따라, 이미 그린 선이나 옆 변으로 들어오는 선을 기울이지 않는다."""
+def _aim(r: Relation, a: PlacedBox, b: PlacedBox) -> Optional[Point]:
+    """도착 요소 b에서 선 r이 향하는 종류마다의 점(PlacedBox.aims). 없으면 None(anchor를 향한다). 마지막 꺾는 점(꺾는 점이 없으면
+    출발 요소 a의 점)이 그 점 바로 아래·위인 선만 따라, 이미 그린 선이나 옆 변으로 들어오는 선을 기울이지 않는다."""
     point = dict(b.aims).get(r.kind)
-    if point is None or not r.via or r.source == r.target or abs(r.via[-1][0] - point[0]) > AIM_EPS:
+    toward = r.via[-1] if r.via else a.anchor
+    if point is None or toward is None or r.source == r.target or abs(toward[0] - point[0]) > AIM_EPS:
         return None
     return point
+
+
+def kind_aim(label: str, x: str, y: str) -> str:
+    """결과 글의 자리 뒤에 덧붙는 종류마다 향하는 점 하나("상속 향하는 점 x, y") — 결과 글(server), 그 설명(guide.trunk_aims),
+    검사의 고치는 법(boxcheck)이 함께 쓴다."""
+    return f"{label} 향하는 점 {x}, {y}"
 
 
 def layout(diagram: Diagram) -> Layout:
@@ -1257,7 +1264,7 @@ def layout(diagram: Diagram) -> Layout:
     by_key = {p.key: p for p in placed}
     problems: list[str] = []
     routes = []
-    aims = [_aim(r, by_key[r.target]) for r in diagram.relations]
+    aims = [_aim(r, by_key[r.source], by_key[r.target]) for r in diagram.relations]
     for i, (r, aim) in enumerate(zip(diagram.relations, aims)):
         points, found = _route(r, by_key[r.source], by_key[r.target], _at("relations", i), spec.relations[r.kind],
                                spec.words, aim)

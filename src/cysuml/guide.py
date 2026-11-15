@@ -18,8 +18,8 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from .boxcheck import KINDS, bend_away
-from .boxdiagram import (AIM_EDGE, AIM_SPLIT, ARROW, ARROW_HEAD, ELEMENT_WORDS, LABEL_LINE, NAVIGABLE, NEST_PAD, SIDES,
-                         RelationType, Spec, Words, aims_off_center, josa, split_kinds, trunk_kinds)
+from .boxdiagram import (AIM_EDGE, AIM_EPS, AIM_SPLIT, ARROW, ARROW_HEAD, ELEMENT_WORDS, LABEL_LINE, NAVIGABLE, NEST_PAD,
+                         SIDES, RelationType, Spec, Words, aims_off_center, josa, kind_aim, split_kinds, trunk_kinds)
 from .canvas import MIN_SCALE, SCALE
 from .report import fmt_num
 
@@ -114,11 +114,6 @@ def _types(spec: Spec, kinds: Iterable[str]) -> list[RelationType]:
     return [spec.relations[k] for k in kinds]
 
 
-def kind_aim(label: str, x: str, y: str) -> str:
-    """결과 글의 자리 뒤에 덧붙는 종류마다 향하는 점 하나("상속 향하는 점 x, y") — 결과 글(server)과 그 설명(trunk_aims)이 함께 쓴다."""
-    return f"{label} 향하는 점 {x}, {y}"
-
-
 def trunk_aims(spec: Spec) -> str:
     """결과 글의 자리 뒤에 덧붙는 종류마다의 향하는 점(boxdiagram._split_aims) 설명. 엔진이 나누지 않는 도구(split_kinds가 빈
     튜플)는 빈 글."""
@@ -127,9 +122,10 @@ def trunk_aims(spec: Spec) -> str:
         return ""
     noun, labels = spec.words.noun, _joined(t.label for t in types)
     shown = ", ".join(kind_aim(t.label, "x", "y") for t in types)
-    return (f"  같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오는 {noun}{josa(noun, '은', '는')} 그 {noun}의 자리 뒤에 종류마다 향하는 "
-            f"점을 \"{shown}\"로 덧붙인다(마지막 꺾는 점을 그 점 바로 아래에 둔 그 종류의 선이 그 점을 향한다 — 공유 줄기를 "
-            f"종류마다 그 점으로 모을 때 쓴다. 모양이 좁아 두 종류의 삼각형이 나란히 들지 않으면 덧붙지 않는다).")
+    return (f"  같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오는 {noun}{josa(noun, '은', '는')} 그 {noun}의 자리 뒤에 종류마다 "
+            f"향하는 점을 \"{shown}\"로 덧붙인다(마지막 꺾는 점 — 꺾는 점이 없으면 자식 가운데 — 이 그 점 바로 아래인 그 종류의 선이 "
+            f"그 점을 향한다. 공유 줄기를 종류마다 그 점으로 모을 때 쓴다. 모양이 좁아 두 종류의 삼각형이 나란히 들지 않으면 덧붙지 "
+            f"않는다).")
 
 
 def places_result(spec: Spec) -> str:
@@ -290,11 +286,12 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
         lines += [f"    - 같은 부모로 {first}·{second}{josa(second, '이', '가')} 함께 오면 종류마다 향하는 점이 정해진다 — "
                   f"{first}{josa(first, '은', '는')} 가운데에서 왼쪽으로 {half}px, {second}{josa(second, '은', '는')} 오른쪽으로 "
                   f"{half}px이고, 결과의 그 부모 자리 뒤에 \"{first} 향하는 점 x, y, {second} 향하는 점 x, y\"로 덧붙는다(덧붙은 값을 "
-                  f"그대로 쓴다). {first} 선은 {first} 향하는 점, {second} 선은 {second} 향하는 점 바로 아래(x가 같게)에 마지막 꺾는 "
-                  f"점을 두면 그 점을 향해 곧게 들어가 두 종류의 {head}{ga} 나란히 놓이고, 그 밖의 선(꺾는 점이 없는 선도)은 그대로 "
+                  f"그대로 쓴다). {first} 선은 {first} 향하는 점, {second} 선은 {second} 향하는 점 바로 아래(x가 같게 — "
+                  f"{fmt_num(AIM_EPS)}px 안이면 그 점에 맞춘다)에 마지막 꺾는 점을 두면 그 점을 향해 곧게 들어가 두 종류의 {head}{ga} "
+                  f"나란히 놓인다. 꺾는 점 없이 곧게 잇는 선은 자식 가운데가 그 점 바로 아래면 그 점을 향하고, 그 밖의 선은 그대로 "
                   f"가운데를 향한다. 그러니 위 두 점의 [부모 가운데 x, y] 대신 {first} 자식은 [{first} 향하는 점의 x, 줄기 높이 y]를, "
                   f"{second} 자식은 [{second} 향하는 점의 x, 줄기 높이 y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 "
-                  f"x와 같으면 그 점 하나만 준다).",
+                  f"x와 같으면 그 점 하나만 주거나 꺾는 점 없이 곧게 잇는다).",
                   f"    - {first} 자식의 가운데 x가 모두 {second} 향하는 점과 {second} 자식들보다 {TRUNK_CLEAR}px 이상 왼쪽에 있고, "
                   f"{second} 자식의 가운데 x가 모두 {first} 향하는 점보다 {TRUNK_CLEAR}px 이상 오른쪽에 있으면 두 가로 줄기가 떨어지니 "
                   f"같은 높이 y에 둔다. 아니면 같은 높이에서 두 가로 줄기가 포개지거나 한 줄로 이어져 보이니, 한 종류의 줄기를 "
