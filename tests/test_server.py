@@ -296,8 +296,8 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
            f"{boxdiagram.TRIANGLE[0] + guide.TRUNK_CLEAR}px(삼각형 길이 + {guide.TRUNK_CLEAR}) 이상 떼어 다른 종류의 삼각형 밑을 "
            "지나지 않게 한다.",
            f"줄기를 y와 y + {split} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 아래 줄기를 자식 {noun}들의 위 {edge}보다 "
-           f"{guide.TRUNK_CLEAR}px 이상 위에 둔다 — 부모와 자식 사이를 {guide.TRUNK_ROOM}px 이상 띄우고 y를 가운데쯤에 두면 다 "
-           "맞는다.",
+           f"{guide.TRUNK_CLEAR}px 이상 위에 둔다 — 부모와 자식 사이를 {guide.TRUNK_ROOM}px 이상 띄우고 y를 부모와 자식 사이 "
+           "한가운데에 두면 다 맞는다.",
            f"    - 결과의 부모 자리 뒤에 종류마다 향하는 점이 덧붙지 않으면(부모 아래 {edge}" + ("이" if edge == "변" else "가")
            + f" {narrow}px보다 좁아 삼각형 둘이 나란히 들지 않을 때 등) 한 종류만 위대로 아래 {edge} 가운데에 모으고, 다른 종류는 "
            f"옆 {edge}{to} 들인다.",

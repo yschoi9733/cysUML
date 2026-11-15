@@ -296,8 +296,8 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
                   f"    - 종류마다 향하는 점이 있으면 줄기 높이 y(두 높이면 위 줄기)를 부모 아래 {edge}에서 "
                   f"{fmt_num(longest + TRUNK_CLEAR)}px({head} 길이 + {TRUNK_CLEAR}) 이상 떼어 다른 종류의 {head} 밑을 지나지 않게 한다. "
                   f"줄기를 y와 y + {TRUNK_SPLIT} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 아래 줄기를 자식 {noun}들의 위 "
-                  f"{edge}보다 {TRUNK_CLEAR}px 이상 위에 둔다 — 부모와 자식 사이를 {TRUNK_ROOM}px 이상 띄우고 y를 가운데쯤에 두면 다 "
-                  f"맞는다.",
+                  f"{edge}보다 {TRUNK_CLEAR}px 이상 위에 둔다 — 부모와 자식 사이를 {TRUNK_ROOM}px 이상 띄우고 y를 부모와 자식 사이 "
+                  f"한가운데에 두면 다 맞는다.",
                   f"    - 결과의 부모 자리 뒤에 종류마다 향하는 점이 덧붙지 않으면(부모 아래 {edge}{josa(edge, '이', '가')} "
                   f"{narrow}px보다 좁아 {head} 둘이 나란히 들지 않을 때 등) 한 종류만 위대로 아래 {edge} 가운데에 모으고, 다른 종류는 "
                   f"옆 {edge}{to} 들인다. 세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {TRUNK_SIDE}로 정하고, 그 종류의 "
