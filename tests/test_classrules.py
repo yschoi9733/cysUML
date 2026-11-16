@@ -434,29 +434,37 @@ def test_self_inheritance_names_the_element_word_of_the_tool():
 
 
 def test_tool_descriptions_state_the_rules_of_the_kinds_the_tool_takes():
+    # 규칙·알림 줄은 relations 인자 설명에 있다(관계 필드)
+    rel = {m: m.ARGS["relations"] for m in (P, CD, D, usecasediagram)}
+    class_rel = server.CLASS_ARGS["relations"]
     assert ('  - 규칙: 상속은 같은 종류끼리 긋는다("class"·"abstract"끼리, "interface"끼리, "enum"끼리). 클래스가 '
-            "인터페이스를 구현하는 것은 realization이다.") in server.CLASS_TOOL
+            "인터페이스를 구현하는 것은 realization이다.") in class_rel
     assert ('  - 알림: 다음 실체화는 그리되 검사 결과에 알림을 준다(불합격이 아니다) — from이 "interface"인 것, to가 '
-            '"interface" 밖의 종류인 것. ') in server.CLASS_TOOL
+            '"interface" 밖의 종류인 것. ') in class_rel
     # 아이콘 표기는 기본 표기와 같은 종류로 묶어 적는다
     assert ('"interface"끼리, "enum"끼리, "component"·"component_icon"끼리, "artifact"·"artifact_icon"끼리, "node"끼리). '
-            '상속의 끝이 될 수 없는 종류: "package".') in P.TOOL
-    assert '상속의 끝이 될 수 없는 종류: "package"·"lollipop".' in CD.TOOL
+            '상속의 끝이 될 수 없는 종류: "package".') in rel[P]
+    assert '상속의 끝이 될 수 없는 종류: "package"·"lollipop".' in rel[CD]
     assert ('from이 "interface"·"lollipop"·"package" 가운데 하나인 것, to가 "interface"·"lollipop" 밖의 종류인 것(to가 '
-            '"component"·"component_icon" 가운데 하나이고 from이 "class"·"abstract" 가운데 하나인 것은 빼고).') in CD.TOOL
+            '"component"·"component_icon" 가운데 하나이고 from이 "class"·"abstract" 가운데 하나인 것은 빼고).') in rel[CD]
     assert ('from이 "interface"·"package" 가운데 하나인 것, to가 "interface" 밖의 종류인 것(to가 "component"·"component_icon" '
-            '가운데 하나이고 from이 "class"·"abstract" 가운데 하나인 것은 빼고).') in D.TOOL
+            '가운데 하나이고 from이 "class"·"abstract" 가운데 하나인 것은 빼고).') in rel[D]
     # 따옴표 친 종류 이름 바로 뒤에 받침에 따라 갈리는 조사를 붙이지 않는다("lollipop"는은 틀린다 — 이고·인 같은 서술은 괜찮다)
-    for tool in (server.CLASS_TOOL, P.TOOL, CD.TOOL, D.TOOL, usecasediagram.TOOL):
-        rules = "\n".join(line for line in tool.splitlines() if line.startswith(("  - 규칙:", "  - 알림:")))
+    # 도구 설명과 인자 설명 전체를 훑는다
+    for module, tool in ((server, server.CLASS_TOOL), (P, P.TOOL), (CD, CD.TOOL), (D, D.TOOL), (usecasediagram, usecasediagram.TOOL)):
+        args = server.CLASS_ARGS if module is server else module.ARGS
+        whole = "\n".join([tool, *args.values()])
+        rules = "\n".join(line for line in whole.splitlines() if line.startswith(("  - 규칙:", "  - 알림:")))
+        assert rules, module
         assert not re.search(r'"(?:[은는가을를]|이 |으?로)', rules), rules
     # 흐름 안내(서버 안내문·도구 설명)도 표기 규칙 알림이 불합격이 아니라고 적는다
     assert "표기 규칙 알림(관계 규칙이 있는 도구에서 뜻을 확인해 볼 관계)" in server.INSTRUCTIONS
     # 자기 자신 금지는 관계 종류(reflexive)에서 꺾는 점 줄에 적는다
     assert ("자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다(상속·실체화는 꺾는 점이 있어도 자기 자신으로 갈 수 "
-            "없다).") in server.CLASS_TOOL
+            "없다).") in class_rel
     # 유즈케이스도의 일반화는 클래스도 관계가 아니라 이 규칙을 적지 않는다(제 규칙은 test_usecaserules)
-    assert "상속" not in usecasediagram.TOOL and "실체화" not in usecasediagram.TOOL
+    whole = "\n".join([usecasediagram.TOOL, *usecasediagram.ARGS.values()])  # "없다"는 도구 설명과 인자 설명을 함께 본다
+    assert "상속" not in whole and "실체화" not in whole
 
 
 def call(name, args):

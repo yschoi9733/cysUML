@@ -3,7 +3,7 @@
 액터는 교류도와 같은 사람 모양(sequencediagram.draw_actor)에 이름을 모양 밖에 쓰고, 유즈케이스는 이름을 안 가운데에 쓴 타원,
 시스템 경계는 이름을 위쪽 가운데에 쓰고 안에 유즈케이스를 두는 사각형이다. 읽기·자리 잡기·그리기는 공용 엔진(boxdiagram),
 검사는 공용 검사(boxcheck)가 한다. 요소·관계의 짜임이 UML 표기에 맞는지는 표기 규칙(UseCaseRules)이 읽기 끝에 본다. 도구
-설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
+설명(TOOL)·인자 설명(ARGS)과 배치 요령(TIPS)도 여기 둔다.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from .boxdiagram import (ELEMENT_WORDS, LABEL_LINE, NEST_PAD, TRIANGLE_HEAD, Dia
 from .canvas import SCALE, Canvas, Point
 from .classdiagram import RELATIONS as CLASS_RELATIONS
 from .geom import Border, EllipseBorder
-from .guide import NAME_SIDE, box_tool, relation_fields, spacing_tips
+from .guide import NAME_SIDE, box_args, box_tool, relation_fields, spacing_tips
 from .parsing import Reader
 from .parsing import at as _at
 from .parsing import show as _show
@@ -252,8 +252,8 @@ class UseCaseRules(Rules):
             "유즈케이스끼리 잇는 연관은 입력 오류다(서로 다른 시스템 경계이거나 한쪽만 경계 안인 유즈케이스끼리는 받는다).",
             "  - 규칙: 일반화는 액터끼리, 유즈케이스끼리 긋는다. 종류가 다른 일반화, 고리를 이루는 일반화(A의 부모가 B이고 B의 부모가 "
             "다시 A인 것 — 여러 단계도)는 입력 오류다.",
-            '  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — 공용 '
-            '입력의 "어느 관계에든 단다"와 달리 다른 관계에 달면 입력 오류다. 다른 스테레오타입은 어느 관계에든 단다. 자기 자신을 '
+            '  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — elements '
+            '인자 설명의 "공용 입력(열쇠·이름)" 절에 적은 "어느 관계에든 단다"와 달리 다른 관계에 달면 입력 오류다. 다른 스테레오타입은 어느 관계에든 단다. 자기 자신을 '
             "포함하거나 확장하는 관계와 고리를 이루는 «include»끼리·«extend»끼리(A가 B를, B가 다시 A를 포함하거나 확장하는 것 — 여러 단계도)도 입력 오류다(«include»와 "
             "«extend»가 섞인 고리는 받는다)."])
 
@@ -576,4 +576,5 @@ INTRO = """유즈케이스도를 그려 PNG와 입력 파일로 저장하고, �
 사이를 연관·의존(«include»·«extend»)·일반화로 잇는다. 요소는 준 왼쪽 위(left·top) 그대로, 관계선은 준 꺾는 점(via)을 따라 \
 그리고, 요소 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다."""
 
-TOOL = box_tool(INTRO, SPEC, f"{ELEMENTS}\n{relation_fields(SPEC)}", TIPS)
+TOOL = box_tool(INTRO, SPEC, TIPS)
+ARGS = box_args(SPEC, ELEMENTS, relation_fields(SPEC))

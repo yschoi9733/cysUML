@@ -93,7 +93,7 @@ def test_deploy_from_an_element_inside_a_node_to_that_node_is_an_input_error(tar
                 inside("Docker", "artifact", "app.jar", 40, 132)]
     with pytest.raises(InputError, match="품은 요소와 그 안의 요소는 선으로 잇지 않는다"):
         draw(elements, [deploy("app.jar", target)])
-    assert "노드 안에 둔 요소에서 그 노드(나 그 노드를 품은 노드)로는 긋지 않는다" in D.TOOL
+    assert "노드 안에 둔 요소에서 그 노드(나 그 노드를 품은 노드)로는 긋지 않는다" in D.ARGS["elements"]  # 표기 절
 
 
 def test_node_inside_a_node_passes():
@@ -130,10 +130,10 @@ def test_communication_path_has_no_arrowhead_unless_navigable_says_so():
     assert plain.heads == () and plain.line.dash is None
     one_way, = draw(nodes, [path("A", "B", navigable="to")]).drawn
     assert [h for h in one_way.heads if isinstance(h, Line)]
-    assert '"to"·"from"·"both"·"none"(기본)' in D.TOOL and guide.relation_fields(D.SPEC) in D.TOOL
+    assert '"to"·"from"·"both"·"none"(기본)' in D.ARGS["relations"] and guide.relation_fields(D.SPEC) == D.ARGS["relations"]
     # 기본 방향은 도구 전체에 걸리므로(클래스끼리 이은 연관도 화살촉 없이 그린다) 표기 절이 그것을 알린다
     classes, = draw([el("class", "Order", 0, 0), el("class", "Customer", 200, 0)], [path("Order", "Customer")]).drawn
-    assert classes.heads == () and "클래스끼리 이은 연관·집합·합성도 같으니, 화살촉이 필요하면 navigable을 준다" in D.TOOL
+    assert classes.heads == () and "클래스끼리 이은 연관·집합·합성도 같으니, 화살촉이 필요하면 navigable을 준다" in D.ARGS["elements"]
 
 
 def test_path_takes_a_name_and_a_stereotype_on_the_line():

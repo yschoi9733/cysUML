@@ -4,7 +4,7 @@
 (classdiagram.RELATIONS)에 소켓(requires — 쓰는 쪽에서 원으로 가는 실선이 원을 틈을 두고 감싸는 반원에서 끝난다)을 더한 것이고,
 표기 규칙은 클래스도 관계 규칙(classdiagram.ClassRules)을 이어받아 소켓 잇기 규칙을 더한 것이다. 연관의 기본 방향은
 '없음'이다 — 컴포넌트에서 제공 인터페이스 원으로 가는 막대가 화살촉 없는 실선이라서. 읽기·자리 잡기·그리기는 공용
-엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
+엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 도구 설명(TOOL)·인자 설명(ARGS)과 배치 요령(TIPS)도 여기 둔다.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from .canvas import SCALE, Canvas, Line, Point
 from .classdiagram import RELATIONS as CLASS_RELATIONS
 from .classdiagram import ClassRules
 from .geom import Border, EllipseBorder
-from .guide import LABEL_ROOM, PLACED_ELEMENTS, box_tool, relation_fields, spacing_tips
+from .guide import LABEL_ROOM, PLACED_ELEMENTS, box_args, box_tool, relation_fields, spacing_tips
 from .parsing import Reader, at, show
 from .report import Notice
 from .shapes import SHAPES
@@ -151,4 +151,5 @@ INTRO = """컴포넌트도를 그려 PNG와 입력 파일로 저장하고, 검�
 그릴 수 있고, 컴포넌트·아티팩트는 아이콘 표기로도 그린다. 요소는 준 왼쪽 위(left·top) 그대로, 관계선은 준 꺾는 점(via)을 따라 그리고, 요소 크기·선 끝·선 글자 자리만 도구가 \
 정한다. 좌표는 px이고 y는 아래로 커진다."""
 
-TOOL = box_tool(INTRO, SPEC, f"{PLACED_ELEMENTS}\n{LOLLIPOP_INPUT}\n{relation_fields(SPEC)}\n{SOCKET_INPUT}", TIPS)
+TOOL = box_tool(INTRO, SPEC, TIPS)
+ARGS = box_args(SPEC, f"{PLACED_ELEMENTS}\n{LOLLIPOP_INPUT}", f"{relation_fields(SPEC)}\n{SOCKET_INPUT}")

@@ -1,4 +1,8 @@
-"""도구 설명과 서버 안내문이 함께 쓰는 조각. 그림 모듈은 제 도구 설명을 만들 때 이 조각을 가져다 쓴다(고치지 않는다).
+"""도구 설명·인자 설명과 서버 안내문이 함께 쓰는 조각. 그림 모듈은 그 그림의 도구 설명과 인자 설명을 만들 때 이 조각을 가져다
+쓴다(고치지 않는다).
+
+도구 설명에는 소개·결과·그리는 흐름·불합격 종류·배치 요령만 두고, 입력에 관한 글은 인자 설명에 둔다. Claude Code는 도구 검색 없이
+미리 싣는 도구 설명을 MAX_DESCRIPTION자에서 자르지만 인자 설명은 자르지 않아서다.
 
 - flow(가): AI가 배치하는 그림을 그리는 흐름과, 그 도구에서 날 수 있는 불합격 목록.
 - NEW_INPUT(나): 새 그림 도구가 모두 받는 입력 규칙(열쇠·여러 줄 이름·관계 스테레오타입).
@@ -11,7 +15,9 @@
 - places_result(사): 새 도구의 결과 글 설명. 그 도구의 모양과 관계에 따라 자리 뒤에 덧붙는 것(모양 자리·선이 향하는 점·종류마다
   향하는 점)도 적는다. 종류마다 향하는 점(trunk_aims)은 클래스도 결과 설명도 쓴다.
 - spacing_tips(아): AI가 배치하는 그림의 배치 요령 끝 두 항목(요소 사이 띄우기·요소 크기).
-- box_tool(자): 상자 그림(공용 엔진 boxdiagram이 그리는 그림) 도구 설명 전체. 그림 모듈은 제 소개·입력·표기·요령만 넘긴다.
+- box_tool(자): 상자 그림(공용 엔진 boxdiagram이 그리는 그림) 도구 설명 전체. 그림 모듈은 그 그림의 소개·요령만 넘긴다.
+- box_args(차): 상자 그림 도구의 elements·relations 인자 설명. 그림 모듈은 요소 필드·관계 필드·표기 절을 넘긴다.
+- COMMON_ARGS(카): 모든 도구가 받는 file_name·out_dir·scale 인자 설명.
 """
 from __future__ import annotations
 
@@ -24,6 +30,8 @@ from .canvas import MIN_SCALE, SCALE
 from .report import fmt_num
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
+# 도구 설명·서버 안내문 길이 상한. Claude Code(2.1.296~)가 미리 싣는 글을 이 글자 수에서 자른다(4,097자부터 잘림 — 실측)
+MAX_DESCRIPTION = 4096
 DEFAULT_DIR = "diagrams"
 INPUT_SUFFIX = ".cysuml.json"  # 그림 옆에 저장하는 입력 파일의 끝. package.json 같은 남의 파일과 이름이 겹치지 않게 cysUML만 쓴다
 # 같은 부모로 종류가 다른 두 줄기를 높이를 달리해 둘 때의 수(px). 맞물리는 조건은 test_server가 본다
@@ -77,9 +85,13 @@ def flow(kinds: Optional[Iterable[str]] = None, words: Words = ELEMENT_WORDS) ->
             f"{len(names)}가지: {', '.join(names)}.")
 
 
-COMMON_INPUT = f"""- file_name: 저장할 파일 이름(확장자 없이). 그림(.png)과 입력 파일({INPUT_SUFFIX})에 쓰고, 같은 이름이면 둘 다 덮어쓴다.
-- out_dir: 저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/이고, 상대 경로도 서버 작업 폴더 기준이다.
-- scale: 출력 배율(기본 {SCALE:g}, {MIN_SCALE:g} 이상). 보통은 주지 않는다."""
+COMMON_ARGS = {
+    "file_name": f"저장할 파일 이름(확장자 없이). 그림(.png)과 입력 파일({INPUT_SUFFIX})에 쓰고, 같은 이름이면 둘 다 덮어쓴다.",
+    "out_dir": f"저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/이고, 상대 경로도 서버 작업 폴더 기준이다.",
+    "scale": f"출력 배율(기본 {SCALE:g}, {MIN_SCALE:g} 이상). 보통은 주지 않는다.",
+}
+
+ARGS_NOTE = "입력 필드는 인자마다 붙은 설명에 있다."  # 모든 도구 설명의 소개 바로 아래 문단
 
 IMAGE_RESULT = f"- 그림: 저장한 PNG. 긴 변이 {MAX_IMAGE_EDGE}px를 넘으면 그 길이로 줄여 돌려준다(저장한 그림은 줄이지 않는다)."
 
@@ -225,7 +237,7 @@ def relation_fields(spec: Spec) -> str:
         shapes = _joined(t.start.name for t in starts if t.start is not None)
         meaning.append(f"{_joined(t.label for t in starts)}의 {shapes}{josa(shapes, '은', '는')} from 쪽에 붙는다.")
     lines.append(f"  - from·to(필수): {'상자 이름' if box else '요소 열쇠'}." + "".join(f" {m}" for m in meaning))
-    lines.append("  - name: 관계 이름." + ("" if box else ' stereotype: "공용 입력(열쇠·이름)" 절.'))
+    lines.append("  - name: 관계 이름." + ("" if box else f' stereotype: {spec.list_field} 인자 설명의 "공용 입력(열쇠·이름)" 절.'))
     steered = [t for t in types.values() if t.navigable]
     counted = [t for t in types.values() if t.multiplicity]
     options = "·".join(f'"{n}"' + ("(기본)" if n == spec.navigable else "") for n in NAVIGABLE)
@@ -323,20 +335,23 @@ def spacing_tips(spec: Spec, label: str, size_note: str = "") -> str:
             f"- {noun} 크기는 도구가 글자{inner}에 맞춰 늘린다{size_note}. 그린 크기는 결과의 \"{noun} 자리\"에서 보고 다음 입력에 쓴다.")
 
 
-def box_tool(intro: str, spec: Spec, inputs: str, tips: str, kinds: Iterable[str] = KINDS, notation: str = "",
-             errors: str = "") -> str:
-    """(자) 상자 그림 도구 설명. 그림 모듈은 제 소개(intro), 공용 조각 밖의 입력 항목(inputs — elements·relations 등), 표기
-    절(notation), 결과 절의 오류 문장 뒤에 더할 오류(errors), 날 수 있는 불합격 종류(kinds), 배치 요령(tips)을 넘기고, 공용
-    입력·결과·그리는 흐름은 여기서 채운다. 중첩 절은 안에 요소를 두는 모양이 있는 도구에만 넣는다."""
+def box_tool(intro: str, spec: Spec, tips: str, kinds: Iterable[str] = KINDS, errors: str = "") -> str:
+    """(자) 상자 그림 도구 설명. 그림 모듈은 그 그림의 소개(intro), 결과 절의 오류 문장 뒤에 더할 오류(errors), 날 수 있는
+    불합격 종류(kinds), 배치 요령(tips)을 넘기고, 인자 설명을 가리키는 줄·결과·그리는 흐름은 여기서 채운다. 입력은 box_args가
+    인자 설명으로 만든다."""
     field = spec.list_field
-    parts = [intro, f"입력\n{inputs}\n{COMMON_INPUT}", NEW_INPUT]
-    if _holds(spec):
-        parts.append(NESTING)
-    if notation:
-        parts.append(notation)
     more = f"{errors} " if errors else ""
-    parts += [f"결과\n{places_result(spec)}\n{IMAGE_RESULT}\n{INPUT_RESULT}\n- {field}·relations·file_name이 틀리면 그리지 않고 틀린 곳을 "
-              f"{field}[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. {more}그림이 너무 커서 PNG로 그릴 수 없거나 저장할 "
-              "폴더에 쓸 수 없을 때도 오류로 돌려준다.",
-              flow(kinds, spec.words), tips]
-    return "\n\n".join(parts)
+    return "\n\n".join([
+        intro, ARGS_NOTE,
+        f"결과\n{places_result(spec)}\n{IMAGE_RESULT}\n{INPUT_RESULT}\n- {field}·relations·file_name이 틀리면 그리지 않고 틀린 곳을 "
+        f"{field}[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. {more}그림이 너무 커서 PNG로 그릴 수 없거나 저장할 "
+        "폴더에 쓸 수 없을 때도 오류로 돌려준다.",
+        flow(kinds, spec.words), tips])
+
+
+def box_args(spec: Spec, elements: str, relations: str, notation: str = "") -> dict[str, str]:
+    """(차) 상자 그림 도구의 요소 목록·relations 인자 설명(인자 이름 → 글). 그림 모듈은 요소 필드(elements)·관계 필드(relations)·
+    표기 절(notation)을 넘긴다. 요소 목록 인자 설명에는 요소 필드 뒤에 공용 입력 절, 중첩 절(안에 요소를 두는 모양이 있는 도구만),
+    표기 절을 이 차례로 붙인다 — 요소와 관계를 함께 설명하는 절도 쪼개지 않고 이 인자 한곳에 둔다."""
+    parts = [elements, NEW_INPUT] + ([NESTING] if _holds(spec) else []) + ([notation] if notation else [])
+    return {spec.list_field: "\n\n".join(parts), "relations": relations}
