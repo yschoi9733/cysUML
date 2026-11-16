@@ -4,6 +4,7 @@ import math
 import pytest
 
 from cysuml import boxcheck as K
+from cysuml import boxdiagram as B
 from cysuml import geom as G
 from cysuml import guide
 from cysuml import statediagram as S
@@ -113,15 +114,19 @@ def test_transition_text_on_the_actions_of_a_composite_state_fails():
     assert "끝을 품은 요소의 이름 칸에 겹친다" in r.failures[0].problem and r.failures[0].elements == ("검증->저장", "처리 중")
 
 
-def test_line_through_another_state_and_through_a_transition_text_fail():
+def test_line_through_another_state_and_through_a_transition_text_fail(monkeypatch):
     elements = [el("state", "A", left=0, top=0), el("state", "B", left=0, top=120), el("state", "C", left=0, top=240)]
     r = report(elements, [tr("A", "C")])
     assert kinds(r) == ["line_through_box"] and r.failures[0].elements == ("A->C", "B")
-    # 다른 전이가 글자를 지난다: A→B 글자는 선 오른쪽에 놓이는데, 왼쪽의 X→Y 선이 그 자리를 가로지른다
-    elements = [el("state", "A", left=0, top=0), el("state", "B", left=0, top=160),
-                el("state", "X", left=-200, top=80), el("state", "Y", left=200, top=80)]
-    r = report(elements, [tr("A", "B", name="아주 긴 전이 글자"), tr("X", "Y")])
-    assert "line_through_text" in kinds(r)
+    # 다른 전이가 글자 자리를 지난다: A→B 글자의 가운데 자리(선 양옆)를 왼쪽에서 오는 X→Y 선이 가로지른다. 글자는 선을 따라 옆 빈
+    # 곳으로 옮겨 합격하고, 가운데에만 두면(옮길 자리가 없을 때) X→Y 선이 글자를 지나 불합격이다
+    scene = ([el("state", "A", left=0, top=0), el("state", "B", left=0, top=160),
+              el("state", "X", left=-200, top=80), el("state", "Y", left=200, top=80)],
+             [tr("A", "B", name="아주 긴 전이 글자"), tr("X", "Y")])
+    assert report(*scene).passed
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    r = report(*scene)
+    assert kinds(r) == ["line_through_text"] and r.failures[0].elements == ("X->Y", "A->B")
 
 
 # ---------------------------------------------------------------- 모양과 크기

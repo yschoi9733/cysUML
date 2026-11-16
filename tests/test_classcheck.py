@@ -5,6 +5,7 @@ import unicodedata
 import pytest
 
 from cysuml import boxcheck as BC
+from cysuml import boxdiagram as B
 from cysuml import classcheck as K
 from cysuml import classdiagram as C
 
@@ -212,19 +213,30 @@ def test_moving_the_other_line_away_from_the_multiplicity_passes():
     assert r.passed and len(r.crossings) == 1
 
 
-def test_name_crossed_by_another_line_fails():
-    # 세로선이 이름 후보 둘(가로선 가운데 위아래)을 다 지나 이름이 선 위에 놓인다
-    r = report([box("A", 0, 0), box("B", 300, 0), box("C", 150, -200), box("D", 150, 200)],
-               [rel("association", "A", "B", name="places"), rel("association", "C", "D")])
-    (f,) = r.failures
+def middle_only(monkeypatch):
+    """선을 따라 더 볼 자리를 없애 이름 글자를 가운데 후보에만 둔다 — 검사가 글자에 걸린 것을 잡는지 보려고."""
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+
+
+def test_name_crossed_by_another_line_fails(monkeypatch):
+    # 세로선이 이름 후보 둘(가로선 가운데 위아래)을 다 지난다. 이름은 선을 따라 옆 빈 곳으로 옮겨 합격하고, 가운데에만 두면(옮길
+    # 자리가 없을 때) 이름이 선 위에 놓여 불합격이다
+    scene = ([box("A", 0, 0), box("B", 300, 0), box("C", 150, -200), box("D", 150, 200)],
+             [rel("association", "A", "B", name="places"), rel("association", "C", "D")])
+    assert report(*scene).passed
+    middle_only(monkeypatch)
+    (f,) = report(*scene).failures
     assert f.kind == "line_through_text" and f.elements == ("C->D", "A->B") and "이름 'places'" in f.problem
 
 
-def test_line_through_its_own_label_names_one_element():
-    # 가장 긴 첫 구간 (90, 24)–(400, 24)의 가운데 위아래가 이름 자리인데, 돌아 내려오는 마지막 구간(x=245)이 둘 다 지난다
-    r = report([box("A", 0, 0), box("B", 200, 280)],
-               [rel("association", "A", "B", name="x", via=[[400, 24], [400, -10], [245, -10]])])
-    own = [f for f in r.failures if f.kind == "line_through_text"]
+def test_line_through_its_own_label_names_one_element(monkeypatch):
+    # 가장 긴 첫 구간 (90, 24)–(400, 24)의 가운데 위아래가 이름 자리인데, 같은 선의 돌아 내려오는 마지막 구간(x=245)이 둘 다
+    # 지난다. 이름은 선을 따라 옮겨 합격하고, 가운데에만 두면 그 선이 이름을 지나 불합격이다
+    scene = ([box("A", 0, 0), box("B", 200, 280)],
+             [rel("association", "A", "B", name="x", via=[[400, 24], [400, -10], [245, -10]])])
+    assert report(*scene).passed
+    middle_only(monkeypatch)
+    own = [f for f in report(*scene).failures if f.kind == "line_through_text"]
     assert own and all(f.elements == ("A->B",) for f in own)
     assert own[0].hint == K.LABEL_HINT
 
@@ -274,12 +286,15 @@ def test_label_blocked_only_in_the_middle_moves_along_the_line_and_passes():
     assert boxed_in_name(19, left=120, width=140).passed
 
 
-def test_labels_of_stacked_relations_overlap():
-    # 같은 두 상자 사이의 세 관계는 한 선에 포개지고, 이름 자리 둘을 앞의 둘이 쓰고 나면 셋째 이름은 겹친다
-    r = report([box("A", 0, 0), box("B", 300, 0)],
-               [rel("association", "A", "B", name="a"), rel("dependency", "A", "B", name="b"),
-                rel("association", "B", "A", name="c")])
-    (f,) = [f for f in r.failures if f.kind == "text_overlap"]
+def test_labels_of_stacked_relations_overlap(monkeypatch):
+    # 같은 두 상자 사이의 세 관계는 한 선에 포개지고, 이름 자리 둘을 앞의 둘이 쓰고 나면 셋째 이름은 선을 따라 옆 빈 곳으로 옮겨
+    # 겹치지 않는다(선끼리 포개진 것은 남는다). 가운데에만 두면 셋째 이름이 겹친다
+    scene = ([box("A", 0, 0), box("B", 300, 0)],
+             [rel("association", "A", "B", name="a"), rel("dependency", "A", "B", name="b"),
+              rel("association", "B", "A", name="c")])
+    assert kinds(report(*scene)) == ["line_overlap"]
+    middle_only(monkeypatch)
+    (f,) = [f for f in report(*scene).failures if f.kind == "text_overlap"]
     assert f.elements == ("A->B#2", "B->A") and "이름 'b'" in f.problem and "이름 'c'" in f.problem
 
 

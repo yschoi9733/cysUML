@@ -5,6 +5,7 @@ import pytest
 
 from cysuml import activitydiagram as A
 from cysuml import boxcheck as K
+from cysuml import boxdiagram as B
 from cysuml import guide
 from cysuml.canvas import Polygon, Text
 from cysuml.flowshapes import ACTION_RADIUS, ACTION_SIDE, DIAMOND, rounded
@@ -76,15 +77,19 @@ def test_relation_without_kind_is_a_flow_and_the_guard_is_written_as_given():
     assert [t.text for t in owned(d, "stock?->결제 요청", Text)] == ["[재고 있음]"]
 
 
-def test_flow_through_another_action_or_a_guard_fails():
+def test_flow_through_another_action_or_a_guard_fails(monkeypatch):
     # 위 행동에서 아래 행동으로 곧게 가는 흐름이 가운데 행동을 지난다
     r = report([el("action", "가"), el("action", "나", top=100), el("action", "다", top=200)], [fl("가", "다")])
     assert kinds(r) == ["line_through_box"] and r.failures[0].elements == ("가->다", "나")
-    # 결정에서 오른쪽으로 나가는 흐름의 조건 글자를 위에서 내려오는 흐름이 지난다
-    elements = [el("decision", id="d", left=0, top=100), el("action", "오른쪽", left=200, top=95),
-                el("action", "위", left=40, top=-60), el("action", "아래", left=40, top=200)]
-    r = report(elements, [fl("d", "오른쪽", name="[아주 긴 조건 글자]"), fl("위", "아래")])
-    assert "line_through_text" in kinds(r)
+    # 결정에서 오른쪽으로 나가는 흐름의 조건 글자 자리를 위에서 내려오는 흐름이 지난다. 글자는 선을 따라 옆 빈 곳으로 옮겨 합격하고,
+    # 가운데에만 두면(옮길 자리가 없을 때) 그 흐름이 글자를 지나 불합격이다
+    scene = ([el("decision", id="d", left=0, top=100), el("action", "오른쪽", left=200, top=95),
+              el("action", "위", left=40, top=-60), el("action", "아래", left=40, top=200)],
+             [fl("d", "오른쪽", name="[아주 긴 조건 글자]"), fl("위", "아래")])
+    assert report(*scene).passed
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    r = report(*scene)
+    assert kinds(r) == ["line_through_text"] and r.failures[0].elements == ("위->아래", "d->오른쪽")
 
 
 def test_decision_and_merge_are_the_same_diamond():
