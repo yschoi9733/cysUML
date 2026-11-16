@@ -756,7 +756,7 @@ def test_multiplicities_keep_off_lines_and_each_other():
                                 {"kind": "association", "from": "A", "to": "C",
                                  "from_multiplicity": "0..*", "to_multiplicity": "1"}]})
     name = d.layout.relations[0].labels[0]
-    assert name.segment == 0 and K.check(d).passed  # 이름은 제 선 위에 얹는다
+    assert name.segment == 0 and K.check(d).passed  # 이름은 그 관계의 선 위에 얹는다
     labels = [t for t in d.canvas.records if isinstance(t, Text) and t.bg]  # 다중도는 선 옆에 흰 바탕을 깔고 쓴다
     assert len(labels) == 4
     for i, t in enumerate(labels):

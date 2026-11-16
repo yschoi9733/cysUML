@@ -224,7 +224,7 @@ SIDE_GAP, VERTICAL_GAP = 80, 60  # 요령의 요소 사이 기본 간격(가로�
 
 def test_tips_send_from_outside_a_node_with_room_for_the_label():
     assert "가로 80px·세로 60px쯤에서 시작하고" in D.TIPS and guide.LABEL_ROOM in D.TIPS
-    assert "도구가 선 위에 얹어 선을 따라 노드 테두리를 비킨 자리에 놓으니, 가장 바깥 노드와는 그 글자가 들어갈 만큼 띄우면 된다" in D.TIPS
+    assert "도구가 선을 따라 노드 테두리를 비킨 자리에 놓으니, 가장 바깥 노드와는 그 글자가 들어갈 만큼 띄우면 된다" in D.TIPS
     assert "옆이면 가장 긴 줄의 글자 폭 + 15px, 아래·위면 글자 줄 수 × 15 + 가장 긴 줄의 글자 폭 ÷ 4 + 25px 이상" in guide.LABEL_ROOM
     assert '어림은 넉넉한 값이라, «deploy» 한 줄은 실제로는 요소 사이 기본 간격("요소 사이는" 항목)에도 들어간다' in D.TIPS
 
