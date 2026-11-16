@@ -69,7 +69,8 @@ class Text:
     """한 줄 글자. text는 normalize한 글자다.
 
     bg는 글자 밑에 흰 바탕을 깔았다는 뜻이고, 그 바탕은 바로 앞의 Mask다. 칠할 글자가 없으면(공백뿐) 깔지 않고 bg도
-    False다. placement는 글자를 놓은 결과로, 범위 계산과 그리기가 그대로 쓴다(주지 않으면 만들 때 놓는다).
+    False다. 여러 줄 글자 덩어리 전체에 흰 바탕 하나를 erase로 먼저 깐 글자(선 위에 얹은 관계 이름 — boxdiagram._draw_label)도
+    bg는 False다. placement는 글자를 놓은 결과로, 범위 계산과 그리기가 그대로 쓴다(주지 않으면 만들 때 놓는다).
     """
 
     x: float
