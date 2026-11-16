@@ -74,11 +74,11 @@ optional bend points:
 
 It gets back the check result, the size and place of every box as drawn, the saved file paths, and the picture.
 The check **fails** when boxes overlap, a line runs through a box, a label or another line's arrowhead, or labels
-overlap. A relation's name is drawn on its own line, which breaks around the name, so the stretch of line it sits on
-doesn't count as running through it (the rest of that line, its end shapes and other lines still do). A name with no
-room on its line (including a line too short to stay visible on both sides of the name), or on a line that loops back
-to the same box, goes beside the line, and if putting the names on their lines makes the whole picture fail more,
-every name goes beside its line.
+overlap. A relation's name is drawn on top of that relation's line, which breaks around the name, so the stretch of
+line it sits on doesn't count as running through it (the rest of that line, its end shapes and other lines still do).
+A name with no room on its line (including a line too short to stay visible on both sides of the name), or on a line
+that loops back to the same box, goes beside the line, and if putting the names on their lines makes the whole picture
+fail more, every name goes beside its line.
 Crossing lines and the picture size are reported but don't fail. Inheritance lines from several children to
 one parent may join into one trunk that shares a single triangle (realization lines too, but not mixed with
 inheritance); the `relations` argument description tells the assistant how to give the bend points for it. When both
