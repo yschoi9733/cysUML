@@ -473,7 +473,7 @@ def test_shared_trunk_given_as_the_description_says_passes(tmp_path, name, field
     ("actor", {"name_side": "right"}, True),
     ("actor", {"name_side": "left"}, True),
     ("actor", {}, False),  # 이름이 아래(기본)면 자식 줄기가 부모 이름을 지난다 — 배치 요령이 이름을 옆에 두라고 한다
-    ("actor", {"name_side": "top"}, False),  # 위면 자식 제 이름을 지난다 — 설명이 이름을 옆에 쓰라고 한다
+    ("actor", {"name_side": "top"}, False),  # 위면 자식 줄기가 그 자식의 이름을 지난다 — 설명이 이름을 옆에 쓰라고 한다
     ("use_case", {}, True),
 ])
 def test_use_case_trunk_given_as_the_description_says(tmp_path, kind, more, passes):

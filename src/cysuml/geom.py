@@ -151,7 +151,7 @@ def enters(s: tuple[Point, Point], polygon: tuple[Point, ...], margin: float) ->
 
 
 def crossings(a: tuple[Point, ...], b: Optional[tuple[Point, ...]], eps: float) -> list[Point]:
-    """꺾은선 a와 b가 서로 건너가는 점. b가 None이면 a가 제 몸을 건너가는 점이다.
+    """꺾은선 a와 b가 서로 건너가는 점. b가 None이면 a가 자기 자신을 건너가는 점이다.
 
     두 선이 닿은 곳(한 점이든, 한 직선 위를 같이 가는 구간이든)마다 a가 그곳에 들어오기 전과 나간 뒤가 b의 다른 쪽에 있으면
     건너간 것이다. 그래서 꺾는 점이 다른 선 위에 딱 놓이거나(정수 좌표에서 흔하다) 짧게 같이 가다 나가도 건너감으로 센다. 닿기만

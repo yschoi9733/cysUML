@@ -56,7 +56,7 @@ class Row:
 
 @dataclass(frozen=True)
 class ClassParts:
-    """클래스 모양이 읽는 제 필드."""
+    """클래스 모양이 읽는 필드."""
 
     literals: tuple[Row, ...]
     attributes: tuple[Row, ...]

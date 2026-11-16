@@ -173,7 +173,7 @@ def test_result_adds_the_aim_point_of_packages_only():
 @pytest.mark.parametrize("parent", ["base", "infrastructure.persistence"])
 def test_packages_share_one_trunk_at_the_x_their_lines_aim_at(parent):
     # 공유 줄기 — 패키지의 x는 결과에 덧붙는 향하는 점(탭 오른쪽 몸통의 가운데)의 x다. 자리 가운데 x로 주면 이름이 긴 패키지는
-    # 첫 구간이 제 탭을 지난다(패키지는 상속의 끝이 될 수 없어 같은 삼각형을 쓰는 실체화로 본다)
+    # 첫 구간이 그 패키지의 탭을 지난다(패키지는 상속의 끝이 될 수 없어 같은 삼각형을 쓰는 실체화로 본다)
     elements = [el("package", parent, 200, 0)] + [el("package", n, left, 150) for n, left in
                                                  (("infrastructure", 0), ("web", 220), ("persistence.jpa", 420))]
     boxes = {p.key: p for p in draw(elements).layout.boxes}

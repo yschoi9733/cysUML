@@ -451,7 +451,7 @@ def test_line_through_another_relations_arrowhead(navigable, passed):
 
 
 def test_line_under_its_own_diamond_fails():
-    # 돌아온 세로 구간(x=100)이 제 마름모(x 90~108)를 지난다
+    # 돌아온 세로 구간(x=100)이 끝에 단 마름모(x 90~108)를 지난다
     via = [[150, 24], [150, 80], [100, 80], [100, 10], [200, 10], [200, 24]]
     r = report([box("A", 0, 0), box("B", 400, 0)], [rel("aggregation", "A", "B", navigable="none", via=via)])
     (f,) = r.failures

@@ -91,7 +91,7 @@ BOX_WORDS = Words("상자", "변", "이름")
 ELEMENT_WORDS = Words("요소", "테두리", "열쇠")
 
 
-NAME_AREA = "이름 칸"  # NameZone.what의 기본값 — 요소가 제 글자를 쓰는 자리
+NAME_AREA = "이름 칸"  # NameZone.what의 기본값 — 요소의 글자를 쓰는 자리
 
 
 def floored(rect: T.Box) -> Point:
@@ -103,7 +103,7 @@ def floored(rect: T.Box) -> Point:
 
 @dataclass(frozen=True)
 class NameZone:
-    """요소가 제 글자(이름·스테레오타입 등)를 쓰는 자리. outside면 몸통(선이 닿는 테두리) 밖에 붙은 칸이다(패키지 탭, 모양 밖
+    """요소의 글자(이름·스테레오타입 등)를 쓰는 자리. outside면 몸통(선이 닿는 테두리) 밖에 붙은 칸이다(패키지 탭, 모양 밖
     이름) — 그 요소가 끝인 선도 지나가면 안 된다. 몸통 안의 칸은 그 요소를 품은 선만 피하면 된다. 글자를 쓰지 않아도 몸통 밖에
     붙어 선이 지나가면 안 되는 자리(UML 1 표기 컴포넌트의 부품 네모)도 이것으로 넘기고, 검사 글이 그 자리를 부르는 말은 what이다."""
 
@@ -116,7 +116,7 @@ class NameZone:
 @dataclass(frozen=True)
 class Element:
     """요소 하나. key는 관계·중첩이 가리키는 열쇠, name은 이름 줄(이름이 없는 모양은 빈 튜플), parent는 품은 요소의 열쇠,
-    data는 모양이 제 필드를 읽은 값이다. min_width·min_height는 자리(모양 밖 이름까지)의 최소 크기다."""
+    data는 모양(Shape.read)이 읽은 필드 값이다. min_width·min_height는 자리(모양 밖 이름까지)의 최소 크기다."""
 
     key: str
     kind: str
@@ -132,7 +132,7 @@ class Element:
 
 
 class Shape:
-    """요소 모양. 그림 모듈은 이것을 이어받아 겉 테두리·이름 자리·크기·제 필드 읽기·그리기를 정한다. 기본은 사각형 테두리다.
+    """요소 모양. 그림 모듈은 이것을 이어받아 겉 테두리·이름 자리·크기·그 모양의 필드 읽기·그리기를 정한다. 기본은 사각형 테두리다.
 
     rect는 모양 자리(모양 밖 이름은 빼고)다. 모양 밖 이름은 공용 엔진이 쓰고 그 자리를 이름 칸으로 넘긴다."""
 
@@ -147,7 +147,7 @@ class Shape:
     default_width: float = 0      # width를 주지 않았을 때의 최소 폭
 
     def read(self, r: Reader, o: dict, path: str, kind: Optional[str]) -> Any:
-        """제 필드를 읽는다. 문제는 r.fail로 알린다. kind가 None이면 입력의 kind가 틀렸다(문제만 모으고 값은 쓰지 않는다)."""
+        """이 모양의 필드를 읽는다. 문제는 r.fail로 알린다. kind가 None이면 입력의 kind가 틀렸다(문제만 모으고 값은 쓰지 않는다)."""
         return None
 
     def keyword(self, e: Element) -> Optional[str]:
@@ -244,7 +244,7 @@ class RelationType:
 class Rules:
     """요소·관계의 짜임이 UML 표기에 맞는지 보는 규칙(Spec.rules). 선이 겹치는지와 달리 자리와 상관없어 읽기 끝에 본다. 틀린 짜임은
     r.fail로 다른 입력 오류와 함께 모아 그리지 않고, 그리되 뜻을 확인해 볼 짜임은 알림(Notice)으로 돌려 검사 결과에 싣는다. 그림
-    모듈은 이것을 이어받아 제 규칙을 정한다. 자기 자신으로 가는 관계를 막는 것은 관계 종류(RelationType.reflexive)가 정한다."""
+    모듈은 이것을 이어받아 그 그림의 규칙을 정한다. 자기 자신으로 가는 관계를 막는 것은 관계 종류(RelationType.reflexive)가 정한다."""
 
     def check(self, r: Reader, spec: Spec, elements: list[tuple[str, Element]],
               relations: list[tuple[str, Relation]]) -> list[Notice]:
@@ -258,7 +258,7 @@ class Rules:
 
     def nests(self, outer: str, inner: str) -> bool:
         """inner 종류 요소를 안에 요소를 두는 outer 종류 요소 안에 둘 수 있는지. 요소가 겹쳤을 때의 안내(boxcheck)는 둘 수 없으면
-        in을 권하지 않는다. 엔진은 이것으로 입력을 막지 않는다 — 막는 것은 그림 모듈이 이어받은 check가 제 오류 글로 한다. 기본은
+        in을 권하지 않는다. 엔진은 이것으로 입력을 막지 않는다 — 막는 것은 그림 모듈이 이어받은 check가 그 그림의 오류 글로 한다. 기본은
         모두 된다."""
         return True
 
@@ -890,8 +890,8 @@ def _far(box: T.Box) -> float:
 def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[tuple[T.Box, list[list[Point]]]]:
     """이름 글자를 선 옆에서 선을 따라 옮길 때(옮기는 조건은 _Spots.pick_name) 더 볼 자리를 구간마다 (띠, 묶음들)로 낸다. 묶음은
     가운데에서 가까운 것부터다 — 가장 긴 구간은 가운데에서 양쪽으로 NAME_STEP씩 옮긴 자리마다 선 양옆 둘(진행 방향 앞쪽·뒤쪽 차례로
-    네 자리가 한 묶음), 그다음 구간도 길이 차례로 그 가운데(두 자리)부터 같게 낸다. 글자는 제 구간 옆을 벗어나지 않는다(_steps).
-    띠는 그 구간 묶음들의 흰 바탕을 다 덮는 상자다."""
+    네 자리가 한 묶음), 그다음 구간도 길이 차례로 그 가운데(두 자리)부터 같게 낸다. 구간마다 낸 자리의 글자는 그 구간 옆을 벗어나지
+    않는다(_steps). 띠는 그 구간 묶음들의 흰 바탕을 다 덮는 상자다."""
     box = lines_box(0, 0, lines)
     # 글자 가운데는 선에서 (원점에서 가장 먼 모서리까지) + NAME_GAP 안이고, 흰 바탕은 그 가운데에서 다시 그만큼 + LABEL_CLEAR 안이다
     far = _far(box)
@@ -905,8 +905,8 @@ def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[t
 def on_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[tuple[int, T.Box, list[list[Point]]]]:
     """이름 글자를 그 관계의 선 위에 얹은 채 선을 따라 옮길 때(_Spots.pick_on_line) 더 볼 자리를 구간마다 (구간 번호, 띠, 묶음들)로
     낸다. 글자 가운데는 선 위다. 묶음은 가운데에서 가까운 것부터다 — 가장 긴 구간은 가운데에서 NAME_STEP씩 진행 방향(from→to)
-    앞쪽·뒤쪽으로 옮긴 두 자리가 한 묶음, 그다음 구간도 길이 차례로 그 가운데(한 자리)부터 같게 낸다. 글자는 제 구간을 벗어나지
-    않는다(_steps). 띠는 그 구간 묶음들의 글자 상자를 NAME_GAP만큼 넓혀 다 덮는 상자다."""
+    앞쪽·뒤쪽으로 옮긴 두 자리가 한 묶음, 그다음 구간도 길이 차례로 그 가운데(한 자리)부터 같게 낸다. 구간마다 낸 자리의 글자는 그
+    구간을 벗어나지 않는다(_steps). 띠는 그 구간 묶음들의 글자 상자를 NAME_GAP만큼 넓혀 다 덮는 상자다."""
     box = lines_box(0, 0, lines)
     far = _far(box)
     for n, k, steps in _steps(points, box):
@@ -1291,8 +1291,8 @@ def _outside_name(e: Element, w: float, h: float, gap: float) -> tuple[float, fl
 
 
 def _place(spec: Spec, diagram: Diagram, lines_of: Mapping[str, tuple[str, ...]]) -> tuple[PlacedBox, ...]:
-    """요소 크기와 자리. 안의 요소부터 재서 바깥 요소가 안의 요소를 NEST_PAD 여백을 두고 덮도록 오른쪽·아래로 늘린다. 제 이름 칸이
-    들어갈 크기는 모양(Shape.size)이 정한다."""
+    """요소 크기와 자리. 안의 요소부터 재서 바깥 요소가 안의 요소를 NEST_PAD 여백을 두고 덮도록 오른쪽·아래로 늘린다. 요소마다
+    이름 칸이 들어갈 크기는 그 요소의 모양(Shape.size)이 정한다."""
     children: dict[str, list[Element]] = {}
     for e in diagram.boxes:
         if e.parent is not None:

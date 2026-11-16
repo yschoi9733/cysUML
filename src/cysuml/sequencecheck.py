@@ -42,10 +42,10 @@ FRAME_LINE_CLEAR = ARROW_HALF + PAD  # 메시지 선과 프레임 가로 선 사
 MESSAGE_GAP = 2 * ARROW_HALF + PAD   # 가로로 겹쳐 지나는 두 메시지 선 사이 — 화살촉끼리도 PAD 이상 떨어진다
 
 KINDS = (  # 불합격 종류(이 순서로 낸다)
-    "participant_overlap",       # 머리끼리 겹치거나 머리가 제 생명선 밖의 생명선을 가린다
+    "participant_overlap",       # 머리끼리 겹치거나 머리가 그 머리의 생명선 밖의 생명선을 가린다
     "bar_on_participant",        # 막대가 머리에 걸치거나 다른 생명선을 덮는다
     "bar_overlap",               # 한 생명선의 같은 깊이 막대끼리 붙거나, 다른 생명선의 막대끼리 겹친다
-    "bar_off_lifeline",          # 막대가 제 생명선(깊이만큼 비킨 자리)에 있지 않거나, 비킨 막대가 시작할 때 바깥 막대가 없다
+    "bar_off_lifeline",          # 막대가 속한 생명선(깊이만큼 비킨 자리)에 있지 않거나, 비킨 막대가 시작할 때 바깥 막대가 없다
     "bar_off_message",           # 막대 윗변이 여는 메시지에 맞지 않거나, 마지막 메시지 밑에 짧은 꼬리가 남는다
     "message_off_bar",           # 메시지 선 끝이 막대 변(그 높이에 막대가 없으면 생명선)에 닿지 않거나 화살촉이 남의 막대에 겹친다
     "line_at_bar_end",           # 메시지 선이 건너는 막대의 윗변·밑변에 붙는다
@@ -64,7 +64,7 @@ KINDS = (  # 불합격 종류(이 순서로 낸다)
     "text_on_lifeline",          # 메시지 글자가 그 메시지가 건너지 않는 생명선을 가린다
     "text_overlap",              # 글자끼리 겹치거나 한 글자의 흰 바탕이 다른 글자를 지운다
     "note_covers",               # 노트(흰 상자)가 다른 것을 덮는다
-    "text_outside",              # 조건·ref 이름·노트 글자가 제 프레임·상자·노트 밖으로 나간다
+    "text_outside",              # 조건·ref 이름·노트 글자가 속한 프레임·상자·노트 밖으로 나간다
 )
 ORDER = {kind: i for i, kind in enumerate(KINDS)}
 
