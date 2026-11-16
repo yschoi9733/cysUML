@@ -13,6 +13,13 @@ from cysuml.parsing import InputError
 from cysuml.text import text_width
 
 
+def middle_only(monkeypatch):
+    """선을 따라 더 볼 자리(선 옆 slide_spots·선 위 on_spots)를 없애 이름 글자를 가운데에만 둔다 — 선 위 가운데 자리가 빈
+    자리면 거기, 아니면 선 옆 가운데 후보다."""
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    monkeypatch.setattr(B, "on_spots", lambda points, lines: iter(()))
+
+
 def el(kind, name=None, left=0, top=0, **more):
     return {"kind": kind, "left": left, "top": top, **more, **({} if name is None else {"name": name})}
 
@@ -81,13 +88,14 @@ def test_flow_through_another_action_or_a_guard_fails(monkeypatch):
     # 위 행동에서 아래 행동으로 곧게 가는 흐름이 가운데 행동을 지난다
     r = report([el("action", "가"), el("action", "나", top=100), el("action", "다", top=200)], [fl("가", "다")])
     assert kinds(r) == ["line_through_box"] and r.failures[0].elements == ("가->다", "나")
-    # 결정에서 오른쪽으로 나가는 흐름의 조건 글자 자리를 위에서 내려오는 흐름이 지난다. 글자는 선을 따라 옆 빈 곳으로 옮겨 합격하고,
-    # 가운데에만 두면(옮길 자리가 없을 때) 그 흐름이 글자를 지나 불합격이다
+    # 결정에서 오른쪽으로 나가는 흐름의 조건 글자는 선 위에 빈 자리가 없어(글자가 구간보다 길다) 선 옆에 놓는데, 그 가운데 자리를
+    # 위에서 내려오는 흐름이 지난다. 글자는 선을 따라 옆 빈 곳으로 옮겨 합격하고, 가운데에만 두면(옮길 자리가 없을 때) 그 흐름이
+    # 글자를 지나 불합격이다
     scene = ([el("decision", id="d", left=0, top=100), el("action", "오른쪽", left=200, top=95),
               el("action", "위", left=40, top=-60), el("action", "아래", left=40, top=200)],
              [fl("d", "오른쪽", name="[아주 긴 조건 글자]"), fl("위", "아래")])
     assert report(*scene).passed
-    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    middle_only(monkeypatch)
     r = report(*scene)
     assert kinds(r) == ["line_through_text"] and r.failures[0].elements == ("위->아래", "d->오른쪽")
 

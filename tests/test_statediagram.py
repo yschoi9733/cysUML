@@ -13,6 +13,18 @@ from cysuml.flowshapes import DIAMOND_SIZE, FINAL, FINAL_CORE, START, STATE_RADI
 from cysuml.parsing import InputError
 
 
+def middle_only(monkeypatch):
+    """선을 따라 더 볼 자리(선 옆 slide_spots·선 위 on_spots)를 없애 이름 글자를 가운데에만 둔다 — 선 위 가운데 자리가 빈
+    자리면 거기, 아니면 선 옆 가운데 후보다."""
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    monkeypatch.setattr(B, "on_spots", lambda points, lines: iter(()))
+
+
+def beside_only(monkeypatch):
+    """이름을 선 위에 얹지 않고 모두 선 옆에 놓는다(선 옆 배치와 같다)."""
+    monkeypatch.setattr(B._Spots, "pick_on_line", lambda self, *args, **kwargs: None)
+
+
 def el(kind, name=None, left=0, top=0, **more):
     return {"kind": kind, "left": left, "top": top, **more, **({} if name is None else {"name": name})}
 
@@ -75,6 +87,16 @@ def test_state_diagram_with_every_part_passes():
     assert r.passed, r.summary()
 
 
+def test_names_sit_on_their_lines_but_a_self_transition_keeps_its_name_beside_the_loop():
+    # 전이 이름은 그 전이의 선 위에 얹는다. 같은 상태로 돌아오는 고리 선의 이름은 얹으면 짧은 구간으로 이뤄진 고리 모양을 가리니
+    # 선 옆에 둔다. 짧은 선에 긴 글자(대기→처리 중, ok?→완료)는 얹으면 흰 바탕과 화살촉 사이에 선이 LINE_SHOW만큼 보이지 않아 선
+    # 옆에 둔다
+    d = draw(FULL, FULL_TRANSITIONS)
+    names = {r.owner: r.labels[0] for r in d.layout.relations if r.labels}
+    assert [names.pop(k).segment for k in ("완료->완료", "대기->처리 중", "ok?->완료")] == [None] * 3
+    assert names and all(lab.segment is not None for lab in names.values())
+
+
 def test_relation_without_kind_is_a_transition_and_its_text_is_written_as_given():
     d = draw(FULL, FULL_TRANSITIONS)
     assert {p.relation.kind for p in d.layout.relations} == {"transition"}
@@ -106,10 +128,14 @@ def test_line_through_the_actions_of_a_composite_state_fails():
     assert report(elements, [tr("검증", "밖", via=[[160, 125], [160, -130]])]).passed
 
 
-def test_transition_text_on_the_actions_of_a_composite_state_fails():
-    # 칸 바로 아래 두 상태를 잇는 전이의 세 줄 글자는 위로 놓으면 동작 칸에, 아래로 놓으면 복합 상태 아래 테두리에 걸린다
+def test_transition_text_on_the_actions_of_a_composite_state_fails(monkeypatch):
+    # 칸 바로 아래 두 상태를 잇는 전이의 세 줄 글자는 선 위에 얹으면 들어맞아 합격한다. 선 옆에 놓으면 위로는 동작 칸에, 아래로는
+    # 복합 상태 아래 테두리에 걸린다
     elements = COMPOSITE + [el("state", "저장", left=200, top=105, **{"in": "처리 중"})]
-    r = report(elements, [tr("검증", "저장", name=["검증이", "끝나면", "저장한다"])])
+    scene = (elements, [tr("검증", "저장", name=["검증이", "끝나면", "저장한다"])])
+    assert report(*scene).passed
+    beside_only(monkeypatch)
+    r = report(*scene)
     assert kinds(r) == ["text_on_box"]
     assert "끝을 품은 요소의 이름 칸에 겹친다" in r.failures[0].problem and r.failures[0].elements == ("검증->저장", "처리 중")
 
@@ -118,13 +144,14 @@ def test_line_through_another_state_and_through_a_transition_text_fail(monkeypat
     elements = [el("state", "A", left=0, top=0), el("state", "B", left=0, top=120), el("state", "C", left=0, top=240)]
     r = report(elements, [tr("A", "C")])
     assert kinds(r) == ["line_through_box"] and r.failures[0].elements == ("A->C", "B")
-    # 다른 전이가 글자 자리를 지난다: A→B 글자의 가운데 자리(선 양옆)를 왼쪽에서 오는 X→Y 선이 가로지른다. 글자는 선을 따라 옆 빈
-    # 곳으로 옮겨 합격하고, 가운데에만 두면(옮길 자리가 없을 때) X→Y 선이 글자를 지나 불합격이다
+    # 다른 전이가 글자 자리를 지난다: A→B 선 가운데(선 위 가운데 자리와 선 양옆)를 왼쪽에서 오는 X→Y 선이 가로지른다. 글자는 A→B
+    # 선 위에 얹은 채 옆 빈 곳으로 옮겨 합격하고, 가운데에만 두면(옮길 자리가 없을 때) 선 옆 가운데 후보에 놓여 X→Y 선이 글자를
+    # 지나 불합격이다
     scene = ([el("state", "A", left=0, top=0), el("state", "B", left=0, top=160),
               el("state", "X", left=-200, top=80), el("state", "Y", left=200, top=80)],
              [tr("A", "B", name="아주 긴 전이 글자"), tr("X", "Y")])
     assert report(*scene).passed
-    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    middle_only(monkeypatch)
     r = report(*scene)
     assert kinds(r) == ["line_through_text"] and r.failures[0].elements == ("X->Y", "A->B")
 

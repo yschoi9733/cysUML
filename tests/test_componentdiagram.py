@@ -20,6 +20,13 @@ from cysuml.text import text_width
 README = Path(__file__).resolve().parent.parent / "README.md"
 
 
+def middle_only(monkeypatch):
+    """선을 따라 더 볼 자리(선 옆 slide_spots·선 위 on_spots)를 없애 이름 글자를 가운데에만 둔다 — 선 위 가운데 자리가 빈
+    자리면 거기, 아니면 선 옆 가운데 후보다."""
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    monkeypatch.setattr(B, "on_spots", lambda points, lines: iter(()))
+
+
 def el(kind, name, left, top, **more):
     return {"kind": kind, "name": name, "left": left, "top": top, **more}
 
@@ -145,12 +152,12 @@ def test_line_through_the_name_of_an_interface_fails():
 
 def test_element_or_label_on_the_name_of_an_interface_fails(monkeypatch):
     assert kinds(report([el("lollipop", "Api", 0, 0), el("class", "A", 0, 34)])) == ["box_overlap"]
-    # 관계 이름 자리 둘(선 가운데 위아래) 가운데 아래는 상자 C가 막고, 위에는 Api 이름이 있다. 선을 따라 옮기면 빈 곳이 있어
-    # 합격하고, 가운데에만 두면(옮길 자리가 없을 때) Api 이름에 겹쳐 불합격이다
+    # 선 가운데는 아래를 상자 C가 막고(선 위 가운데 자리와 아래 자리), 위에는 Api 이름이 있다. 선 위에 얹은 채 옮기면 빈 곳이 있어
+    # 합격하고, 가운데에만 두면(옮길 자리가 없을 때) 선 옆 위 자리에 놓여 Api 이름에 겹쳐 불합격이다
     scene = ([el("lollipop", "Api", 172, -28), el("class", "A", 0, 0), el("class", "B", 300, 0), el("class", "C", 150, 29)],
              [rel("association", "A", "B", name="has")])
     assert report(*scene).passed
-    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    middle_only(monkeypatch)
     (f,) = report(*scene).failures
     assert f.kind == "text_on_box" and f.elements == ("A->B", "Api")
 
@@ -179,14 +186,24 @@ def test_element_outside_a_package_with_room_for_the_label_passes_either_way(ste
         assert r.passed, (offset, r.summary())
 
 
-def test_label_from_outside_a_package_moves_off_its_border_at_the_basic_spacing():
-    # 패키지 안 컴포넌트로 «manifest»를 긋는 아티팩트를 패키지 오른쪽에 기본 간격(80px)만큼 띄워 두면, 선 가운데의 이름 자리는
-    # 패키지 테두리에 걸린다. 도구가 선을 따라 빈 자리로 옮겨 합격한다
+def test_label_from_outside_a_package_moves_off_its_border_at_the_basic_spacing(monkeypatch):
+    # 패키지 안 컴포넌트로 «manifest»를 긋는 아티팩트를 패키지 오른쪽에 기본 간격(80px)만큼 띄워 두면, 선 가운데(선 위 가운데 자리와
+    # 선 옆 가운데 후보 둘)는 패키지 테두리에 걸린다. 도구가 선 위에 얹은 채 빈 자리로 옮겨 합격한다 — 선 옆에 놓아도 선을 따라
+    # 옮겨 합격한다
     elements = [el("package", "orders", 0, 0), el("component", "OrderService", 20, 52, **{"in": "orders"})]
     d = draw(elements)
     pkg, svc = placed(d, "orders").rect, placed(d, "OrderService").rect
     jar = el("artifact", "order.jar", pkg[2] + 80, svc[1] + 10)
-    d = draw([*elements, jar], [rel("dependency", "order.jar", "OrderService", stereotype="manifest")])
+    data = ([*elements, jar], [rel("dependency", "order.jar", "OrderService", stereotype="manifest")])
+    d = draw(*data)
+    assert K.check(d).passed, K.check(d).summary()
+    (r,) = d.layout.relations
+    (label,) = r.labels
+    middle = tuple((a + b) / 2 for a, b in zip(*r.points))
+    assert label.segment == 0 and math.dist((label.x, label.y), middle) == pytest.approx(B.NAME_STEP)
+    with monkeypatch.context() as m:
+        m.setattr(B._Spots, "pick_on_line", lambda self, *args, **kwargs: None)  # 선 위에 얹지 않는다
+        d = draw(*data)
     assert K.check(d).passed, K.check(d).summary()
     (r,) = d.layout.relations
     (label,) = r.labels

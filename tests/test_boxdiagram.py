@@ -9,11 +9,18 @@ from cysuml import boxdiagram as B
 from cysuml import geom as G
 from cysuml import guide, server
 from cysuml import text as T
-from cysuml.canvas import Ellipse, Line, Polygon, Text
+from cysuml.canvas import BG_MARGIN, Ellipse, Line, Mask, Polygon, Text
 from cysuml.classdiagram import CLASS_SHAPES, RELATIONS
 from cysuml.parsing import InputError
 from cysuml.report import fmt_rect
 from cysuml.shapes import PACKAGE
+
+
+def middle_only(monkeypatch):
+    """선을 따라 더 볼 자리(선 옆 slide_spots·선 위 on_spots)를 없애 이름 글자를 가운데에만 둔다 — 선 위 가운데 자리가 빈
+    자리면 거기, 아니면 선 옆 가운데 후보다."""
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    monkeypatch.setattr(B, "on_spots", lambda points, lines: iter(()))
 
 
 def _center_lines(c, p, rect, lines):
@@ -297,12 +304,12 @@ def test_line_through_the_outside_name_of_another_element_fails():
 
 def test_element_or_label_on_the_outside_name_fails(monkeypatch):
     assert kinds(report([dot("Payment", 0, 0), el("class", "A", 0, 34)])) == ["box_overlap"]
-    # 관계 이름 자리 둘(선 y=24 가운데 위아래) 가운데 아래는 상자 C가 막고, 위에는 Payment 이름(선에서 9px)이 있다. 선을 따라
-    # 옮기면 빈 곳이 있어 합격하고, 가운데에만 두면(옮길 자리가 없을 때) 이름 칸에 겹쳐 불합격이다
+    # 선(y=24) 가운데는 아래를 상자 C가 막고(선 위 가운데 자리와 아래 자리), 위에는 Payment 이름(선에서 9px)이 있다. 선 위에 얹은
+    # 채 옮기면 빈 곳이 있어 합격하고, 가운데에만 두면(옮길 자리가 없을 때) 선 옆 위 자리에 놓여 이름 칸에 겹쳐 불합격이다
     scene = ([dot("Payment", 165, -28), el("class", "A", 0, 0), el("class", "B", 300, 0), el("class", "C", 150, 29)],
              [rel("association", "A", "B", name="has")])
     assert report(*scene).passed
-    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    middle_only(monkeypatch)
     (f,) = report(*scene).failures
     assert f.kind == "text_on_box" and f.elements == ("A->B", "Payment")
 
@@ -401,9 +408,9 @@ def test_a_loop_of_in_is_told_once():
 
 
 def test_report_passed_text_follows_the_tool_words():
-    assert K.Report.PASSED == "합격 — 선이 상자·글자를 지나거나 겹친 곳이 없다."  # 클래스에서 읽으면 클래스도 도구의 말
+    assert K.Report.PASSED == "합격 — 선이 상자·글자를 지나거나 겹친 곳이 없다(관계 이름이 얹힌 그 선 구간은 빼고)."  # 클래스에서 읽으면 클래스도 도구의 말
     r = report([el("class", "A", 0, 0)])
-    assert r.PASSED == "합격 — 선이 요소·글자를 지나거나 겹친 곳이 없다." and r.summary().startswith(r.PASSED)
+    assert r.PASSED == "합격 — 선이 요소·글자를 지나거나 겹친 곳이 없다(관계 이름이 얹힌 그 선 구간은 빼고)." and r.summary().startswith(r.PASSED)
     assert r.SHRINK == "요소를 가까이 모으거나 배율을 낮춘다"
 
 
@@ -430,12 +437,17 @@ def test_class_diagram_tool_keeps_its_own_input():
                                                             "relations[0].stereotype"}
 
 
-def test_stereotype_and_name_of_a_relation_are_two_lines_and_pass():
+def test_stereotype_and_name_of_a_relation_are_two_lines_on_the_line_over_one_white_patch():
+    # «use»와 이름 두 줄을 가로선(y 24)에 얹는다. 흰 바탕은 두 줄의 줄 상자를 다 덮는 하나라, 선이 두 줄 사이 틈으로 보이지 않고 글자
+    # 덩어리 앞뒤에서만 끊긴다
     d = draw([el("class", "A", 0, 0), el("class", "B", 300, 0)],
              [rel("association", "A", "B", stereotype="use", name="places")])
     assert [t.text for t in owned(d, "A->B", Text)] == ["«use»", "places"]
     a, b = owned(d, "A->B", Text)
-    assert b.y - a.y == B.LABEL_LINE and a.box[3] <= b.box[1] and b.box[3] < 24  # 두 줄 모두 선(y=24) 위
+    assert b.y - a.y == B.LABEL_LINE and a.box[3] <= b.box[1] and a.y < 24 < b.y and not (a.bg or b.bg)
+    (patch,) = owned(d, "A->B", Mask)
+    cover = G.grow(G.span([a.box[:2], a.box[2:], b.box[:2], b.box[2:]]), BG_MARGIN)
+    assert (patch.left, patch.top, patch.right, patch.bottom) == pytest.approx(cover)
     assert K.check(d).passed
 
 
