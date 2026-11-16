@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from pathlib import Path
 
 import anyio
@@ -55,6 +56,16 @@ def text(result):
     return result.content[0].text
 
 
+def whole(tool):
+    """MCP가 내놓는 도구 하나의 글 전체 — 도구 설명과 인자 설명. 입력 글은 인자 설명에 있으므로, 어떤 글이 "없다"거나 글 전체가 어떤
+    규칙을 지키는지는 이것으로 본다."""
+    return "\n".join([tool.description, *(p.get("description", "") for p in tool.input_schema["properties"].values())])
+
+
+def arg(tool, key):
+    return tool.input_schema["properties"][key]["description"]
+
+
 def image(result):
     (block,) = [b for b in result.content if b.type == "image"]
     assert block.mime_type == "image/png"
@@ -93,13 +104,18 @@ PLACED_TOOLS = {  # AI가 배치하는 도구 → 그 도구 설명에 있어야
 }
 
 TRUNK_TOOLS = [n for n, (_, _, spec) in PLACED_TOOLS.items() if any(t.trunk for t in spec.relations.values())]
-BOX_TOOLS = {  # 상자 그림 도구 → 그림 모듈, relations 인자 설명의 말, 선 글자 이름(요령 끝 항목), 혼자 그릴 요소 종류
+BOX_TOOLS = {  # 상자 그림 도구 → 그림 모듈, relations 인자 설명 첫 줄의 말, 선 글자 이름(요령 끝 항목), 혼자 그릴 요소 종류
     "draw_package_diagram": (packagediagram, "관계", "관계 이름·스테레오타입", "class"),
     "draw_component_diagram": (componentdiagram, "관계", "관계 이름·스테레오타입", "component"),
     "draw_deployment_diagram": (deploymentdiagram, "관계", "관계 이름·스테레오타입", "node"),
     "draw_use_case_diagram": (usecasediagram, "관계", "관계 이름·스테레오타입", "use_case"),
     "draw_state_diagram": (statediagram, "전이", "전이", "state"),
     "draw_activity_diagram": (activitydiagram, "흐름", "흐름", "action"),
+}
+ARGS = {  # 도구 → 그림 입력 인자 설명(인자 이름 → 글). file_name·out_dir·scale은 모든 도구가 guide.COMMON_ARGS를 쓴다
+    "draw_class_diagram": server.CLASS_ARGS,
+    **{name: module.ARGS for name, (module, *_) in BOX_TOOLS.items()},
+    "draw_sequence_diagram": server.SEQUENCE_ARGS,
 }
 
 
@@ -116,14 +132,61 @@ def test_lists_every_tool_with_its_inputs():
             assert props[key]["items"] == {"type": "string" if key in strings else "object"}
 
 
+def length(text_):
+    """Claude Code가 세는 글 길이를 넉넉히 어림한 값 — 파이썬 len과 호환 정규화(NFKC)를 거친 길이 가운데 큰 값. 미리 싣는 도구 설명이
+    len으로 4,094자인 자리에서 잘린 적이 있고, 그 앞의 말줄임표(…)를 NFKC처럼 점 셋으로 세면 4,096자가 된다(그렇게 센다는 것은
+    추정이다)."""
+    return max(len(text_), len(unicodedata.normalize("NFKC", text_)))
+
+
+def test_length_counts_an_ellipsis_as_three_dots():
+    assert length("…") == 3 and length("a…") == 4 and length("가나") == 2
+
+
+def test_instructions_and_every_tool_description_fit_what_claude_code_loads_up_front():
+    # 도구 검색 없이 도구를 미리 싣는 Claude Code는 서버 안내문과 도구 설명을 guide.MAX_DESCRIPTION자에서 자른다. 인자 설명은 자르지
+    # 않으므로 입력 글은 인자 설명에 둔다(test_every_tool_reads_its_input_from_its_argument_descriptions)
+    instructions, tools, _ = run(server.mcp)
+    assert length(instructions) <= guide.MAX_DESCRIPTION, length(instructions)
+    for name, tool in tools.items():
+        assert length(tool.description) <= guide.MAX_DESCRIPTION, (name, length(tool.description))
+
+
+CHECKED_ARG_LENGTH = 9000  # Claude Code가 도구 검색을 켜든 끄든 자르지 않는 것을 확인한 인자 설명 길이(실험용 MCP 서버로 잼)
+
+
+def test_every_argument_description_stays_within_the_length_checked_not_to_be_cut():
+    # 인자 설명이 이보다 길어지면 Claude Code가 자르지 않는지 다시 확인하고 이 값을 고친다
+    _, tools, _ = run(server.mcp)
+    for name, tool in tools.items():
+        for key, prop in tool.input_schema["properties"].items():
+            assert length(prop.get("description", "")) <= CHECKED_ARG_LENGTH, (name, key)
+
+
+def test_every_tool_reads_its_input_from_its_argument_descriptions():
+    # 도구 설명은 소개 바로 아래 문단에서 인자 설명을 가리키고 결과 절로 이어 간다. 그림 입력 인자 설명은 인자 이름으로 시작하는 첫
+    # 줄부터 옮긴 글이고, file_name·out_dir·scale은 모든 도구가 같은 글이다
+    _, tools, _ = run(server.mcp)
+    assert set(ARGS) == set(tools)
+    for name, tool in tools.items():
+        _, note, rest = tool.description.split("\n\n", 2)
+        assert note == guide.ARGS_NOTE and rest.startswith("결과\n"), name
+        assert "\n입력\n" not in tool.description, name
+        assert set(tool.input_schema["properties"]) == {*ARGS[name], *guide.COMMON_ARGS}, name
+        for key, text_ in {**ARGS[name], **guide.COMMON_ARGS}.items():
+            assert arg(tool, key) == text_, (name, key)
+        for key, text_ in ARGS[name].items():
+            assert text_.startswith(f"- {key}: "), (name, key)
+
+
 def test_each_tool_carries_its_flow_and_tips_and_the_instructions_carry_the_flows_only():
     instructions, tools, _ = run(server.mcp)
     seq_tool = tools["draw_sequence_diagram"].description
     for name, (tips, kinds, spec) in PLACED_TOOLS.items():
         tool = tools[name].description
         assert guide.flow(kinds, spec.words) in tool and tips in tool
-        if name in TRUNK_TOOLS:  # 공유 줄기 안내가 든 관계 필드가 그 도구 설명에 그대로 들어간다
-            assert guide.relation_fields(spec) in tool
+        if name in TRUNK_TOOLS:  # 공유 줄기 안내가 든 관계 필드가 그 도구의 relations 인자 설명에 그대로 들어간다
+            assert guide.relation_fields(spec) in arg(tools[name], "relations")
         assert server.SEQUENCE_FLOW not in tool and guide.PLACED_FLOW not in seq_tool
         assert tips not in instructions
         assert tips not in seq_tool
@@ -138,19 +201,20 @@ def test_each_placed_tool_says_how_far_to_bend_beside_an_arrowhead():
     # test_packagediagram이 본다
     _, tools, _ = run(server.mcp)
     for name, (_, _, spec) in PLACED_TOOLS.items():
-        assert guide.arrow_bend(spec.words) in tools[name].description, name
+        assert guide.arrow_bend(spec.words) in arg(tools[name], "relations"), name
 
 
 def test_sequence_description_names_every_field_kind_and_limit_the_reader_takes():
     S = sequencediagram
+    fields = "\n".join(server.SEQUENCE_ARGS.values())  # 필드는 인자 설명에 있다
     names = (S.DIAGRAM_FIELDS + S.PARTICIPANT_FIELDS + S.MESSAGE_FIELDS + S.ALL_FRAME_FIELDS + S.BRANCH_FIELDS)
     for name in names:  # 필드는 "name(필수)"·"kind:"·"from·to"처럼 바로 뒤에 괄호·쌍점·가운뎃점이 붙어 나온다
-        assert re.search(rf"(?<![A-Za-z_]){name}[(:·]", server.SEQUENCE_TOOL), name
+        assert re.search(rf"(?<![A-Za-z_]){name}[(:·]", fields), name
     for kind in S.PARTICIPANT_KINDS + S.MESSAGE_KINDS + S.FRAME_KINDS:
-        assert f'"{kind}"' in server.SEQUENCE_TOOL, kind
+        assert f'"{kind}"' in fields, kind
     for limit in (S.MAX_PARTICIPANTS, S.MAX_MESSAGES, S.MAX_FRAMES, S.MAX_NOTES):
-        assert f"{limit}개까지" in server.SEQUENCE_TOOL
-    assert "반환(reply)은 나를 부른 쪽으로 보낸다" in server.SEQUENCE_TOOL
+        assert f"{limit}개까지" in fields
+    assert "반환(reply)은 나를 부른 쪽으로 보낸다" in server.SEQUENCE_ARGS["messages"]
 
 
 def test_description_names_the_failure_kinds_of_each_tool_in_check_order():
@@ -162,7 +226,8 @@ def test_description_names_the_failure_kinds_of_each_tool_in_check_order():
     assert {"상자끼리 겹치거나 붙음", "선이 끝 상자 변에 붙어 감", "선 끝 모양이 그 선의 다른 끝 상자 변에 붙음",
             "선 끝 모양이 그 끝의 상자 안으로 들어감"} <= set(class_names)
     assert not any("요소" in n or "테두리" in n for n in class_names)
-    assert not any(n in server.CLASS_TOOL for n in guide.kind_names(boxcheck.NESTED_KINDS, boxdiagram.BOX_WORDS))
+    class_all = "\n".join([server.CLASS_TOOL, *server.CLASS_ARGS.values()])  # "없다"는 인자 설명까지 함께 본다
+    assert not any(n in class_all for n in guide.kind_names(boxcheck.NESTED_KINDS, boxdiagram.BOX_WORDS))
     assert ", ".join(guide.KIND_NAMES.values()) + "." in packagediagram.TOOL
 
 
@@ -183,7 +248,7 @@ def test_relation_fields_follow_the_relation_kinds_a_tool_takes():
 
 def test_box_tools_are_registered_from_their_module():
     # 클래스도 밖의 AI가 배치하는 도구는 모두 _box_tool로 등록한다. 입력 스키마 이름은 도구 이름을 따르고(SDK가 함수 이름으로 짓는다),
-    # relations 설명만 도구마다 다르다
+    # elements·relations 인자 설명은 그림 모듈의 ARGS다
     assert set(BOX_TOOLS) == set(PLACED_TOOLS) - {"draw_class_diagram"}
     _, tools, _ = run(server.mcp)
     for name, (module, word, _, _) in BOX_TOOLS.items():
@@ -191,8 +256,10 @@ def test_box_tools_are_registered_from_their_module():
         assert tool.description == module.TOOL, name
         schema = tool.input_schema
         assert schema["title"] == f"{name}Arguments"
-        assert schema["properties"]["elements"]["description"] == "요소 목록(하나 이상). 필드는 도구 설명에 있다."
-        assert schema["properties"]["relations"]["description"] == f"{word} 목록. 필드는 도구 설명에 있다."
+        assert arg(tool, "elements") == module.ARGS["elements"] and arg(tool, "relations") == module.ARGS["relations"], name
+        assert set(module.ARGS) == {"elements", "relations"}
+        assert module.ARGS["elements"].startswith("- elements: 요소 목록(하나 이상).")
+        assert module.ARGS["relations"].startswith(f"- relations: {word} 목록(없어도 된다).\n")
         assert schema["properties"]["relations"]["default"] is None and schema["properties"]["scale"]["default"] == SCALE
         assert module.SPEC.list_field == "elements"
 
@@ -212,26 +279,28 @@ def test_each_box_tool_draws_with_and_without_relations(tmp_path, name):
 
 def test_box_tool_descriptions_share_their_input_result_and_closing_tips():
     for name, (module, _, label, _) in BOX_TOOLS.items():
-        tool, spec = module.TOOL, module.SPEC
+        tool, spec, elements = module.TOOL, module.SPEC, module.ARGS["elements"]
         holds = any(s.holds for s in spec.shapes.values())
-        assert tool.startswith(module.INTRO + "\n\n입력\n") and tool.endswith("\n\n" + module.TIPS), name
-        for part in (guide.COMMON_INPUT, guide.NEW_INPUT, guide.places_result(spec), guide.IMAGE_RESULT):
+        # 도구 설명은 소개, 인자 설명을 가리키는 줄, 결과로 시작해 배치 요령으로 끝난다
+        assert tool.startswith(f"{module.INTRO}\n\n{guide.ARGS_NOTE}\n\n결과\n") and tool.endswith("\n\n" + module.TIPS), name
+        for part in (guide.places_result(spec), guide.IMAGE_RESULT):
             assert tool.count(part) == 1, name
+        # 공용 입력·중첩·표기 절은 요소 목록 인자 설명 끝에 이 차례로, 빈 줄 하나씩 띄워 붙는다
+        sections = [guide.NEW_INPUT] + ([guide.NESTING] if holds else []) + ([module.NOTATION] if module is deploymentdiagram else [])
+        assert elements.endswith("\n\n" + "\n\n".join(sections)) and elements.count(guide.NEW_INPUT) == 1, name
+        assert guide.NEW_INPUT not in tool and guide.NESTING not in tool and guide.NEW_INPUT not in module.ARGS["relations"], name
         # 중첩 절과 "안의 요소"는 안에 요소를 두는 모양이 있는 도구에만(액티비티도는 없다)
-        assert (guide.NESTING in tool) == holds == (name != "draw_activity_diagram"), name
+        assert (guide.NESTING in elements) == holds == (name != "draw_activity_diagram"), name
         assert module.TIPS.endswith("\n" + guide.spacing_tips(spec, label))
         assert ("글자와 안의 요소에 맞춰" in module.TIPS) == holds
         # 따로 모아 알리는 오류는 시작·끝 점이 있는 그림(상태도·액티비티도)만, 표기 절은 배치도만 넣는다
         more = flowshapes.ends_errors(spec) + " " if module in (statediagram, activitydiagram) else ""
         assert ("따로 모아 알린다" in tool) == bool(more), name
-        assert ("배치도(deployment diagram) 표기:" in tool) == (module is deploymentdiagram)
+        assert ("배치도(deployment diagram) 표기:" in "\n".join([tool, *module.ARGS.values()])) == (module is deploymentdiagram)
         assert (f"\n- elements·relations·file_name이 틀리면 그리지 않고 틀린 곳을 elements[0].left 꼴 자리와 함께 모두 모아 오류로 "
                 f"돌려준다. {more}그림이 너무 커서") in tool
     assert "시작 점으로 들어오거나 끝 점에서 나가는 전이는 " in statediagram.TOOL
     assert "시작 점으로 들어오거나 끝 점에서 나가는 흐름은 " in activitydiagram.TOOL
-    # 배치도 표기 절은 중첩 절 뒤, 결과 절 앞이다
-    tool = deploymentdiagram.TOOL
-    assert tool.index(guide.NESTING) < tool.index(deploymentdiagram.NOTATION) < tool.index("\n\n결과\n")
 
 
 def test_closing_tips_of_every_placed_tool_say_the_next_input():
@@ -240,7 +309,7 @@ def test_closing_tips_of_every_placed_tool_say_the_next_input():
     for name, (tips, _, spec) in PLACED_TOOLS.items():
         noun = spec.words.noun
         assert tips.endswith(f'그린 크기는 결과의 "{noun} 자리"에서 보고 다음 입력에 쓴다.'), name
-    for text_ in (instructions, *(t.description for t in tools.values())):
+    for text_ in (instructions, *(whole(t) for t in tools.values())):
         assert "다음 배치에" not in text_
     assert server.CLASS_TIPS.endswith("\n" + guide.spacing_tips(classdiagram.SPEC, "관계 이름·다중도",
                                                                 f"(폭은 {classdiagram.MIN_WIDTH}px 이상)"))
@@ -254,7 +323,7 @@ def test_tools_with_trunk_relations():
 
 @pytest.mark.parametrize("name", TRUNK_TOOLS)
 def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
-    # 도구 설명에 관계 필드가 그대로 들어가는 것은 test_each_tool_carries_its_flow_and_tips_…가 본다
+    # relations 인자 설명에 관계 필드가 그대로 들어가는 것은 test_each_tool_carries_its_flow_and_tips_…가 본다
     spec = PLACED_TOOLS[name][2]
     trunks = [t for t in spec.relations.values() if t.trunk]
     assert trunks
@@ -608,16 +677,20 @@ def test_result_adds_the_point_each_kind_aims_at_after_the_place(tmp_path):
 
 def test_relation_fields_say_where_lines_start_for_each_tool():
     # 클래스도는 상자 가운데, 새 도구는 요소 종류에 따로 적은 점(패키지는 탭 오른쪽 몸통의 가운데)
-    assert "선은 상자 가운데에서 첫 꺾는 점(없으면 상대 상자 가운데)으로 가는 선이 상자 변과" in server.CLASS_TOOL
-    assert "선은 요소 가운데(요소 종류에 따로 적은 모양은 그 점)에서" in packagediagram.TOOL
-    assert "탭 오른쪽 몸통의 가운데를 향한다" in packagediagram.TOOL
+    assert "선은 상자 가운데에서 첫 꺾는 점(없으면 상대 상자 가운데)으로 가는 선이 상자 변과" in server.CLASS_ARGS["relations"]
+    assert "선은 요소 가운데(요소 종류에 따로 적은 모양은 그 점)에서" in packagediagram.ARGS["relations"]
+    elements = packagediagram.ARGS["elements"]
+    assert "탭 오른쪽 몸통의 가운데를 향한다" in elements
     # 아이콘 표기 두 종류도 "따로 적은 점"을 적는다
-    assert "UML 1 표기 컴포넌트는 부품 네모를 뺀 상자의 가운데(자리 가운데보다 튀어나온 폭의 반 4px 오른쪽)" in packagediagram.TOOL
+    assert "UML 1 표기 컴포넌트는 부품 네모를 뺀 상자의 가운데(자리 가운데보다 튀어나온 폭의 반 4px 오른쪽)" in elements
     assert shapes.PART[0] / 4 == 4  # 위 글의 4px — 부품 네모 폭을 바꾸면 안내 글도 고친다
-    assert "문서 아이콘 아티팩트는 문서의 가운데(결과의 모양 자리 가운데)이고, 둘 다 반 픽셀이면 정수로 내린다" in packagediagram.TOOL
-    # 패키지도도 모양 밖 이름이 있는 문서 아이콘 아티팩트를 받으므로 이름 쪽과 모양 자리 결과 문장을 넣는다(한 번씩)
-    for tool in (packagediagram.TOOL, componentdiagram.TOOL, deploymentdiagram.TOOL):
-        assert guide.PLACES_RESULT in tool and tool.count(guide.OUTSIDE_PLACES) == 1 and tool.count(guide.NAME_SIDE) == 1
+    assert "문서 아이콘 아티팩트는 문서의 가운데(결과의 모양 자리 가운데)이고, 둘 다 반 픽셀이면 정수로 내린다" in elements
+    # 패키지도도 모양 밖 이름이 있는 문서 아이콘 아티팩트를 받으므로 이름 쪽(요소 목록 인자 설명)과 모양 자리 결과 문장(도구 설명)을
+    # 넣는다(한 번씩)
+    for module in (packagediagram, componentdiagram, deploymentdiagram):
+        tool, all_ = module.TOOL, "\n".join([module.TOOL, *module.ARGS.values()])
+        assert guide.PLACES_RESULT in tool and guide.OUTSIDE_PLACES in tool and guide.NAME_SIDE in module.ARGS["elements"]
+        assert all_.count(guide.OUTSIDE_PLACES) == 1 and all_.count(guide.NAME_SIDE) == 1
 
 
 def test_new_tools_tell_what_the_result_adds_to_the_places_of_their_shapes():
@@ -638,8 +711,8 @@ def test_new_tools_tell_what_the_result_adds_to_the_places_of_their_shapes():
     # 유즈케이스도: 액터의 모양 자리는 붙고, 액터·유즈케이스가 향하는 점은 가운데를 정수로 내린 점이라 붙이지 않는다. 공유 줄기는
     # 일반화 하나뿐이라 종류마다 향하는 점도 없다
     assert guide.places_result(usecasediagram.SPEC) == guide.PLACES_RESULT + "\n" + guide.OUTSIDE_PLACES
-    assert guide.trunk_aims(usecasediagram.SPEC) == "" and "향하는 점" not in usecasediagram.TOOL
-    assert '"향하는 점 x, y"' not in server.CLASS_TOOL  # 클래스도에는 비켜난 점을 향하는 모양이 없다
+    assert guide.trunk_aims(usecasediagram.SPEC) == "" and "향하는 점" not in whole(tools["draw_use_case_diagram"])
+    assert '"향하는 점 x, y"' not in whole(tools["draw_class_diagram"])  # 클래스도에는 비켜난 점을 향하는 모양이 없다
     # 비켜난 점을 향하는 모양도 모양 밖 이름도 공유 줄기 종류 둘도 없는 도구는 PLACES_RESULT만
     plain = boxdiagram.Spec({k: s for k, s in packagediagram.SPEC.shapes.items()
                              if not boxdiagram.aims_off_center(s) and not s.outside_name},
@@ -665,11 +738,12 @@ def test_shapes_that_aim_aside_are_the_shapes_whose_lines_aim_away_from_the_midd
 
 def test_component_description_carries_the_lollipop_its_name_side_and_its_circle_place():
     # 컴포넌트도는 모양 밖 이름이 있는 제공 인터페이스 원을 받으므로 이름 쪽(바)과 모양 자리 결과 문장을 넣고, 연관 기본 방향은 '없음'이다
-    tool = componentdiagram.TOOL
-    for part in (guide.PLACED_ELEMENTS, guide.NEW_INPUT, guide.NESTING, guide.NAME_SIDE, guide.PLACES_RESULT,
-                 guide.OUTSIDE_PLACES):
+    tool, args = componentdiagram.TOOL, componentdiagram.ARGS
+    for part in (guide.PLACED_ELEMENTS, guide.NEW_INPUT, guide.NESTING, guide.NAME_SIDE):
+        assert part in args["elements"]
+    for part in (guide.PLACES_RESULT, guide.OUTSIDE_PLACES):
         assert part in tool
-    assert 'kind "lollipop"' in tool and '"to"·"from"·"both"·"none"(기본)' in tool
+    assert 'kind "lollipop"' in args["elements"] and '"to"·"from"·"both"·"none"(기본)' in args["relations"]
 
 
 def test_component_tool_returns_the_circle_place_of_a_lollipop(tmp_path):
@@ -685,7 +759,7 @@ def test_component_tool_returns_the_circle_place_of_a_lollipop(tmp_path):
 def test_deployment_diagram_always_carries_its_english_name():
     # 이 레포는 "배치"를 자리 잡기 뜻으로도 쓰므로, 도구 설명·안내문·README 한국어 부분은 그림 이름에 늘 영어 이름을 붙인다
     korean = README.read_text(encoding="utf-8").split("\n## 한국어\n", 1)[1]
-    for text in (deploymentdiagram.TOOL, server.INSTRUCTIONS, korean):
+    for text in ("\n".join([deploymentdiagram.TOOL, *deploymentdiagram.ARGS.values()]), server.INSTRUCTIONS, korean):
         assert "배치도" in text
         assert not re.search(r"배치도(?!(\*\*)?\(deployment diagram\))", text)
     assert deploymentdiagram.TIPS.startswith("배치도(deployment diagram) 자리 잡기 요령:")

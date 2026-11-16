@@ -171,7 +171,7 @@ def test_state_name_zone_covers_the_name_and_the_actions():
 
 def test_children_go_under_the_name_zone_as_the_description_says():
     # 이름 한 줄·동작 없는 복합 상태 안의 요소는 top + 60부터 둔다
-    assert "top + 60부터" in S.TOOL
+    assert "top + 60부터" in S.ARGS["elements"]
     outer = el("state", "밖", left=0, top=0)
     assert report([outer, el("state", "안", left=20, top=60, **{"in": "밖"})]).passed
     assert kinds(report([outer, el("state", "안", left=20, top=59, **{"in": "밖"})])) == ["inner_off_area"]
@@ -259,12 +259,17 @@ def test_start_and_end_rules_are_told_together_for_every_relation():
 
 
 def test_tool_description_uses_the_shared_pieces_and_its_own_relation_fields():
-    for part in (guide.flow(K.KINDS, S.SPEC.words), guide.NEW_INPUT, guide.NESTING, guide.PLACES_RESULT, S.TIPS):
+    for part in (guide.flow(K.KINDS, S.SPEC.words), guide.PLACES_RESULT, S.TIPS):
         assert part in S.TOOL
-    assert guide.relation_fields(S.SPEC) not in S.TOOL and guide.OUTSIDE_PLACES not in S.TOOL
-    assert guide.PLACED_ELEMENTS not in S.TOOL
+    for part in (guide.NEW_INPUT, guide.NESTING):
+        assert part in S.ARGS["elements"]
+    whole = "\n".join([S.TOOL, *S.ARGS.values()])  # "없다"는 인자 설명까지 함께 본다 — 입력 글은 인자 설명에 있다
+    assert guide.relation_fields(S.SPEC) not in whole and guide.OUTSIDE_PLACES not in whole
+    assert guide.PLACED_ELEMENTS not in whole
     for kind in S.SHAPES:
-        assert f'"{kind}"' in S.TOOL
-    assert '"transition". 관계 종류가 하나뿐이라 빼도 된다' in S.TOOL
-    for field in ("from·to(필수)", "name:", "via:", "actions:", "in:", "width·height:"):
-        assert field in S.TOOL
+        assert f'"{kind}"' in S.ARGS["elements"]
+    assert '"transition". 관계 종류가 하나뿐이라 빼도 된다' in S.ARGS["relations"]
+    for field in ("actions:", "in:", "width·height:"):
+        assert field in S.ARGS["elements"]
+    for field in ("from·to(필수)", "name:", "via:"):
+        assert field in S.ARGS["relations"]

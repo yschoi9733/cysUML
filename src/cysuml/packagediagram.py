@@ -1,7 +1,7 @@
 """패키지도: 패키지와 패키지 사이 의존을 그린다. 패키지 안에 클래스·패키지를 넣고, 컴포넌트·아티팩트·노드도 함께 그린다.
 
 요소 종류는 shapes.SHAPES, 관계는 클래스도 관계 여섯 가지(classdiagram.RELATIONS)와 그 표기 규칙(classdiagram.RULES)이고,
-읽기·자리 잡기·그리기는 공용 엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
+읽기·자리 잡기·그리기는 공용 엔진(boxdiagram), 검사는 공용 검사(boxcheck)가 한다. 도구 설명(TOOL)·인자 설명(ARGS)과 배치 요령(TIPS)도 여기 둔다.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from . import boxdiagram as B
 from .boxdiagram import ELEMENT_WORDS, Diagram, Drawing, Spec
 from .canvas import SCALE
 from .classdiagram import RELATIONS, RULES
-from .guide import PLACED_ELEMENTS, box_tool, relation_fields, spacing_tips
+from .guide import PLACED_ELEMENTS, box_args, box_tool, relation_fields, spacing_tips
 from .shapes import SHAPES
 
 SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="to", rules=RULES)
@@ -38,4 +38,5 @@ INTRO = """패키지도를 그려 PNG와 입력 파일로 저장하고, 검사 �
 클래스·패키지를 넣는다. 클래스·패키지·컴포넌트·아티팩트·노드를 한 그림에 섞어 그릴 수 있고, 컴포넌트·아티팩트는 아이콘 표기로도 그린다. 요소는 준 왼쪽 위(left·top) 그대로, \
 관계선은 준 꺾는 점(via)을 따라 그리고, 요소 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다."""
 
-TOOL = box_tool(INTRO, SPEC, f"{PLACED_ELEMENTS}\n{relation_fields(SPEC)}", TIPS)
+TOOL = box_tool(INTRO, SPEC, TIPS)
+ARGS = box_args(SPEC, PLACED_ELEMENTS, relation_fields(SPEC))

@@ -2,7 +2,7 @@
 노드를 넣고, 노드끼리는 통신 경로(연관)로, 노드 밖 요소에서 노드로는 «deploy»(스테레오타입을 단 의존)로 잇는다.
 
 요소 종류·관계 종류·읽기·자리 잡기·그리기·검사는 패키지도와 같은 공용 엔진(boxdiagram)·공용 검사(boxcheck)를 쓰고, 연관의 기본
-방향만 '없음'으로 둔다(통신 경로는 화살촉 없는 실선). 도구 설명(TOOL)과 자리 잡기 요령(TIPS)도 여기 둔다.
+방향만 '없음'으로 둔다(통신 경로는 화살촉 없는 실선). 도구 설명(TOOL)·인자 설명(ARGS)과 자리 잡기 요령(TIPS)도 여기 둔다.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from . import boxdiagram as B
 from .boxdiagram import ELEMENT_WORDS, NEST_PAD, Diagram, Drawing, Spec
 from .canvas import SCALE
 from .classdiagram import HEAD, NAME_LINE, RELATIONS, RULES
-from .guide import LABEL_ROOM, PLACED_ELEMENTS, box_tool, relation_fields, spacing_tips
+from .guide import LABEL_ROOM, PLACED_ELEMENTS, box_args, box_tool, relation_fields, spacing_tips
 from .shapes import DEPTH, SHAPES
 
 SPEC = Spec(SHAPES, RELATIONS, ELEMENT_WORDS, list_field="elements", navigable="none", rules=RULES)
@@ -66,4 +66,5 @@ INTRO = """배치도(deployment diagram)를 그려 PNG와 입력 파일로 저�
 «deploy»를 긋는다. 컴포넌트·아티팩트는 아이콘 표기로도 그리고, 클래스·패키지 요소도 한 그림에 섞어 그릴 수 있다. 요소는 준 왼쪽 위(left·top) 그대로, 관계선은 준 꺾는 점(via)을 \
 따라 그리고, 요소 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다."""
 
-TOOL = box_tool(INTRO, SPEC, f"{PLACED_ELEMENTS}\n{relation_fields(SPEC)}", TIPS, notation=NOTATION)
+TOOL = box_tool(INTRO, SPEC, TIPS)
+ARGS = box_args(SPEC, PLACED_ELEMENTS, relation_fields(SPEC), notation=NOTATION)

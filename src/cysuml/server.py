@@ -3,8 +3,9 @@
 도구는 그린 PNG와 그 입력 파일(guide.INPUT_SUFFIX)을 저장하고, 검사 결과 글과 그림을 함께 돌려준다. 입력이 틀렸거나, 그림이
 너무 커서 PNG로 못 그리거나, 저장할 폴더에 쓸 수 없으면 저장하지 않고 오류 결과(isError)로 돌려준다 — AI가 읽고 고칠 수 있게 예외
 대신 결과로 낸다. 그림은 바꿔 넣었는데 입력 파일에서 멈춘 때만 그림이 바뀐 채 오류가 되고, 오류 글이 그렇다고 알린다.
-새 그림의 도구 설명은 그 그림 모듈이 guide의 공용 조각으로 만든다(처음부터 있던 두 도구의 설명은 여기 있다). 상자 그림(공용 엔진
-boxdiagram이 그리는 그림) 도구는 _box_tool 하나로 등록한다.
+새 그림의 도구 설명과 인자 설명은 그 그림 모듈이 guide의 공용 조각으로 만든다(처음부터 있던 두 도구의 설명은 여기 있다). 입력에
+관한 글은 도구 설명이 아니라 인자 설명에 둔다(guide 머리말). 상자 그림(공용 엔진 boxdiagram이 그리는 그림) 도구는 _box_tool
+하나로 등록한다.
 """
 from __future__ import annotations
 
@@ -30,8 +31,8 @@ from pydantic import Field, WithJsonSchema
 from . import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, componentdiagram, deploymentdiagram,
                packagediagram, sequencecheck, sequencediagram, statediagram, usecasediagram)
 from .canvas import MIN_SCALE, SCALE
-from .guide import (COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, INPUT_RESULT, INPUT_SUFFIX, MAX_IMAGE_EDGE, MEMBERS, SAVED_INPUT,
-                    flow, relation_fields, spacing_tips, trunk_aims)
+from .guide import (ARGS_NOTE, COMMON_ARGS, DEFAULT_DIR, IMAGE_RESULT, INPUT_RESULT, INPUT_SUFFIX, MAX_IMAGE_EDGE, MEMBERS,
+                    SAVED_INPUT, flow, relation_fields, spacing_tips, trunk_aims)
 from .parsing import InputError
 from .report import Report, fmt_num, fmt_rect
 from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
@@ -80,17 +81,7 @@ INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리
 CLASS_TOOL = f"""클래스도를 그려 PNG와 입력 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 상자는 준 왼쪽 위(left·top) 그대로, \
 관계선은 준 꺾는 점(via)을 따라 그리고, 상자 크기·선 끝·선 글자 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다.
 
-입력
-- classes: 상자 목록(하나 이상).
-  - name(필수): 관계가 이 이름으로 상자를 가리키므로 서로 달라야 한다.
-  - left·top(필수): 상자 왼쪽 위.
-  - kind: "class"(기본)·"abstract"·"interface"·"enum".
-  - stereotype: «» 없이 이름만.
-  - attributes·operations: {MEMBERS}
-  - literals: 열거 값 목록(kind가 "enum"일 때만).
-  - width·height: 최소 크기. 글자가 더 길면 그만큼 늘어난다(폭 기본 90).
-{relation_fields(classdiagram.SPEC)}
-{COMMON_INPUT}
+{ARGS_NOTE}
 
 결과
 - 글: 검사 결과, 상자마다 그린 자리와 크기, 저장한 그림·입력 파일 경로와 그림 픽셀 크기.
@@ -104,32 +95,22 @@ CLASS_TOOL = f"""클래스도를 그려 PNG와 입력 파일로 저장하고, �
 
 {CLASS_TIPS}"""
 
+CLASS_ARGS = {  # 클래스도 도구의 그림 입력 인자 설명(인자 이름 → 글)
+    "classes": f"""- classes: 상자 목록(하나 이상).
+  - name(필수): 관계가 이 이름으로 상자를 가리키므로 서로 달라야 한다.
+  - left·top(필수): 상자 왼쪽 위.
+  - kind: "class"(기본)·"abstract"·"interface"·"enum".
+  - stereotype: «» 없이 이름만.
+  - attributes·operations: {MEMBERS}
+  - literals: 열거 값 목록(kind가 "enum"일 때만).
+  - width·height: 최소 크기. 글자가 더 길면 그만큼 늘어난다(폭 기본 90).""",
+    "relations": relation_fields(classdiagram.SPEC),
+}
+
 SEQUENCE_TOOL = f"""교류도를 그려 PNG와 입력 파일로 저장하고, 검사 결과와 그림을 함께 돌려준다. 교류도는 도구가 배치한다 — 좌표는 받지 \
 않고, 생명선 간격과 메시지 높이를 글자 폭에 맞춰 정하고 활성 막대를 메시지에서 잇는다.
 
-입력
-- participants: 참여자 목록(하나 이상, {MAX_PARTICIPANTS}개까지). 이 차례로 왼쪽부터 놓는다.
-  - name(필수): 메시지가 이 이름으로 참여자를 가리키므로 서로 달라야 한다.
-  - kind: "lifeline"(기본)·"actor".
-- messages: 메시지 목록(없어도 된다, {MAX_MESSAGES}개까지). 이 차례로 위에서부터 놓는다.
-  - from·to(필수): 참여자 이름. 자기 자신에게 보내는 메시지는 받지 않는다 — 그 일은 notes에 적는다.
-  - kind: "call"(기본, 호출)·"reply"(반환, 점선)·"create"(생명선을 만든다 — 그 생명선의 머리가 이 메시지 높이에 놓인다).
-  - name: 메시지 글자. call은 꼭 준다(부르는 연산). reply는 돌려주는 값이 있을 때, create는 «create» 밑에 한 줄 더 쓸 때만 준다.
-  - 반환(reply)은 나를 부른 쪽으로 보낸다 — A가 B를 불렀으면 B에서 A로. 거꾸로 보내도 그려지지만 뜻이 틀린다.
-  - create는 액터에 보내지 못하고, 그 생명선이 주고받는 첫 메시지여야 한다. 같은 생명선을 다시 만드는 것은 같은 alt의 다른 \
-칸에서만 한다 — 칸마다 그 높이에 머리를 그리고, 앞 칸에서 만든 생명선은 그 칸과 함께 끝나 다시 만들기 전에는 쓰지 못한다.
-  - 활성 막대는 도구가 잇는다. 대개 생명선을 부르면 열리고, 그 생명선이 반환하거나 부른 쪽이 다음 메시지를 보내면 닫힌다\
-(액터가 받는 호출과 프레임 둘레는 규칙이 따로 있다).
-- frames: 프레임 목록(없어도 된다, {MAX_FRAMES}개까지). 메시지는 messages 안의 자리(0부터)로 가리킨다. 프레임은 그림 전체 폭으로 \
-그리고, 프레임끼리 덮는 메시지가 겹치면 안 된다(프레임 안에 프레임·ref를 넣지 않는다).
-  - kind(필수): "loop"·"opt"·"alt"·"ref".
-  - loop·opt: first·last(필수, 덮는 첫 메시지와 끝 메시지), condition(조건).
-  - alt: branches(필수, 칸 둘 이상). 칸마다 condition·first·last를 모두 주고, 칸은 빈틈없이 이어 붙인다(다음 칸 first는 앞 칸 \
-last+1). 마지막 칸 조건은 흔히 "else"다.
-  - ref: name(필수, 상자에 쓸 이름), before(필수, 이 자리 메시지 바로 앞에 놓는다 — 메시지 수와 같으면 맨 뒤).
-  - condition은 대괄호 없이 쓴다(도구가 씌운다).
-- notes: 노트 글자 목록({MAX_NOTES}개까지). 그림 아래에 차례대로 모은다.
-{COMMON_INPUT}
+{ARGS_NOTE}
 
 결과
 - 글: 검사 결과, 저장한 그림·입력 파일 경로와 그림 픽셀 크기. 검사 항목은 메시지·프레임·노트를 입력 안의 자리(messages[3]·\
@@ -140,6 +121,30 @@ frames[0]·notes[0])로, 참여자를 이름으로 가리킨다.
 없거나, 저장할 폴더에 쓸 수 없거나, 도구가 배치하지 못했을 때도 오류로 돌려준다.
 
 {SEQUENCE_FLOW}"""
+
+SEQUENCE_ARGS = {  # 교류도 도구의 그림 입력 인자 설명(인자 이름 → 글)
+    "participants": f"""- participants: 참여자 목록(하나 이상, {MAX_PARTICIPANTS}개까지). 이 차례로 왼쪽부터 놓는다.
+  - name(필수): 메시지가 이 이름으로 참여자를 가리키므로 서로 달라야 한다.
+  - kind: "lifeline"(기본)·"actor".""",
+    "messages": f"""- messages: 메시지 목록(없어도 된다, {MAX_MESSAGES}개까지). 이 차례로 위에서부터 놓는다.
+  - from·to(필수): 참여자 이름. 자기 자신에게 보내는 메시지는 받지 않는다 — 그 일은 notes에 적는다.
+  - kind: "call"(기본, 호출)·"reply"(반환, 점선)·"create"(생명선을 만든다 — 그 생명선의 머리가 이 메시지 높이에 놓인다).
+  - name: 메시지 글자. call은 꼭 준다(부르는 연산). reply는 돌려주는 값이 있을 때, create는 «create» 밑에 한 줄 더 쓸 때만 준다.
+  - 반환(reply)은 나를 부른 쪽으로 보낸다 — A가 B를 불렀으면 B에서 A로. 거꾸로 보내도 그려지지만 뜻이 틀린다.
+  - create는 액터에 보내지 못하고, 그 생명선이 주고받는 첫 메시지여야 한다. 같은 생명선을 다시 만드는 것은 같은 alt의 다른 \
+칸에서만 한다 — 칸마다 그 높이에 머리를 그리고, 앞 칸에서 만든 생명선은 그 칸과 함께 끝나 다시 만들기 전에는 쓰지 못한다.
+  - 활성 막대는 도구가 잇는다. 대개 생명선을 부르면 열리고, 그 생명선이 반환하거나 부른 쪽이 다음 메시지를 보내면 닫힌다\
+(액터가 받는 호출과 프레임 둘레는 규칙이 따로 있다).""",
+    "frames": f"""- frames: 프레임 목록(없어도 된다, {MAX_FRAMES}개까지). 메시지는 messages 안의 자리(0부터)로 가리킨다. 프레임은 그림 전체 폭으로 \
+그리고, 프레임끼리 덮는 메시지가 겹치면 안 된다(프레임 안에 프레임·ref를 넣지 않는다).
+  - kind(필수): "loop"·"opt"·"alt"·"ref".
+  - loop·opt: first·last(필수, 덮는 첫 메시지와 끝 메시지), condition(조건).
+  - alt: branches(필수, 칸 둘 이상). 칸마다 condition·first·last를 모두 주고, 칸은 빈틈없이 이어 붙인다(다음 칸 first는 앞 칸 \
+last+1). 마지막 칸 조건은 흔히 "else"다.
+  - ref: name(필수, 상자에 쓸 이름), before(필수, 이 자리 메시지 바로 앞에 놓는다 — 메시지 수와 같으면 맨 뒤).
+  - condition은 대괄호 없이 쓴다(도구가 씌운다).""",
+    "notes": f"- notes: 노트 글자 목록({MAX_NOTES}개까지). 그림 아래에 차례대로 모은다.",
+}
 
 
 def _version() -> str:
@@ -358,17 +363,13 @@ def _listed(description: str, item: str = "object") -> WithJsonSchema:
     return WithJsonSchema({"type": "array", "items": {"type": item}, "description": description})
 
 
-def _relations(word: str) -> Any:
-    """relations 인자 타입 — word는 그 도구가 관계를 부르는 말(관계·전이·흐름)."""
-    return Annotated[Any, _listed(f"{word} 목록. 필드는 도구 설명에 있다.")]
+def _list_arg(description: str, item: str = "object") -> Any:
+    return Annotated[Any, _listed(description, item)]
 
 
-FileName = Annotated[str, Field(description=f"저장할 파일 이름(확장자 없이). 그림(.png)과 입력 파일({INPUT_SUFFIX})에 쓰고, 같은 "
-                                            "이름이면 둘 다 덮어쓴다.")]
-Elements = Annotated[Any, _listed("요소 목록(하나 이상). 필드는 도구 설명에 있다.")]
-Relations = _relations("관계")
-OutDir = Annotated[Optional[str], Field(description=f"저장할 폴더. 주지 않으면 서버 작업 폴더 아래 {DEFAULT_DIR}/.")]
-Scale = Annotated[float, Field(ge=MIN_SCALE, allow_inf_nan=False, description=f"출력 배율(기본 {SCALE:g}). 보통은 주지 않는다.")]
+FileName = Annotated[str, Field(description=COMMON_ARGS["file_name"])]
+OutDir = Annotated[Optional[str], Field(description=COMMON_ARGS["out_dir"])]
+Scale = Annotated[float, Field(ge=MIN_SCALE, allow_inf_nan=False, description=COMMON_ARGS["scale"])]
 
 
 CLASS_NAME = "draw_class_diagram"
@@ -377,8 +378,8 @@ CLASS_NAME = "draw_class_diagram"
 @mcp.tool(name=CLASS_NAME, description=CLASS_TOOL)
 def draw_class_diagram(
         file_name: FileName,
-        classes: Annotated[Any, _listed("상자 목록(하나 이상). 필드는 도구 설명에 있다.")],
-        relations: Relations = None,
+        classes: _list_arg(CLASS_ARGS["classes"]),
+        relations: _list_arg(CLASS_ARGS["relations"]) = None,
         out_dir: OutDir = None,
         scale: Scale = SCALE,
 ) -> CallToolResult:
@@ -386,18 +387,19 @@ def draw_class_diagram(
     return _draw(CLASS_NAME, file_name, data, scale, classdiagram.render, classcheck.check, out_dir, _places)
 
 
-def _box_tool(name: str, diagram: ModuleType, word: str = "관계") -> None:
-    """상자 그림 도구 하나를 등록한다. 그림 모듈(diagram)의 render·TOOL을 쓰고, 인자는 file_name·elements·relations·out_dir·
-    scale이다. word는 relations 인자 설명에 쓰는 말(관계·전이·흐름)이다."""
+def _box_tool(name: str, diagram: ModuleType) -> None:
+    """상자 그림 도구 하나를 등록한다. 그림 모듈(diagram)의 render·TOOL·ARGS(elements·relations 인자 설명)를 쓰고, 인자는
+    file_name·elements·relations·out_dir·scale이다."""
     def tool(file_name, elements, relations=None, out_dir=None, scale=SCALE):
         data = {"elements": elements} if relations is None else {"elements": elements, "relations": relations}
         return _draw(name, file_name, data, scale, diagram.render, boxcheck.check, out_dir, _places)
 
-    # SDK는 함수 이름으로 입력 스키마 이름(<이름>Arguments)을 짓고, 글자로 남은 주석을 그 함수의 모듈에서 풀어 relations 설명을
-    # 바꿀 수 없다 — 이름은 도구 이름으로, 주석은 글자가 아닌 타입으로 준다
+    # SDK는 함수 이름으로 입력 스키마 이름(<이름>Arguments)을 짓고, 글자로 남은 주석을 그 함수의 모듈에서 풀어 인자 설명을
+    # 도구마다 바꿀 수 없다 — 이름은 도구 이름으로, 주석은 글자가 아닌 타입으로 준다
     tool.__name__ = tool.__qualname__ = name
-    tool.__annotations__ = {"file_name": FileName, "elements": Elements, "relations": _relations(word), "out_dir": OutDir,
-                            "scale": Scale, "return": CallToolResult}
+    tool.__annotations__ = {"file_name": FileName, "elements": _list_arg(diagram.ARGS["elements"]),
+                            "relations": _list_arg(diagram.ARGS["relations"]), "out_dir": OutDir, "scale": Scale,
+                            "return": CallToolResult}
     mcp.add_tool(tool, name=name, description=diagram.TOOL)
 
 
@@ -405,8 +407,8 @@ _box_tool("draw_package_diagram", packagediagram)
 _box_tool("draw_component_diagram", componentdiagram)
 _box_tool("draw_deployment_diagram", deploymentdiagram)
 _box_tool("draw_use_case_diagram", usecasediagram)
-_box_tool("draw_state_diagram", statediagram, "전이")
-_box_tool("draw_activity_diagram", activitydiagram, "흐름")
+_box_tool("draw_state_diagram", statediagram)
+_box_tool("draw_activity_diagram", activitydiagram)
 
 
 SEQUENCE_NAME = "draw_sequence_diagram"
@@ -415,10 +417,10 @@ SEQUENCE_NAME = "draw_sequence_diagram"
 @mcp.tool(name=SEQUENCE_NAME, description=SEQUENCE_TOOL)
 def draw_sequence_diagram(
         file_name: FileName,
-        participants: Annotated[Any, _listed("참여자 목록(하나 이상). 필드는 도구 설명에 있다.")],
-        messages: Annotated[Any, _listed("메시지 목록. 필드는 도구 설명에 있다.")] = None,
-        frames: Annotated[Any, _listed("프레임 목록. 필드는 도구 설명에 있다.")] = None,
-        notes: Annotated[Any, _listed("노트 글자 목록. 그림 아래에 모은다.", "string")] = None,
+        participants: _list_arg(SEQUENCE_ARGS["participants"]),
+        messages: _list_arg(SEQUENCE_ARGS["messages"]) = None,
+        frames: _list_arg(SEQUENCE_ARGS["frames"]) = None,
+        notes: _list_arg(SEQUENCE_ARGS["notes"], "string") = None,
         out_dir: OutDir = None,
         scale: Scale = SCALE,
 ) -> CallToolResult:

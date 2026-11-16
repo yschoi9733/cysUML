@@ -1,7 +1,7 @@
 """상태도: 시작·끝 점, 상태(안에 상태를 넣은 복합 상태 포함), 선택 마름모를 전이로 잇는다.
 
 모양은 액티비티도와 함께 쓰는 flowshapes에 있고, 읽기·자리 잡기·그리기는 공용 엔진(boxdiagram), 검사는 공용 검사(boxcheck)가
-한다. 도구 설명(TOOL)과 배치 요령(TIPS)도 여기 둔다.
+한다. 도구 설명(TOOL)·인자 설명(ARGS)과 배치 요령(TIPS)도 여기 둔다.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from .canvas import SCALE
 from .classdiagram import ROW, SECTION_PAD
 from .flowshapes import (DIAMOND, DIAMOND_SIZE, FINAL, FINAL_POINT, NAME_BAND, START, START_POINT, STATE, ends_errors,
                          parse_flow)
-from .guide import arrow_bend, box_tool, spacing_tips
+from .guide import arrow_bend, box_args, box_tool, spacing_tips
 
 TRANSITION = RelationType("전이", end=ARROW_HEAD)
 SHAPES = {"initial": START_POINT, "final": FINAL_POINT, "state": STATE, "choice": DIAMOND}
@@ -45,7 +45,7 @@ INTRO = """상태도를 그려 PNG와 입력 파일로 저장하고, 검사 결�
 상태를 넣는다(복합 상태). 요소는 준 왼쪽 위(left·top) 그대로, 전이는 준 꺾는 점(via)을 따라 그리고, 요소 크기·선 끝·전이 글자 \
 자리만 도구가 정한다. 좌표는 px이고 y는 아래로 커진다."""
 
-INPUTS = f"""- elements: 요소 목록(하나 이상).
+ELEMENTS = f"""- elements: 요소 목록(하나 이상).
   - kind(필수): "initial"(시작 점 — 검게 칠한 원), "final"(끝 점 — 과녁 모양), "state"(상태 — 둥근 모서리 상자), "choice"\
 (선택 — 마름모).
   - name·id: "공용 입력(열쇠·이름)" 절. 상태는 name(필수)을 쓴다. 시작·끝 점과 선택은 이름이 없어 name 대신 id(필수)를 준다.
@@ -56,13 +56,15 @@ INPUTS = f"""- elements: 요소 목록(하나 이상).
 마름모({DIAMOND_SIZE}×{DIAMOND_SIZE}px)는 크기가 정해져 있다.
   - 상태의 이름 칸은 위쪽에 이름 줄과 동작 칸을 함께 덮는다. 높이는 이름 한 줄이면 {_ZONE}px이고, 이름 줄이 하나 늘 때마다 \
 {LABEL_LINE}px, 동작 칸이 있으면 {SECTION_PAD}px에 동작 줄마다 {ROW}px를 더한다. 복합 상태 안의 요소는 이 칸 아래에 둔다(이름 한 \
-줄·동작 없는 상태면 top + {_ZONE + NEST_PAD}부터).
-- relations: 전이 목록(없어도 된다).
+줄·동작 없는 상태면 top + {_ZONE + NEST_PAD}부터)."""
+
+RELATION_FIELDS = f"""- relations: 전이 목록(없어도 된다).
   - kind: "transition". 관계 종류가 하나뿐이라 빼도 된다.
   - from·to(필수): 요소 열쇠. 화살촉은 늘 to 쪽에 붙는다. 시작 점은 from에만, 끝 점은 to에만 쓴다.
   - name: 전이 글자. "사건 [조건] / 동작" 꼴을 받은 그대로 쓴다 — 대괄호·빗금도 쓴다(도구가 씌우지 않는다). 길면 줄마다 문자열인 \
-목록으로 나눈다. stereotype: "공용 입력(열쇠·이름)" 절.
+목록으로 나눈다. stereotype: elements 인자 설명의 "공용 입력(열쇠·이름)" 절.
   - via: 꺾는 점 [[x, y], …]. 선은 요소 가운데에서 첫 꺾는 점(없으면 상대 요소 가운데)으로 가는 선이 요소 테두리와 만나는 곳에서 \
 시작한다. 같은 상태로 돌아오는 전이(자기 전이)는 꺾는 점이 둘 이상 있어야 한다. {arrow_bend(SPEC.words)}"""
 
-TOOL = box_tool(INTRO, SPEC, INPUTS, TIPS, errors=ends_errors(SPEC))
+TOOL = box_tool(INTRO, SPEC, TIPS, errors=ends_errors(SPEC))
+ARGS = box_args(SPEC, ELEMENTS, RELATION_FIELDS)

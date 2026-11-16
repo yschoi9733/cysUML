@@ -574,6 +574,7 @@ def test_include_extend_and_other_stereotypes_read_where_they_belong():
 
 
 def test_tool_description_states_the_rules():
+    lines = "\n".join(U.ARGS.values()).splitlines()  # 규칙은 인자 설명(elements의 in 줄, relations의 규칙 줄)에 있다
     for line in ["  - in: 이 요소를 품은 시스템 경계의 열쇠. \"요소 안에 요소 두기(중첩)\" 절. 규칙: 액터는 시스템 밖의 사람이나 외부 "
                  "시스템이라 시스템 경계 안에 두면(in) 입력 오류다.",
                  "  - 규칙: 시스템 경계에는 관계를 잇지 않는다 — 경계는 시스템의 범위를 그린 것이라, 시스템 경계가 끝인 관계는 "
@@ -583,11 +584,13 @@ def test_tool_description_states_the_rules():
                  "  - 규칙: 일반화는 액터끼리, 유즈케이스끼리 긋는다. 종류가 다른 일반화, 고리를 이루는 일반화(A의 부모가 B이고 B의 "
                  "부모가 다시 A인 것 — 여러 단계도)는 입력 오류다.",
                  '  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — '
-                 '공용 입력의 "어느 관계에든 단다"와 달리 다른 관계에 달면 입력 오류다. 다른 스테레오타입은 어느 관계에든 단다. 자기 '
+                 'elements 인자 설명의 "공용 입력(열쇠·이름)" 절에 적은 "어느 관계에든 단다"와 달리 다른 관계에 달면 입력 오류다. '
+                 '다른 스테레오타입은 어느 관계에든 단다. 자기 '
                  "자신을 포함하거나 확장하는 관계와 고리를 이루는 «include»끼리·«extend»끼리(A가 B를, B가 다시 A를 포함하거나 확장하는 것 — 여러 단계도)도 입력 오류다"
                  "(«include»와 «extend»가 섞인 고리는 받는다)."]:
-        assert line in U.TOOL.splitlines(), line
-    assert "자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다(연관·일반화는 꺾는 점이 있어도 자기 자신으로 갈 수 없다)." in U.TOOL
+        assert line in lines, line
+    assert ("자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다(연관·일반화는 꺾는 점이 있어도 자기 자신으로 갈 수 없다)."
+            in U.ARGS["relations"])
     # 규칙은 in만 본다 — 자리(경계 밖)는 배치 요령이 말한다
     assert "- 액터는 시스템 경계의 왼쪽과 오른쪽 밖에 두고, 이름은" in U.TIPS
 

@@ -476,7 +476,7 @@ def test_socket_to_itself_is_one_error_on_the_first_call_however_it_bends(via):
     with pytest.raises(InputError) as e:
         C.parse(socket_ends([rel("requires", "Shop", "Shop", via=via)]))
     assert e.value.problems == ("relations[0]: 소켓은 자기 자신으로 갈 수 없다 — from과 to를 다른 요소로 고친다",)
-    assert "(상속·실체화·소켓은 꺾는 점이 있어도 자기 자신으로 갈 수 없다)" in C.TOOL
+    assert "(상속·실체화·소켓은 꺾는 점이 있어도 자기 자신으로 갈 수 없다)" in C.ARGS["relations"]
 
 
 def test_shared_engine_reads_check_socket_ends_too():
@@ -530,10 +530,10 @@ def test_icon_components_balls_sockets_and_page_artifacts_pass():
 
 
 def test_tool_description_tells_how_to_draw_sockets():
-    assert C.SOCKET_INPUT in C.TOOL and C.TIPS in C.TOOL
-    assert '"requires"' in C.TOOL and "소켓 반원" in C.TOOL
+    assert C.SOCKET_INPUT in C.ARGS["relations"] and C.TIPS in C.TOOL
+    assert '"requires"' in C.ARGS["relations"] and "소켓 반원" in C.ARGS["relations"]
     assert "막대는 100°, 화살표는 110° 넘게" in C.TIPS and "한 원에 하나" in C.TIPS
-    assert f"이름은 원에서 {C.BALL_NAME_GAP:g}px 떨어진다" in C.TOOL
+    assert f"이름은 원에서 {C.BALL_NAME_GAP:g}px 떨어진다" in C.ARGS["elements"]
 
 
 def test_associations_have_no_arrowhead_unless_given_a_direction():
