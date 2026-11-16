@@ -504,16 +504,27 @@ def test_names_of_crossing_lines_sit_on_their_own_lines_away_from_the_crossing(m
     assert kinds_of(C.render(data)) == ["line_through_text", "line_through_text", "text_overlap"]
 
 
+# 상자 둘 사이에 관계 넷이 포개진 그림 — 선 옆 배치에서 넓혀서 옮긴 이름이 뒤 글자를 밀어 좁은 조건의 배치로 돌아간다
+STACKED = {"classes": [{"name": "C0", "left": -10, "top": 190}, {"name": "C1", "left": -30, "top": 80}],
+           "relations": [{"kind": "aggregation", "from": "C1", "to": "C0", "name": "«use»", "to_multiplicity": "*"},
+                         {"kind": "dependency", "from": "C1", "to": "C0", "name": "«use»"},
+                         {"kind": "composition", "from": "C0", "to": "C1", "from_multiplicity": "0..*"},
+                         {"kind": "composition", "from": "C0", "to": "C1", "name": "places", "from_multiplicity": "0..*"}]}
+# 선 위에 얹으면 그림 전체가 더 걸려 선 옆 배치로 돌아가는 그림(#71 시제품이 무작위 클래스도에서 고른 입력)
+BACK_BESIDE = {"classes": [{"name": "C0", "left": 120, "top": 30}, {"name": "C1", "left": 360, "top": 140},
+                           {"name": "C2", "left": 60, "top": 290}, {"name": "P", "left": 285, "top": 94}],
+               "relations": [{"kind": "realization", "from": "C1", "to": "C0", "name": "has", "via": [[355, 79]]},
+                             {"kind": "generalization", "from": "C0", "to": "C1", "name": "reads from"},
+                             {"kind": "association", "from": "C1", "to": "C0", "name": "관리한다",
+                              "from_multiplicity": "*", "to_multiplicity": "0..*"}]}
+
+
 def test_widened_moves_are_undone_when_the_whole_diagram_gets_more_faults(monkeypatch):
     # 상자 둘 사이에 관계 넷이 포개진 그림(선 옆 배치). 둘째 관계의 이름은 가운데가 선과 앞 이름에만 닿아(상자에는 안 걸려) 옮기는
     # 조건을 넓혀야 옮겨 가는데, 그 자리를 뒤 관계의 글자가 쓰고 있어 뒤 글자가 밀린다. 넓히기만 하면 그림 전체의 걸린 것이 (4, 0)으로
     # 좁은 조건의 (3, 0)보다 많으니 좁은 조건의 배치를 쓴다
     beside_only(monkeypatch)
-    data = {"classes": [{"name": "C0", "left": -10, "top": 190}, {"name": "C1", "left": -30, "top": 80}],
-            "relations": [{"kind": "aggregation", "from": "C1", "to": "C0", "name": "«use»", "to_multiplicity": "*"},
-                          {"kind": "dependency", "from": "C1", "to": "C0", "name": "«use»"},
-                          {"kind": "composition", "from": "C0", "to": "C1", "from_multiplicity": "0..*"},
-                          {"kind": "composition", "from": "C0", "to": "C1", "name": "places", "from_multiplicity": "0..*"}]}
+    data = STACKED
     real = B._labels
     seen = {}
 
@@ -541,13 +552,8 @@ def test_widened_moves_are_undone_when_the_whole_diagram_gets_more_faults(monkey
 
 def test_names_go_back_beside_their_lines_when_putting_them_on_lines_gets_more_faults(monkeypatch):
     # 선 위에 얹은 이름이 뒤 관계의 글자가 쓸 자리를 차지해 그림 전체의 걸린 것이 선 옆 배치보다 많으면, 그림 전체를 선 옆 배치로
-    # 되돌린다(이슈 #71에서 고른 입력 — 선 위 배치 (2, 1), 선 옆 배치 (1, 1))
-    data = {"classes": [{"name": "C0", "left": 120, "top": 30}, {"name": "C1", "left": 360, "top": 140},
-                        {"name": "C2", "left": 60, "top": 290}, {"name": "P", "left": 285, "top": 94}],
-            "relations": [{"kind": "realization", "from": "C1", "to": "C0", "name": "has", "via": [[355, 79]]},
-                          {"kind": "generalization", "from": "C0", "to": "C1", "name": "reads from"},
-                          {"kind": "association", "from": "C1", "to": "C0", "name": "관리한다",
-                           "from_multiplicity": "*", "to_multiplicity": "0..*"}]}
+    # 되돌린다(선 위 배치 (2, 1), 선 옆 배치 (1, 1))
+    data = BACK_BESIDE
     real_labels, real_beside = B._labels, B._beside_layout
     seen = {}
 
@@ -582,11 +588,19 @@ def test_layouts_are_laid_out_again_only_when_they_can_do_better(monkeypatch):
     # 선 위 배치에 걸린 것이 없으면 선 옆 배치로 다시 놓지 않는다
     d = C.render(walled(120, 260, kind="association", name="has", from_multiplicity="1"))
     assert calls == [(True, True)] and d.layout.relations[0].labels[0].segment == 0
-    # 걸린 것이 있으면 선 옆 배치로도 놓는다. 선 옆 배치에 좁은 조건이라면 옮기지 않았을 이름이 없으면(이름이 상자에 막혀 두 조건
-    # 모두 옮기지 못한다) 좁은 조건으로 다시 놓지 않는다
+    # 걸린 것이 있어도 선 위에 얹은 이름도 넓혀서 옮긴 이름도 없으면(이름이 상자에 막혀 선 옆 가운데 후보에 있다) 선 옆 배치가 이
+    # 배치와 같으니 다시 놓지 않는다
     calls.clear()
-    C.render(walled(95, 285, kind="association", name="has"))
+    d = C.render(walled(95, 285, kind="association", name="has"))
+    assert calls == [(True, True)] and d.layout.relations[0].labels[0].segment is None
+    # 선 위에 얹은 이름이 있으면 선 옆 배치로도 놓는다. 선 옆 배치에 넓혀서 옮긴 이름이 없으면 좁은 조건으로 다시 놓지 않는다
+    calls.clear()
+    C.render(BACK_BESIDE)
     assert calls == [(True, True), (False, True)]
+    # 선 위에 얹은 이름이 없어도 넓혀서 옮긴 이름이 있으면 선 옆 배치를 넓힌 조건·좁은 조건으로 놓는다
+    calls.clear()
+    C.render(STACKED)
+    assert calls == [(True, True), (False, True), (False, False)]
 
 
 def test_label_faults_count_each_element_each_relation_line_and_each_label():
@@ -634,6 +648,12 @@ def test_name_too_wide_for_the_longest_segment_has_no_middle_on_the_line():
     spots = B._Spots(list(zip(points, points[1:])), ["r", "r"], [0, 1])
     assert spots.pick_on_line(lines, points, B.Obstacles(()), "r", slide=False) is None
     assert spots.pick_on_line(lines, points, B.Obstacles(()), "r") == ((150, 50), 1, True)
+    # 글자 상자는 들어도 LABEL_CLEAR만큼 넓힌 것이 들지 않으면(구간이 글자보다 4px 길다) 선 위 가운데 자리가 없다 — 흰 바탕
+    # (BG_MARGIN)이 꺾인 곳에 닿는다
+    width = B.lines_box(0, 0, ("abc",))[2] * 2
+    snug = ((0, 0), (width + 4, 0), (width + 4, 10))
+    spots = B._Spots(list(zip(snug, snug[1:])), ["r", "r"], [0, 1])
+    assert spots.pick_on_line(("abc",), snug, B.Obstacles(()), "r", slide=False) is None
 
 
 def test_on_spots_walk_out_from_the_middle_and_stay_on_their_segment():
