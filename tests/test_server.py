@@ -152,6 +152,17 @@ def test_instructions_and_every_tool_description_fit_what_claude_code_loads_up_f
         assert length(tool.description) <= guide.MAX_DESCRIPTION, (name, length(tool.description))
 
 
+CHECKED_ARG_LENGTH = 9000  # Claude Code가 도구 검색을 켜든 끄든 자르지 않는 것을 확인한 인자 설명 길이(실험용 MCP 서버로 잼)
+
+
+def test_every_argument_description_stays_within_the_length_checked_not_to_be_cut():
+    # 인자 설명이 이보다 길어지면 Claude Code가 자르지 않는지 다시 확인하고 이 값을 고친다
+    _, tools, _ = run(server.mcp)
+    for name, tool in tools.items():
+        for key, prop in tool.input_schema["properties"].items():
+            assert length(prop.get("description", "")) <= CHECKED_ARG_LENGTH, (name, key)
+
+
 def test_every_tool_reads_its_input_from_its_argument_descriptions():
     # 도구 설명은 소개 바로 아래 문단에서 인자 설명을 가리키고 결과 절로 이어 간다. 그림 입력 인자 설명은 인자 이름으로 시작하는 첫
     # 줄부터 옮긴 글이고, file_name·out_dir·scale은 모든 도구가 같은 글이다
@@ -215,7 +226,8 @@ def test_description_names_the_failure_kinds_of_each_tool_in_check_order():
     assert {"상자끼리 겹치거나 붙음", "선이 끝 상자 변에 붙어 감", "선 끝 모양이 그 선의 다른 끝 상자 변에 붙음",
             "선 끝 모양이 그 끝의 상자 안으로 들어감"} <= set(class_names)
     assert not any("요소" in n or "테두리" in n for n in class_names)
-    assert not any(n in server.CLASS_TOOL for n in guide.kind_names(boxcheck.NESTED_KINDS, boxdiagram.BOX_WORDS))
+    class_all = "\n".join([server.CLASS_TOOL, *server.CLASS_ARGS.values()])  # "없다"는 인자 설명까지 함께 본다
+    assert not any(n in class_all for n in guide.kind_names(boxcheck.NESTED_KINDS, boxdiagram.BOX_WORDS))
     assert ", ".join(guide.KIND_NAMES.values()) + "." in packagediagram.TOOL
 
 
@@ -311,7 +323,7 @@ def test_tools_with_trunk_relations():
 
 @pytest.mark.parametrize("name", TRUNK_TOOLS)
 def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
-    # 도구 설명에 관계 필드가 그대로 들어가는 것은 test_each_tool_carries_its_flow_and_tips_…가 본다
+    # relations 인자 설명에 관계 필드가 그대로 들어가는 것은 test_each_tool_carries_its_flow_and_tips_…가 본다
     spec = PLACED_TOOLS[name][2]
     trunks = [t for t in spec.relations.values() if t.trunk]
     assert trunks

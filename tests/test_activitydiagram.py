@@ -130,7 +130,7 @@ def test_tool_description_uses_the_shared_pieces_and_names_only_its_failure_kind
     assert guide.NEW_INPUT in A.ARGS["elements"]
     whole = "\n".join([A.TOOL, *A.ARGS.values()])  # "없다"는 인자 설명까지 함께 본다 — 입력 글은 인자 설명에 있다
     assert guide.NESTING not in whole and guide.relation_fields(A.SPEC) not in whole
-    assert not any(n in A.TOOL for n in guide.kind_names(K.NESTED_KINDS))
+    assert not any(n in whole for n in guide.kind_names(K.NESTED_KINDS))
     for kind in A.SHAPES:
         assert f'"{kind}"' in A.ARGS["elements"]
     assert '"flow". 관계 종류가 하나뿐이라 빼도 된다' in A.ARGS["relations"]

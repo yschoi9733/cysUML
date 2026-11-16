@@ -424,7 +424,7 @@ def test_diamond_leaving_a_component_icon_straight_to_the_left_passes_between_it
 
 @pytest.mark.parametrize("more, x", [({}, 53), ({"stereotype": "component"}, 65)])
 def test_line_to_a_component_icon_is_straight_when_aligned_to_the_box_without_its_parts(more, x):
-    # 도구 설명대로 선이 향하는 점(부품 네모를 뺀 상자 가운데 — 자리 가운데보다 4px 오른쪽, 반 픽셀이면 내림)에 A의 가운데를 맞춘다.
+    # elements 인자 설명대로 선이 향하는 점(부품 네모를 뺀 상자 가운데 — 자리 가운데보다 4px 오른쪽, 반 픽셀이면 내림)에 A의 가운데를 맞춘다.
     # 상자 폭: 90(가운데 53), «component»가 붙으면 115(자리 가운데 61.5 + 4 = 65.5 → 65)
     d = draw([el("component_icon", "C", 0, 0, **more), el("class", "A", x - 45, -150)], [rel("dependency", "A", "C")])
     (line,) = d.layout.relations
@@ -434,7 +434,7 @@ def test_line_to_a_component_icon_is_straight_when_aligned_to_the_box_without_it
 
 @pytest.mark.parametrize("source, target, via", [("A", "C", [[-40, 24]]), ("C", "A", [[-40, 24], [-90, -76]])])
 def test_slanted_line_on_the_left_passes_with_the_bend_next_to_the_component_at_the_aim_height(source, target, via):
-    # 도구 설명의 요령: 컴포넌트 쪽 끝에 붙은 꺾는 점(들어오는 선은 마지막, 나가는 선은 첫 꺾는 점)을 선이 향하는 점의 높이(24)에
+    # elements 인자 설명의 요령: 컴포넌트 쪽 끝에 붙은 꺾는 점(들어오는 선은 마지막, 나가는 선은 첫 꺾는 점)을 선이 향하는 점의 높이(24)에
     # 두면 컴포넌트에 닿는 구간이 가로가 되어 부품 네모 사이로 지난다
     d = draw([el("component_icon", "C", 0, 0), el("class", "A", -200, -100)], [rel("dependency", source, target, via=via)])
     assert K.check(d).passed, K.check(d).summary()
@@ -552,7 +552,7 @@ def test_dependency_bent_beside_its_own_arrowhead(end, passed):
 @pytest.mark.parametrize("side", [1, -1])
 @pytest.mark.parametrize("beta", [0, 30, 50])
 def test_bend_at_the_advised_distance_clears_its_own_arrowhead(beta, side):
-    # 도구 설명이 권하는 거리(ARROW_BEND)에 꺾는 점을 두면, 꺾은 앞 구간(길이 20)이 직각에서 화살촉 쪽으로 β만큼 더 기울어도(꺾는
+    # relations 인자 설명이 권하는 거리(ARROW_BEND)에 꺾는 점을 두면, 꺾은 앞 구간(길이 20)이 직각에서 화살촉 쪽으로 β만큼 더 기울어도(꺾는
     # 점을 요소 가운데 줄에서 비켜 둔 꼴) 화살촉 갈래 끝에서 OVERLAP_GAP 넘게 떨어진다. 아래(side 1)·위(−1)에서 와도 같다
     corner = (-K.ARROW_BEND, 24)
     b = math.radians(beta)

@@ -252,7 +252,7 @@ class UseCaseRules(Rules):
             "유즈케이스끼리 잇는 연관은 입력 오류다(서로 다른 시스템 경계이거나 한쪽만 경계 안인 유즈케이스끼리는 받는다).",
             "  - 규칙: 일반화는 액터끼리, 유즈케이스끼리 긋는다. 종류가 다른 일반화, 고리를 이루는 일반화(A의 부모가 B이고 B의 부모가 "
             "다시 A인 것 — 여러 단계도)는 입력 오류다.",
-            '  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — elements '
+            f'  - 규칙: stereotype이 "include"·"extend"인 관계(«include»·«extend»)는 유즈케이스 사이의 dependency여야 한다 — {spec.list_field} '
             '인자 설명의 "공용 입력(열쇠·이름)" 절에 적은 "어느 관계에든 단다"와 달리 다른 관계에 달면 입력 오류다. 다른 스테레오타입은 어느 관계에든 단다. 자기 자신을 '
             "포함하거나 확장하는 관계와 고리를 이루는 «include»끼리·«extend»끼리(A가 B를, B가 다시 A를 포함하거나 확장하는 것 — 여러 단계도)도 입력 오류다(«include»와 "
             "«extend»가 섞인 고리는 받는다)."])

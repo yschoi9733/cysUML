@@ -36,7 +36,7 @@ DASH = (5, 4)
 TRIANGLE = (18, 9)  # 상속·실체화 빈 삼각형의 길이와 반폭
 DIAMOND = 18        # 집합·합성 마름모 길이(그림판 기본값)
 ARROW = 10          # 열린 화살촉 길이(그림판 기본값)
-# 화살촉 쪽 끝 구간을 꺾을 때 꺾는 점을 끝 요소에서 뗄 거리(입력 오류·도구 설명·고치는 법에 쓴다). 꺾은 앞 구간이 화살촉 갈래 끝에서
+# 화살촉 쪽 끝 구간을 꺾을 때 꺾는 점을 끝 요소에서 뗄 거리(입력 오류·relations 인자 설명·고치는 법에 쓴다). 꺾은 앞 구간이 화살촉 갈래 끝에서
 # 검사 여유(boxcheck.OVERLAP_GAP 2) 넘게 떨어지려면, 앞 구간이 직각에서 화살촉 쪽으로 β만큼 더 기울 때 끝 구간이
 # 10·cos 28° + (2 + 10·sin 28°·sin β) / cos β보다 길어야 한다(직각 10.83, β 30° 13.85, 50° 17.54 — 실측과 맞음). 꺾는 점을 요소
 # 가운데 줄에서 비켜 두면 끝 구간이 기울어 β가 생기므로 β 50°까지 덮게 잡는다
@@ -44,7 +44,7 @@ ARROW_BEND = 20
 # 같은 부모로 공유 줄기 관계 두 종류(split_kinds)가 오면 종류마다 선이 향하는 점을 이만큼 떨어뜨려 가로로 늘어놓는다
 # (가운데에서 양쪽으로 반씩). 삼각형 폭 18보다 넉넉해 변에 나란히 놓인 두 삼각형 사이가 12px 남는다
 AIM_SPLIT = 30
-AIM_EDGE = AIM_SPLIT + 2 * TRIANGLE[1]  # 두 종류의 점을 정하는 가장 좁은 아래·위 변(가운데를 향하는 모양에서). 도구 설명이 알린다
+AIM_EDGE = AIM_SPLIT + 2 * TRIANGLE[1]  # 두 종류의 점을 정하는 가장 좁은 아래·위 변(가운데를 향하는 모양에서). relations 인자 설명이 알린다
 # 마지막 꺾는 점(꺾는 점이 없으면 출발 요소의 점)이 종류마다 향하는 점 바로 아래·위인지 볼 때의 여유. 몇 px 셈 실수는 그 점을 쓰려던
 # 선으로 받되, 가운데(그 점에서 AIM_SPLIT/2)를 뜻한 선과 헷갈리지 않게 그 한가운데(AIM_SPLIT/4)보다 작게 둔다
 AIM_EPS = 5
@@ -218,7 +218,7 @@ class RelationType:
     """관계 종류. start·end는 from·to 쪽 끝에 늘 그리는 모양이다. navigable이면 방향(navigable)을 받아 그 쪽에 화살촉을 그리고,
     multiplicity면 다중도를 받는다. trunk면 자식 여럿의 선이 한 줄기로 모여 한 끝 모양을 함께 쓰는 것(공유 줄기)을 받는다.
     reflexive가 아니면 자기 자신으로 가는 관계를 꺾는 점이 있어도 받지 않는다(상속 등). label(상속 등)과 role(from 쪽이 무엇인지
-    — 상속은 자식)은 오류 글과 도구 설명(guide.relation_fields)에 쓴다."""
+    — 상속은 자식)은 오류 글과 relations 인자 설명(guide.relation_fields)에 쓴다."""
 
     label: str
     dash: Optional[tuple[float, float]] = None
@@ -249,7 +249,7 @@ class Rules:
         return []
 
     def guide(self, spec: Spec) -> str:
-        """도구 설명의 관계 항목(guide.relation_fields)에 붙이는 규칙 글. 줄마다 들여 쓴 "  - " 항목이다. 없으면 빈 글."""
+        """relations 인자 설명의 관계 항목(guide.relation_fields)에 붙이는 규칙 글. 줄마다 들여 쓴 "  - " 항목이다. 없으면 빈 글."""
         return ""
 
     def nests(self, outer: str, inner: str) -> bool:
@@ -1242,7 +1242,7 @@ def trunk_kinds(spec: Spec) -> tuple[str, ...]:
 
 def split_kinds(spec: Spec) -> tuple[str, ...]:
     """종류마다 향하는 점을 나눌 공유 줄기 관계 종류 둘(도구가 받는 차례 — 이 차례로 왼쪽부터 점을 둔다). 공유 줄기 종류를 둘 받고
-    둘 다 끝 모양이 삼각형인 도구만 나누고, 그 밖이면 빈 튜플이다 — 셋 이상의 요령은 도구 설명에 쓰지 않았고, 좁은 모양 판정
+    둘 다 끝 모양이 삼각형인 도구만 나누고, 그 밖이면 빈 튜플이다 — 셋 이상의 요령은 relations 인자 설명에 쓰지 않았고, 좁은 모양 판정
     (AIM_EDGE·_flat)은 삼각형 크기로 셈한다."""
     kinds = trunk_kinds(spec)
     return kinds if len(kinds) == 2 and all(spec.relations[k].end is TRIANGLE_HEAD for k in kinds) else ()

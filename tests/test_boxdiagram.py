@@ -859,7 +859,7 @@ def test_a_stem_of_bends_under_the_point_is_set_upright_without_a_zero_length_pi
 
 
 def test_three_trunk_kinds_are_not_split_and_the_description_says_nothing_of_points():
-    # 세 종류를 받는 도구의 요령은 도구 설명에 없으니 엔진도 나누지 않고(이 PR 전처럼 가운데), 설명을 만들다 멈추지도 않는다 — 부모로
+    # 세 종류를 받는 도구의 요령은 relations 인자 설명에 없으니 엔진도 나누지 않고(이 PR 전처럼 가운데), 설명을 만들다 멈추지도 않는다 — 부모로
     # 셋이 다 오든 둘만 오든 같다
     spec = B.Spec(SHAPES, {**RELATIONS, "extends": B.RelationType("확장", end=B.TRIANGLE_HEAD, trunk=True, role="자식")})
     boxes = [el("class", "P", 200, 0, width=300), el("class", "A", 0, 200), el("class", "B", 200, 200), el("class", "C", 400, 200)]
@@ -922,7 +922,7 @@ def test_one_trunk_kind_or_other_kinds_keep_the_middle():
     assert d.layout.by_key["G"].aims == () and d.layout.by_key["Q"].aims == ()
 
 
-@pytest.mark.parametrize("width, split", [(B.AIM_EDGE, True), (B.AIM_EDGE - 1, False)])  # 도구 설명이 알리는 가장 좁은 변
+@pytest.mark.parametrize("width, split", [(B.AIM_EDGE, True), (B.AIM_EDGE - 1, False)])  # relations 인자 설명이 알리는 가장 좁은 변
 def test_parent_too_narrow_for_two_triangles_side_by_side_keeps_the_middle(width, split):
     p = two_kinds_to(el("class", "P", 200, 0, width=width)).layout.by_key["P"]
     assert p.width == width and bool(p.aims) == split
