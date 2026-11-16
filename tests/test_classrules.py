@@ -462,7 +462,7 @@ def test_tool_descriptions_state_the_rules_of_the_kinds_the_tool_takes():
     # 자기 자신 금지는 관계 종류(reflexive)에서 꺾는 점 줄에 적는다
     assert ("자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 한다(상속·실체화는 꺾는 점이 있어도 자기 자신으로 갈 수 "
             "없다).") in class_rel
-    # 유즈케이스도의 일반화는 클래스도 관계가 아니라 이 규칙을 적지 않는다(제 규칙은 test_usecaserules)
+    # 유즈케이스도의 일반화는 클래스도 관계가 아니라 이 규칙을 적지 않는다(유즈케이스도 규칙은 test_usecaserules)
     whole = "\n".join([usecasediagram.TOOL, *usecasediagram.ARGS.values()])  # "없다"는 도구 설명과 인자 설명을 함께 본다
     assert "상속" not in whole and "실체화" not in whole
 

@@ -30,11 +30,11 @@ from .report import Report as _Report
 BOX_CLEARANCE = 4  # 요소를 사방으로 이만큼 넓힌 곳에 선이나 다른 요소가 닿으면 지나간·겹친 것으로 본다
 TEXT_CLEARANCE = LABEL_CLEAR  # 선 글자 상자를 넓히는 폭. 글자 자리를 고를 때와 같아야 도구가 빈 자리로 고른 글자가 합격한다
 OVERLAP_GAP = 2  # 나란한 두 선의 가운데가 이만큼 안이면 한 선으로 보인다
-OVERLAP_MIN = 4  # 그렇게 붙어 가는 길이가 이보다 길면 포개진 것으로 본다(선이 제 끝 요소 테두리 BOX_CLEARANCE 안을 가는 길이도)
+OVERLAP_MIN = 4  # 그렇게 붙어 가는 길이가 이보다 길면 포개진 것으로 본다(선이 끝 요소 테두리 BOX_CLEARANCE 안을 가는 길이도)
 PARALLEL_SIN = 0.05  # 두 선분 사이 각의 사인이 이 안이면(약 3°) 나란하다고 본다
 LINE_EPS = 1e-6  # 점이 선에서 이 안이면 선 위로 본다(엇갈림이 아니라 맞닿음)
-HEAD_HIDE = 2  # 선 끝 모양이 제 끝 요소 안으로 이만큼 넘게 들어가면 가려진(들어간) 것으로 본다(살짝 들어가는 건 테두리 밑으로 일부러 넣은 것)
-OWN_MARGIN = 0.5  # 선이 제 삼각형·마름모는 그 안쪽으로 이만큼 넘게 들어가야 지난 것으로 본다(테두리에 닿거나 따라가면 이어진 것)
+HEAD_HIDE = 2  # 선 끝 모양이 그 끝의 요소 안으로 이만큼 넘게 들어가면 가려진(들어간) 것으로 본다(살짝 들어가는 건 테두리 밑으로 일부러 넣은 것)
+OWN_MARGIN = 0.5  # 같은 선의 끝에 단 삼각형·마름모는 선이 그 안쪽으로 이만큼 넘게 들어가야 지난 것으로 본다(테두리에 닿거나 따라가면 이어진 것)
 
 ROLES = {"name": "이름", "from_multiplicity": "from 쪽 다중도", "to_multiplicity": "to 쪽 다중도"}
 KINDS = (  # 불합격 종류(이 차례로 낸다)
@@ -43,9 +43,9 @@ KINDS = (  # 불합격 종류(이 차례로 낸다)
     "line_through_box",  # 선이 양 끝도 아니고 끝을 품지도 않은 요소를 지나거나 붙어 지나간다
     "line_through_name",  # 선이 끝 요소의 몸통 밖 이름 칸이나, 끝을 품은 요소의 이름 칸을 지나거나 붙어 지나간다
     "line_along_container",  # 선이 끝을 품은 요소의 테두리 선을 따라간다
-    "line_along_own_box",  # 선이 제 끝 요소에 붙어 간다(그 요소에 닿는 끝 구간은 빼고)
-    "head_near_own_box",  # 반대쪽 끝의 선 끝 모양이 제 끝 요소 테두리에 붙는다
-    "head_under_own_box",  # 선 끝 모양이 제 끝 요소 안으로 들어간다(선 뒤에 그린 요소면 가려진다)
+    "line_along_own_box",  # 선이 끝 요소 테두리에 붙어 간다(그 요소에 닿는 끝 구간은 빼고)
+    "head_near_own_box",  # 선 끝 모양이 그 선의 다른 끝 요소 테두리에 붙는다
+    "head_under_own_box",  # 선 끝 모양이 그 끝의 요소 안으로 들어간다(선 뒤에 그린 요소면 가려진다)
     "line_overlap",  # 선끼리 포개지거나 한 선이 왔던 길을 되짚는다
     "line_through_head",  # 선이 선 끝 모양에 닿는다
     "head_overlap",  # 선 끝 모양끼리 겹친다
@@ -208,17 +208,17 @@ class _Relation:
         return f"선 {self.name}"
 
     def _ends_at(self, box: str) -> list[int]:
-        """제 끝 요소 box에 닿는 끝(points의 처음 0, 마지막 -1)."""
+        """끝 요소 box에 닿는 끝(points의 처음 0, 마지막 -1)."""
         rel = self.placed.relation
         return [i for i, name in ((0, rel.source), (-1, rel.target)) if name == box]
 
     def heads_at(self, box: str) -> list[_Head]:
-        """제 끝 요소 box에 닿는 끝에 얹힌 선 끝 모양."""
+        """끝 요소 box에 닿는 끝에 얹힌 선 끝 모양."""
         tips = [self.points[i] for i in self._ends_at(box)]
         return [h for h in self.heads if any(math.dist(h.tip, t) <= LINE_EPS for t in tips)]
 
     def away_from(self, box: str) -> tuple[tuple[Segment, ...], tuple[Segment, ...]]:
-        """제 끝 요소 box에 붙어 가는지 볼 (선 구간, 선 끝 모양 테두리). 그 요소에 닿는 끝 구간과 그 끝에 얹힌 선 끝 모양은 뺀다 —
+        """끝 요소 box에 붙어 가는지 볼 (선 구간, 선 끝 모양 테두리). 그 요소에 닿는 끝 구간과 그 끝에 얹힌 선 끝 모양은 뺀다 —
         끝 구간은 요소 가운데를 향해 나가므로, 넓은 요소 테두리를 비스듬히 나가는 평범한 선도 처음 몇 px는 테두리에 붙어 있다."""
         drop = {0 if i == 0 else len(self.path) - 1 for i in self._ends_at(box)}
         attached = self.heads_at(box)
@@ -226,7 +226,7 @@ class _Relation:
                 tuple(e for h in self.heads if h not in attached for e in h.edges))
 
     def over_own(self, head: _Head) -> list[Segment]:
-        """이 선이 제 선 끝 모양 head를 지나는 구간들. 그 모양이 얹힌 끝 구간은 빼고, 삼각형·마름모는 안쪽으로 OWN_MARGIN 넘게
+        """이 선이 끝에 단 모양 head를 지나는 구간들. 그 모양이 얹힌 끝 구간은 빼고, 삼각형·마름모는 안쪽으로 OWN_MARGIN 넘게
         들어간 구간만 친다 — 테두리에 닿거나 따라가는 것(끝 구간이 모양 길이와 같은 직교 꺾음, 밑변으로 올라와 붙는 꺾음)은 선이
         모양에 이어진 것이다. 열린 모양(화살촉·소켓 반원)은 끝 구간에만 붙어 있어, 다른 구간이 다른 관계의 선처럼 OVERLAP_GAP 안으로
         다가오면 모양과 선이 한데 붙어 보인다(끝 구간이 화살촉 길이와 같은 직각 꺾음은 갈래 끝 옆 1.2px을 지난다)."""
@@ -449,8 +449,9 @@ def _length(parts: Iterable[Segment]) -> float:
 
 
 def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box], w: Words) -> Iterator[Finding]:
-    """선이 양 끝도 아니고 끝을 품지도 않은 요소(몸통 밖 이름 칸까지)를 지나거나, 제 끝 요소에 붙어 간다(테두리를 따라가면 두
-    겹으로 보인다). 같은 요소를 같은 자리에서 지나는 선들(공유 줄기)은 한 항목으로 묶는다. 끝을 품은 요소는 따로 본다."""
+    """선이 양 끝도 아니고 끝을 품지도 않은 요소(몸통 밖 이름 칸까지)를 지나거나, 끝 요소 테두리에 붙어 간다(따라가면 테두리가 두
+    겹으로 보인다). 선 끝 모양이 그 선의 다른 끝 요소 테두리에 붙는 것도 여기서 본다. 같은 요소를 같은 자리에서 지나는 선들(공유
+    줄기)은 한 항목으로 묶는다. 끝을 품은 요소는 따로 본다."""
     found = _Places()
     for b in boxes:
         wide = b.border.grown(BOX_CLEARANCE)
@@ -465,7 +466,7 @@ def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box], w: Words
                 on_path, on_heads = _clipped(path, wide), _clipped(edges, wide)
                 parts = on_path + on_heads
                 if _length(parts) <= OVERLAP_MIN:
-                    continue  # 제 끝 요소 띠를 잠깐 스치는 꺾음은 테두리를 따라가는 게 아니다
+                    continue  # 끝 요소 띠를 잠깐 스치는 꺾음은 테두리를 따라가는 게 아니다
             else:
                 on_path, parts = [], _clipped(r.segments, wide) + [c for n in names for c in _parts(r.segments, n)]
             if parts:
@@ -551,7 +552,7 @@ def _lines_along_containers(relations: list[_Relation], boxes: list[_Box], w: Wo
 
 
 def _heads_under_own_box(relations: list[_Relation], boxes: list[_Box], w: Words) -> Iterator[Finding]:
-    """선 끝 모양이 제 끝 요소 안으로 HEAD_HIDE 넘게 들어간다. 선 뒤에 그린 요소는 그 모양을 가리고, 선 앞에 그린 요소(바깥 요소)는
+    """선 끝 모양이 그 끝의 요소 안으로 HEAD_HIDE 넘게 들어간다. 선 뒤에 그린 요소는 그 모양을 가리고, 선 앞에 그린 요소(바깥 요소)는
     안의 것과 겹쳐 보인다. 선이 넓은 테두리를 아주 비스듬히 나가면 마름모·삼각형 꼭짓점이나 화살촉 갈래가 요소 안으로 들어간다.
     모양의 점을 모두 본다 — 선 끝에 닿은 점(화살촉 끝)은 테두리 위라 HEAD_HIDE 안쪽에 들지 않고, 점이 여럿인 열린 모양(소켓
     반원 등)은 가운데 점이 들어갈 수 있다. 같은 모양(공유 줄기의 삼각형)은 한 항목으로 묶는다."""
@@ -786,7 +787,7 @@ def _label_overlaps(labels: list[_Label], w: Words) -> Iterator[Finding]:
 
 
 def _crossings(relations: list[_Relation], pairs: Pairs, w: Words) -> Iterator[Finding]:
-    """선끼리(한 선이 제 선을 건너가는 것도) 엇갈린 곳. 여러 선이 한 자리에서 엇갈리면(공유 줄기를 건너는 선 등) 한 곳으로 센다."""
+    """선끼리(한 선이 자기 자신을 건너가는 것도) 엇갈린 곳. 여러 선이 한 자리에서 엇갈리면(공유 줄기를 건너는 선 등) 한 곳으로 센다."""
     found = _Places()
     for r, o in [(r, r) for r in relations] + pairs:
         for x, y in crossings(r.points, None if o is r else o.points, LINE_EPS):

@@ -135,7 +135,7 @@ def test_line_through_an_interface_circle_fails():
 
 
 def test_line_through_the_name_of_an_interface_fails():
-    # 상관없는 선이 이름을 지나면 그 요소를 지나간 것, 원으로 오는 선이 제 이름을 지나면 이름 칸을 지난 것
+    # 상관없는 선이 이름을 지나면 그 요소를 지나간 것, 원으로 오는 선이 그 원의 이름을 지나면 이름 칸을 지난 것
     other = report([el("lollipop", "Api", 140, 0), el("class", "A", 0, 10), el("class", "B", 300, 10)],
                    [rel("association", "A", "B")])
     assert kinds(other) == ["line_through_box"] and other.failures[0].elements == ("A->B", "Api")
