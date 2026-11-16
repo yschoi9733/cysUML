@@ -441,6 +441,27 @@ def test_name_moves_when_that_trades_a_box_overlap_for_one_label_overlap(monkeyp
     assert kinds_of(C.render(data)) == ["text_on_box"]
 
 
+def test_name_on_its_line_stays_in_the_middle_when_moving_it_does_not_help_its_multiplicities(monkeypatch):
+    # 짧은 연관(C1→C4, 52px)의 선 위 가운데 자리 (225, 324)는 옆 실체화 선(C1→C2)과 NAME_GAP 안이라 빈 자리가 아니어서, 이름을
+    # 선 위에서 한 칸(NAME_STEP) 옮기면 빈 자리다. 그래도 다중도 "0..*"가 빈 자리를 못 찾아 걸린 것이 가운데에 둔 것과 같으니,
+    # 빈 자리가 아닌 선 위 가운데 자리에 둔다(선 위에 얹은 이름의 다중도 견주기)
+    data = {"classes": [{"name": "C1", "left": 175, "top": 350}, {"name": "C2", "left": 80, "top": 210},
+                        {"name": "C4", "left": 185, "top": 250}],
+            "relations": [{"kind": "association", "from": "C1", "to": "C4", "name": "주문한다", "from_multiplicity": "0..1",
+                           "to_multiplicity": "0..*"},
+                          {"kind": "realization", "from": "C1", "to": "C2", "name": "places"}]}
+    d = C.render(data)
+    name = d.layout.relations[0].labels[0]
+    assert (name.x, name.y, name.segment) == (225, 324, 0)
+    near = G.grow(B.lines_box(225, 324, name.lines), C.NAME_GAP)
+    assert G.hits(*d.layout.relations[1].points, near)
+    monkeypatch.setattr(B._Spots, "misses", lambda self, start: (0, 0))  # 견주지 않으면 옮긴 자리를 쓴다
+    moved = C.render(data)
+    slid = moved.layout.relations[0].labels[0]
+    assert slid.segment == 0 and math.dist((slid.x, slid.y), (225, 324)) == pytest.approx(B.NAME_STEP)
+    assert kinds_of(moved) == kinds_of(d) == ["line_through_text", "text_overlap"]
+
+
 def test_name_with_no_free_spot_stays_in_the_middle_even_beside_a_spot_that_only_touches_lines(monkeypatch):
     # 가운데는 Up·Down이 막고, 그 옆 빈 곳(x 90~120, 260~300)은 세로선 U0→D0(x 105)·U1→D1(x 280)이 지난다. 선 위에는 빈 자리가
     # 없어 이름을 선 옆에 놓는다. 상자에는 안 걸리고 선에만 닿는 자리는 있지만 빈 자리가 아니라 옮기지 않는다 — 그런 자리는 선 여러
