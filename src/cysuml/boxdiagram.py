@@ -112,7 +112,7 @@ class NameZone:
 @dataclass(frozen=True)
 class Element:
     """요소 하나. key는 관계·중첩이 가리키는 열쇠, name은 이름 줄(이름이 없는 모양은 빈 튜플), parent는 품은 요소의 열쇠,
-    data는 모양이 읽은 그 모양의 필드 값이다. min_width·min_height는 자리(모양 밖 이름까지)의 최소 크기다."""
+    data는 모양(Shape.read)이 읽은 필드 값이다. min_width·min_height는 자리(모양 밖 이름까지)의 최소 크기다."""
 
     key: str
     kind: str
@@ -143,7 +143,7 @@ class Shape:
     default_width: float = 0      # width를 주지 않았을 때의 최소 폭
 
     def read(self, r: Reader, o: dict, path: str, kind: Optional[str]) -> Any:
-        """그 모양의 필드를 읽는다. 문제는 r.fail로 알린다. kind가 None이면 입력의 kind가 틀렸다(문제만 모으고 값은 쓰지 않는다)."""
+        """이 모양의 필드를 읽는다. 문제는 r.fail로 알린다. kind가 None이면 입력의 kind가 틀렸다(문제만 모으고 값은 쓰지 않는다)."""
         return None
 
     def keyword(self, e: Element) -> Optional[str]:
@@ -857,8 +857,8 @@ def name_spots(points: tuple[Point, ...], lines: Union[str, tuple[str, ...]]) ->
 def slide_spots(points: tuple[Point, ...], lines: tuple[str, ...]) -> Iterator[tuple[T.Box, list[list[Point]]]]:
     """이름 글자를 선을 따라 옮길 때(옮기는 조건은 _Spots.pick_name) 더 볼 자리를 구간마다 (띠, 묶음들)로 낸다. 묶음은 가운데에서
     가까운 것부터다 — 가장 긴 구간은 가운데에서 양쪽으로 NAME_STEP씩 옮긴 자리마다 선 양옆 둘(진행 방향 앞쪽·뒤쪽 차례로 네 자리가
-    한 묶음), 그다음 구간도 길이 차례로 그 가운데(두 자리)부터 같게 낸다. 글자는 그 자리를 낸 구간 옆을 벗어나지 않는다 — 글자 상자를 구간
-    방향으로 비춘 폭이 구간 안에 드는 자리만 낸다. 띠는 그 구간 묶음들의 흰 바탕을 다 덮는 상자다."""
+    한 묶음), 그다음 구간도 길이 차례로 그 가운데(두 자리)부터 같게 낸다. 구간마다 낸 자리의 글자는 그 구간 옆을 벗어나지 않는다 — 글자
+    상자를 구간 방향으로 비춘 폭이 구간 안에 드는 자리만 낸다. 띠는 그 구간 묶음들의 흰 바탕을 다 덮는 상자다."""
     box = lines_box(0, 0, lines)
     # 글자 가운데는 선에서 (원점에서 가장 먼 모서리까지) + NAME_GAP 안이고, 흰 바탕은 그 가운데에서 다시 그만큼 + LABEL_CLEAR 안이다
     far = max(math.hypot(cx, cy) for cx in (box[0], box[2]) for cy in (box[1], box[3]))
