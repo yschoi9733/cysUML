@@ -266,9 +266,10 @@ def test_association_name_sits_on_the_middle_of_its_line_over_one_white_patch():
 
 
 def test_name_on_a_short_line_goes_beside_it_so_the_line_still_shows():
-    # A(0, 0)→B(150, 0) 의존(점선 (90, 24)–(150, 24), 60px)에 "creates"를 얹으면 흰 바탕 양쪽에 선이 2px도 안 남아 점선인지 알 수
-    # 없다. 흰 바탕과 선 끝(화살촉이 있으면 화살촉) 사이에 선이 LINE_SHOW(점선 무늬 한 주기)만큼 보이지 않는 자리는 선 위 자리로
-    # 치지 않아 선 옆에 둔다. 선이 길면(B가 300) 선 위에 얹고 흰 바탕 앞뒤로 선이 LINE_SHOW 넘게 보인다
+    # A(0, 0)→B(150, 0) 의존(점선 (90, 24)–(150, 24), 60px)에 "creates"를 얹으면 흰 바탕 앞 A 쪽에 선이 2px도 안 남고 B 쪽도
+    # 화살촉 앞에 3px쯤뿐이라 점선인지 알 수 없다. 흰 바탕과 선 끝(화살촉이 있으면 화살촉) 사이에 선이 LINE_SHOW(점선 무늬 한
+    # 주기)만큼 보이지 않는 자리는 선 위 자리로 치지 않아 선 옆에 둔다. 선이 길면(B가 300) 선 위에 얹고 흰 바탕 앞뒤로 선이
+    # LINE_SHOW 넘게 보인다
     short = {"classes": [{"name": "A", "left": 0, "top": 0}, {"name": "B", "left": 150, "top": 0}],
              "relations": [{"kind": "dependency", "from": "A", "to": "B", "name": "creates"}]}
     d = C.render(short)
