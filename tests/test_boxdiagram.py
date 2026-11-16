@@ -1,4 +1,4 @@
-"""공용 엔진(boxdiagram·boxcheck)을 시험용 모양·관계 종류·도구로 본다 — 뒤 그림 모듈이 엔진을 고치지 않고 제 모양을 더할 수
+"""공용 엔진(boxdiagram·boxcheck)을 시험용 모양·관계 종류·도구로 본다 — 뒤 그림 모듈이 엔진을 고치지 않고 그 그림의 모양을 더할 수
 있는지, 타원·볼록 다각형 테두리, 모양 밖 이름, 열쇠, 바깥 요소가 이 틀에서 도는지."""
 import math
 
@@ -279,7 +279,7 @@ def test_outside_name_side_passes_and_the_returned_place_draws_the_same(side, sh
 
 
 def test_lines_end_on_the_shape_and_may_not_pass_the_outside_name():
-    # 선이 Payment 모양(원) 아래쪽에서 올라와 이름을 지나 원에 닿는다 — 제 끝 요소의 이름이라도 불합격
+    # 선이 Payment 모양(원) 아래쪽에서 올라와 이름을 지나 원에 닿는다 — 끝 요소의 이름이라도 불합격
     r = report([dot("Payment", 0, 0), el("class", "Shop", -33, 150)], [rel("dependency", "Shop", "Payment")])
     (f,) = r.failures
     assert f.kind == "line_through_name" and f.elements == ("Shop->Payment", "Payment")
@@ -415,7 +415,7 @@ def test_large_ellipse_uses_more_sides_to_stay_close():
 
 
 def test_only_elements_in_a_loop_are_told_about_it():
-    # A가 제 자신 안에 있으면 A만 알린다 — A 안의 B는 고리가 아니다
+    # A가 자기 자신 안에 있으면 A만 알린다 — A 안의 B는 고리가 아니다
     with pytest.raises(InputError) as e:
         draw([el("package", "A", 0, 0, **{"in": "A"}), el("package", "B", 20, 44, **{"in": "A"})])
     assert e.value.problems == ("elements[0].in: 자기 자신 안에 둘 수 없다",)
@@ -638,7 +638,7 @@ def test_end_shape_with_a_gap_ends_the_line_before_the_border_and_passes():
 
 
 def test_check_names_an_end_shape_by_its_definition_not_by_its_points():
-    # 세로선 B→C(x −6)가 반원 꼭대기를 지나간다 — 점이 아홉 개인 열린 선이지만 "화살촉"이 아니라 제 이름으로 부른다
+    # 세로선 B→C(x −6)가 반원 꼭대기를 지나간다 — 점이 아홉 개인 열린 선이지만 "화살촉"이 아니라 정의에 적힌 이름(반원)으로 부른다
     r = K.check(socket_drawing(el("class", "B", -51, -150), el("class", "C", -51, 150),
                                relations=[rel("dependency", "B", "C")]))
     assert "line_through_head" in kinds(r)
@@ -892,7 +892,7 @@ def test_lines_of_one_kind_within_the_rounding_share_one_triangle():
 
 
 def test_lines_from_the_side_keep_aiming_at_the_middle_beside_split_lines():
-    # 아래 변으로 두 종류가 제 점을 향해 들어오고, 실체화 하나는 오른쪽 변으로 가로로 들어온다 — 그 선은 가운데 높이 그대로다
+    # 아래 변으로 두 종류가 종류마다 정한 점을 향해 들어오고, 실체화 하나는 오른쪽 변으로 가로로 들어온다 — 그 선은 가운데 높이 그대로다
     half = B.AIM_SPLIT / 2
     d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200), el("class", "Q", 500, 0)],
              [rel("generalization", "A", "P", via=[[45, 120], [245 - half, 120]]),
