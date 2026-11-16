@@ -34,7 +34,7 @@ OVERLAP_MIN = 4  # 그렇게 붙어 가는 길이가 이보다 길면 포개진 
 PARALLEL_SIN = 0.05  # 두 선분 사이 각의 사인이 이 안이면(약 3°) 나란하다고 본다
 LINE_EPS = 1e-6  # 점이 선에서 이 안이면 선 위로 본다(엇갈림이 아니라 맞닿음)
 HEAD_HIDE = 2  # 선 끝 모양이 그 끝의 요소 안으로 이만큼 넘게 들어가면 가려진(들어간) 것으로 본다(살짝 들어가는 건 테두리 밑으로 일부러 넣은 것)
-OWN_MARGIN = 0.5  # 같은 선 끝에 단 삼각형·마름모는 선이 그 안쪽으로 이만큼 넘게 들어가야 지난 것으로 본다(테두리에 닿거나 따라가면 이어진 것)
+OWN_MARGIN = 0.5  # 같은 선의 끝에 단 삼각형·마름모는 선이 그 안쪽으로 이만큼 넘게 들어가야 지난 것으로 본다(테두리에 닿거나 따라가면 이어진 것)
 
 ROLES = {"name": "이름", "from_multiplicity": "from 쪽 다중도", "to_multiplicity": "to 쪽 다중도"}
 KINDS = (  # 불합격 종류(이 차례로 낸다)
@@ -450,7 +450,8 @@ def _length(parts: Iterable[Segment]) -> float:
 
 def _lines_through_boxes(relations: list[_Relation], boxes: list[_Box], w: Words) -> Iterator[Finding]:
     """선이 양 끝도 아니고 끝을 품지도 않은 요소(몸통 밖 이름 칸까지)를 지나거나, 끝 요소 테두리에 붙어 간다(따라가면 테두리가 두
-    겹으로 보인다). 같은 요소를 같은 자리에서 지나는 선들(공유 줄기)은 한 항목으로 묶는다. 끝을 품은 요소는 따로 본다."""
+    겹으로 보인다). 선 끝 모양이 그 선의 다른 끝 요소 테두리에 붙는 것도 여기서 본다. 같은 요소를 같은 자리에서 지나는 선들(공유
+    줄기)은 한 항목으로 묶는다. 끝을 품은 요소는 따로 본다."""
     found = _Places()
     for b in boxes:
         wide = b.border.grown(BOX_CLEARANCE)
