@@ -612,17 +612,28 @@ def test_label_faults_count_an_element_once_and_lines_through_one_place_once():
 
 def test_name_on_a_line_skips_its_segment_and_keeps_the_name_gap_only_from_other_relations():
     # 관계 r1의 구간 0(가로선 y 0)에 얹은 글자는 그 구간을 빼고 본다. 글자 상자 오른쪽 5px에 세로선이 있으면 — LABEL_CLEAR(3px)
-    # 밖이라 걸린 것은 아니지만 — 다른 관계 r2의 선이면 NAME_GAP(8px) 안이라 빈 자리가 아니고, 같은 관계 r1의 다른 구간이면 빈
-    # 자리다
+    # 밖이라 걸린 것은 아니지만 — 다른 관계 r2의 선분이나 선 끝 모양 테두리(구간 번호 없음)면 NAME_GAP(8px) 안이라 빈 자리가 아니고,
+    # 같은 관계 r1의 다른 구간이나 선 끝 모양이면 빈 자리다
     box = B.lines_box(0, 0, ("abc",))
     x = box[2] + 5
-    for owner, free in (("r2", False), ("r1", True)):
-        spots = B._Spots([((-60, 0), (60, 0)), ((x, -30), (x, 30))], ["r1", owner], [0, 1])
+    for owner, path, free in (("r2", 1, False), ("r2", None, False), ("r1", 1, True), ("r1", None, True)):
+        spots = B._Spots([((-60, 0), (60, 0)), ((x, -30), (x, 30))], ["r1", owner], [0, path])
         best = spots._best(("abc",), [(0, 0)], B.Obstacles(()), on=("r1", 0))
-        assert (best.free, best.faults) == (free, 0), owner
+        assert (best.free, best.faults) == (free, 0), (owner, path)
     # 얹은 구간이 아닌 구간에 두면 그 구간이 글자를 지나 걸린다(검사와 같이 LABEL_CLEAR로 센다)
     spots = B._Spots([((-60, 0), (60, 0)), ((x, -30), (x, 30))], ["r1", "r1"], [0, 1])
     assert spots._best(("abc",), [(0, 0)], B.Obstacles(()), on=("r1", 1)).faults == 1
+
+
+def test_name_too_wide_for_the_longest_segment_has_no_middle_on_the_line():
+    # 가장 긴 구간(가로 150px)보다 넓은 이름은 선 위 가운데 자리가 없다 — 넘치면 흰 바탕이 꺾인 곳을 지운다. 선을 따라 다음 구간(세로
+    # 100px — 글자 높이만 들면 된다) 가운데에 얹고, 다중도 견주기의 다시 놓기(slide 아님)에는 선 위 가운데 자리를 내지 않는다
+    lines = ("a_name_wider_than_the_horizontal_segment",)
+    points = ((0, 0), (150, 0), (150, 100))
+    assert B.lines_box(0, 0, lines)[2] > 75
+    spots = B._Spots(list(zip(points, points[1:])), ["r", "r"], [0, 1])
+    assert spots.pick_on_line(lines, points, B.Obstacles(()), "r", slide=False) is None
+    assert spots.pick_on_line(lines, points, B.Obstacles(()), "r") == ((150, 50), 1, True)
 
 
 def test_on_spots_walk_out_from_the_middle_and_stay_on_their_segment():

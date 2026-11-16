@@ -834,7 +834,6 @@ def _segments_by_length(points: tuple[Point, ...]) -> list[int]:
 
 
 def _along(p: Point, q: Point, along: float = 0.0) -> Point:
-    """구간 pq의 가운데에서 p→q 쪽으로 along만큼 간 점."""
     ln = math.dist(p, q)
     return (p[0] + q[0]) / 2 + (q[0] - p[0]) / ln * along, (p[1] + q[1]) / 2 + (q[1] - p[1]) / ln * along
 
@@ -861,23 +860,27 @@ def name_spots(points: tuple[Point, ...], lines: Union[str, tuple[str, ...]]) ->
     return _beside(points[k], points[k + 1], lines_box(0, 0, lines))
 
 
+def _room(p: Point, q: Point, box: T.Box) -> float:
+    """구간 pq(길이가 0이 아니다)의 가운데에 둔 글자 상자(box — 가운데가 원점)를 구간 방향으로 비춘 폭이 구간 안에 들도록 가운데에서
+    옮길 수 있는 거리. 음수면 가운데에도 들지 않는다."""
+    ln = math.dist(p, q)
+    ux, uy = (q[0] - p[0]) / ln, (q[1] - p[1]) / ln
+    return ln / 2 - max(abs(cx * ux + cy * uy) for cx in (box[0], box[2]) for cy in (box[1], box[3]))
+
+
 def _steps(points: tuple[Point, ...], box: T.Box) -> Iterator[tuple[int, int, list[float]]]:
     """이름 글자를 선을 따라 옮길 구간을 길이 차례로 (차례, 구간 번호, 가운데에서 옮길 거리들)로 낸다. 거리는 NAME_STEP씩이고, 글자
-    상자(box — 가운데가 원점)를 구간 방향으로 비춘 폭이 구간 안에 드는 것만이다. 가운데에도 글자가 들지 않는 구간은 내지 않는다."""
-    corners = [(cx, cy) for cx in (box[0], box[2]) for cy in (box[1], box[3])]
+    상자(box — 가운데가 원점)가 구간 안에 드는 것만이다(_room). 가운데에도 글자가 들지 않는 구간은 내지 않는다."""
     for n, k in enumerate(_segments_by_length(points)):
         p, q = points[k], points[k + 1]
-        ln = math.dist(p, q)
-        if ln == 0:
+        if p == q:
             continue
-        ux, uy = (q[0] - p[0]) / ln, (q[1] - p[1]) / ln
-        room = ln / 2 - max(abs(cx * ux + cy * uy) for cx, cy in corners)
+        room = _room(p, q, box)
         if room >= 0:
             yield n, k, [i * NAME_STEP for i in range(1, int(room // NAME_STEP) + 1)]
 
 
 def _far(box: T.Box) -> float:
-    """글자 상자(가운데가 원점)에서 원점에서 가장 먼 모서리까지."""
     return max(math.hypot(cx, cy) for cx in (box[0], box[2]) for cy in (box[1], box[3]))
 
 
@@ -1100,11 +1103,18 @@ class _Spots:
         """이름 글자를 그 관계(owner)의 선 위에 얹을 자리와, 얹은 구간 번호와, 선을 따라 옮겼는지. 선 위 가운데 자리(가장 긴 구간의
         가운데)가 빈 자리가 아니면 slide일 때 선을 따라 더 본 자리(on_spots)를 구간마다 묶음 차례로 보아 처음 빈 자리가 나온 묶음의
         가장 나은 자리로 옮기고, 빈 자리가 끝내 없으면 놓지 않고 None을 돌려준다(그 이름은 선 옆에 놓는다). slide가 아니면 빈
-        자리가 아니어도 선 위 가운데 자리에 둔다."""
+        자리가 아니어도 선 위 가운데 자리에 둔다.
+
+        선 위 가운데 자리는 글자가 가장 긴 구간 안에 들 때만 있다(_room) — 넘치면 글자의 흰 바탕이 구간 끝의 꺾인 곳을 지운다. 그
+        자리가 없으면 slide일 때는 바로 선을 따라 더 본 자리로 가고, slide가 아니면 None이다."""
         k = _segments_by_length(points)[0]
-        best = self._best(lines, [_along(points[k], points[k + 1])], avoid, on=(owner, k))
-        if best.free or not slide:
-            return self._keep(best), k, False
+        p, q = points[k], points[k + 1]
+        if _room(p, q, lines_box(0, 0, lines)) >= 0:
+            best = self._best(lines, [_along(p, q)], avoid, on=(owner, k))
+            if best.free or not slide:
+                return self._keep(best), k, False
+        elif not slide:
+            return None
         for j, band, rings in on_spots(points, lines):
             pool = self._pool(band, avoid)  # 구간마다 한 번만 거른다
             for ring in rings:
@@ -1442,8 +1452,8 @@ def _labels(spots: _Spots, bare: list[PlacedRelation], placed: tuple[PlacedBox, 
         labels, moved, wider = _relation_labels(spots, r, p.owner, points, avoid, slide=True, wide=wide, on=on)
         if moved and (missed := spots.misses(start)) != (0, 0):
             # 옮긴 이름(빈 자리다) 때문에 같은 관계의 다중도가 빈 자리를 못 찾았을 수 있다. 이름을 가운데(선 위에 얹은 이름이면 선 위
-            # 가운데 자리, 선 옆 이름이면 가운데 후보)에 둔 것과 견주어 걸린 것이 더 적을 때(같으면 피할 것에 걸린 글자가 더 적을
-            # 때)만 옮긴 쪽을 쓰고, 둘 다 같으면 가운데에 둔다
+            # 가운데 자리 — 글자가 가장 긴 구간에 들지 않아 그 자리가 없으면 선 옆 가운데 후보, 선 옆 이름이면 가운데 후보)에 둔 것과
+            # 견주어 걸린 것이 더 적을 때(같으면 피할 것에 걸린 글자가 더 적을 때)만 옮긴 쪽을 쓰고, 둘 다 같으면 가운데에 둔다
             slid, tail = labels, spots.cut(start)
             labels, _, _ = _relation_labels(spots, r, p.owner, points, avoid, slide=False, wide=wide,
                                             on=slid[0].segment is not None)
