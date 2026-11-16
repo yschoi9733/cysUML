@@ -639,9 +639,10 @@ def test_name_on_a_line_skips_its_segment_and_keeps_the_name_gap_only_from_other
     assert spots._best(("abc",), [(0, 0)], B.Obstacles(()), on=("r1", 1)).faults == 1
 
 
-def test_name_too_wide_for_the_longest_segment_has_no_middle_on_the_line():
-    # 가장 긴 구간(가로 150px)보다 넓은 이름은 선 위 가운데 자리가 없다 — 넘치면 흰 바탕이 꺾인 곳을 지운다. 선을 따라 다음 구간(세로
-    # 100px — 글자 높이만 들면 된다) 가운데에 얹고, 다중도 견주기의 다시 놓기(slide 아님)에는 선 위 가운데 자리를 내지 않는다
+def test_name_too_wide_for_the_longest_segment_is_not_forced_into_its_middle():
+    # 가장 긴 구간(가로 150px)보다 넓은 이름은 선 위 가운데 자리가 꺾인 곳(이웃 구간)에 닿아 빈 자리가 아니니 선을 따라 다음 구간(세로
+    # 100px — 글자 높이만 들면 된다) 가운데에 얹는다. 다중도 견주기의 다시 놓기(slide 아님)는 빈 자리가 아니어도 가운데에 두지만,
+    # 구간을 넘치는 가운데는 내지 않는다 — 넘친 흰 바탕이 꺾인 곳을 지운다
     lines = ("a_name_wider_than_the_horizontal_segment",)
     points = ((0, 0), (150, 0), (150, 100))
     assert B.lines_box(0, 0, lines)[2] > 75

@@ -1103,20 +1103,19 @@ class _Spots:
         """이름 글자를 그 관계(owner)의 선 위에 얹을 자리와, 얹은 구간 번호와, 선을 따라 옮겼는지. 선 위 가운데 자리(가장 긴 구간의
         가운데)가 빈 자리가 아니면 slide일 때 선을 따라 더 본 자리(on_spots)를 구간마다 묶음 차례로 보아 처음 빈 자리가 나온 묶음의
         가장 나은 자리로 옮기고, 빈 자리가 끝내 없으면 놓지 않고 None을 돌려준다(그 이름은 선 옆에 놓는다). slide가 아니면 빈
-        자리가 아니어도 선 위 가운데 자리에 둔다.
+        자리가 아니어도 선 위 가운데 자리에 둔다 — 다만 글자 상자를 LABEL_CLEAR만큼 넓힌 것을 구간 방향으로 비춘 폭이 가장 긴 구간
+        안에 들지 않으면(_room) None이다. 구간을 넘친 글자의 흰 바탕(BG_MARGIN)이 구간 끝의 꺾인 곳을 지울 수 있어서다.
 
-        선 위 가운데 자리는 글자 상자를 LABEL_CLEAR만큼 넓힌 것이 가장 긴 구간 안에 들 때만 있다(_room) — 넘치면 글자의 흰
-        바탕(BG_MARGIN)이 구간 끝의 꺾인 곳을 지운다. 그 자리가 없으면 slide일 때는 바로 선을 따라 더 본 자리로 가고, slide가
-        아니면 None이다. 선을 따라 더 본 자리는 빈 자리일 때만 쓰므로 따로 넓혀 보지 않는다 — 빈 자리면 구간 끝의 요소·이웃 구간·선
-        끝 모양에서 LABEL_CLEAR 넘게 떨어져 있다."""
+        slide일 때는 들지 않아도 가운데를 그대로 본다. 빈 자리일 때만 쓰니 흰 바탕이 꺾인 곳에 닿지 않고(빈 자리면 구간 끝의
+        요소·이웃 구간·선 끝 모양에서 LABEL_CLEAR 넘게 떨어져 있다), 비스듬한 구간에서는 비춘 폭이 글자가 선 위에서 실제로 차지하는
+        길이보다 길어 들지 않는다고 쳐도 빈 자리일 수 있다."""
         k = _segments_by_length(points)[0]
         p, q = points[k], points[k + 1]
-        if _room(p, q, grow(lines_box(0, 0, lines), LABEL_CLEAR)) >= 0:
-            best = self._best(lines, [_along(p, q)], avoid, on=(owner, k))
-            if best.free or not slide:
-                return self._keep(best), k, False
-        elif not slide:
+        if not (slide or _room(p, q, grow(lines_box(0, 0, lines), LABEL_CLEAR)) >= 0):
             return None
+        best = self._best(lines, [_along(p, q)], avoid, on=(owner, k))
+        if best.free or not slide:
+            return self._keep(best), k, False
         for j, band, rings in on_spots(points, lines):
             pool = self._pool(band, avoid)  # 구간마다 한 번만 거른다
             for ring in rings:
