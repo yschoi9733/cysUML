@@ -89,10 +89,11 @@ def test_state_diagram_with_every_part_passes():
 
 def test_names_sit_on_their_lines_but_a_self_transition_keeps_its_name_beside_the_loop():
     # 전이 이름은 그 전이의 선 위에 얹는다. 같은 상태로 돌아오는 고리 선의 이름은 얹으면 짧은 구간으로 이뤄진 고리 모양을 가리니
-    # 선 옆에 둔다
+    # 선 옆에 둔다. 짧은 선에 긴 글자(대기→처리 중, ok?→완료)는 얹으면 흰 바탕과 화살촉 사이에 선이 LINE_SHOW만큼 보이지 않아 선
+    # 옆에 둔다
     d = draw(FULL, FULL_TRANSITIONS)
     names = {r.owner: r.labels[0] for r in d.layout.relations if r.labels}
-    assert names.pop("완료->완료").segment is None
+    assert [names.pop(k).segment for k in ("완료->완료", "대기->처리 중", "ok?->완료")] == [None] * 3
     assert names and all(lab.segment is not None for lab in names.values())
 
 

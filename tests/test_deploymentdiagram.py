@@ -286,13 +286,14 @@ def sent_from(outer, sender, side, gap, make, end="Tomcat", offset=20):
     return report([sender_at(outer, sender, side, gap, end, offset), *outer], [make(sender["name"], end)])
 
 
-def moved_on_the_line(drawing):
-    """선 하나뿐인 그림에서 이름 글자를 선 위에 얹은 채 선 위 가운데 자리(가장 긴 구간의 가운데)가 아닌 자리로 옮겼는지."""
+def moved_off_the_middle(drawing):
+    """선 하나뿐인 그림에서 이름 글자가 가운데(선 위 가운데 자리 — 가장 긴 구간의 가운데 — 나 선 옆 가운데 후보 둘)가 아닌 자리에
+    놓였는지."""
     (r,) = drawing.layout.relations
     (label,) = r.labels
     longest = max(range(len(r.points) - 1), key=lambda k: math.dist(r.points[k], r.points[k + 1]))
     middle = tuple((a + b) / 2 for a, b in zip(r.points[longest], r.points[longest + 1]))
-    return label.segment is not None and (label.x, label.y) != pytest.approx(middle)
+    return (label.x, label.y) != pytest.approx(middle) and (label.x, label.y) not in B.name_spots(r.points, label.lines)
 
 
 def middle_only(monkeypatch):
@@ -398,13 +399,14 @@ def test_sender_with_room_for_the_label_passes_and_a_long_label_needs_more_than_
 @pytest.mark.parametrize("side, label, offset", [("left", "deploy", 20), ("right", "deploy", 20), ("below", "three-lines", 40)])
 def test_label_whose_middle_spots_sit_on_a_node_border_moves_along_the_line_and_passes(monkeypatch, side, label, offset):
     # 세 겹 노드 안 Tomcat으로 기본 간격에서 보내면 선 가운데(선 위 가운데 자리와 선 옆 가운데 후보 둘)가 다 끝을 품은 노드
-    # 테두리에 걸린다(가운데에만 두면 불합격). 도구가 선 위에 얹은 채 빈 자리로 옮겨 합격한다 — 아래에서 보내는 세 줄 글자도 같다
+    # 테두리에 걸린다(가운데에만 두면 불합격). 도구가 빈 자리로 옮겨 합격한다 — «deploy»는 선 위에 얹은 채 옮기고, 아래에서 보내는
+    # 세 줄 글자는 선 위에서는 흰 바탕과 선 끝 사이에 선이 LINE_SHOW만큼 보이지 않아 선 옆에서 옮긴다
     make, lines = LABELS[label]
     data = ([sender_at(DEEP, el("artifact", "a.war", 0, 0), side, basic_gap(side), offset=offset), *DEEP],
             [make("a.war", "Tomcat")])
     d = draw(*data)
     assert K.check(d).passed, K.check(d).summary()
-    assert moved_on_the_line(d)
+    assert moved_off_the_middle(d)
     with monkeypatch.context() as m:
         middle_only(m)
         assert kinds(report(*data)) == ["text_on_box"]
@@ -464,7 +466,7 @@ def test_label_above_with_the_bend_moves_off_the_outer_border_at_the_basic_spaci
     sender = above(OUTER, el("artifact", "w", 0, 0), left, VERTICAL_GAP)
     data = ([sender, *OUTER], [make("w", "Tomcat", via=tip_bend(OUTER, sender))])
     d = draw(*data)
-    assert K.check(d).passed and moved_on_the_line(d)
+    assert K.check(d).passed and moved_off_the_middle(d)
     with monkeypatch.context() as m:
         middle_only(m)
         (f,) = report(*data).failures

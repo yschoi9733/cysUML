@@ -60,6 +60,9 @@ MULT_ANGLES = (math.pi / 8, math.pi / 6, math.pi / 4, math.pi / 3)
 MULT_DISTANCES = (20, 25, 30, 35, 40, 50)
 MULT_ENOUGH = 20    # 요소와 이만큼 떨어지면 더 멀리 두지 않고 선 끝에 가까운 자리를 고른다
 NAME_STEP = 5       # 이름 글자의 가운데 후보가 다 걸릴 때 선을 따라 옮겨 보는 간격
+# 선 위에 얹은 이름의 흰 바탕과 선 끝(선 끝 모양이 있으면 그 모양) 사이에 보일 선의 길이 — 점선 무늬 한 주기가 다 보여 점선인지
+# 실선인지 가려진다. 짧은 선에 얹으면 선이 흰 바탕 뒤로 거의 다 사라져 관계 종류를 알 수 없다
+LINE_SHOW = sum(DASH)
 PLACE_EPS = 1e-3    # 여러 선이 걸린 자리가 이 안으로 같으면 한 자리로 묶는다(검사도 이 값으로 묶는다)
 
 NEST_PAD = 20       # 바깥 요소를 늘릴 때 안의 요소 둘레에 두는 여백. 검사도 안의 요소가 칸 테두리에서 이만큼 떨어졌는지 본다
@@ -1063,7 +1066,7 @@ class _Spots:
             solid_gaps = [b.gap(wide) for b, _ in near_solids]
             frame_gaps = [segment_gap(wide, s) for s, _ in near_frames]
             room = min(solid_gaps + frame_gaps, default=MULT_ENOUGH)
-            apart = grow(box, NAME_GAP)
+            apart = grow(box, NAME_GAP) if on is not None else wide
             clear = (not any(hits(a, b, apart if other else wide) for (a, b, *_), other in zip(near_segments, others))
                      and all(gap(wide, x) >= 0 for x in near_labels))
             score = (room >= 0, clear, min(room, MULT_ENOUGH))
@@ -1099,7 +1102,7 @@ class _Spots:
         return self._keep(best), False, False
 
     def pick_on_line(self, lines: tuple[str, ...], points: tuple[Point, ...], avoid: Obstacles, owner: object,
-                     slide: bool = True) -> Optional[tuple[Point, int, bool]]:
+                     slide: bool = True, show: tuple[float, float] = (0.0, 0.0)) -> Optional[tuple[Point, int, bool]]:
         """이름 글자를 그 관계(owner)의 선 위에 얹을 자리와, 얹은 구간 번호와, 선을 따라 옮겼는지. 선 위 가운데 자리(가장 긴 구간의
         가운데)가 빈 자리가 아니면 slide일 때 선을 따라 더 본 자리(on_spots)를 구간마다 묶음 차례로 보아 처음 빈 자리가 나온 묶음의
         가장 나은 자리로 옮기고, 빈 자리가 끝내 없으면 놓지 않고 None을 돌려준다(그 이름은 선 옆에 놓는다). slide가 아니면 빈
@@ -1108,21 +1111,49 @@ class _Spots:
 
         slide일 때는 들지 않아도 가운데를 그대로 본다. 빈 자리일 때만 쓰니 흰 바탕이 꺾인 곳에 닿지 않고(빈 자리면 구간 끝의
         요소·이웃 구간·선 끝 모양에서 LABEL_CLEAR 넘게 떨어져 있다), 비스듬한 구간에서는 비춘 폭이 글자가 선 위에서 실제로 차지하는
-        길이보다 길어 들지 않는다고 쳐도 빈 자리일 수 있다."""
+        길이보다 길어 들지 않는다고 쳐도 빈 자리일 수 있다.
+
+        show는 선의 처음(from)·끝(to)에서 흰 바탕까지 보여야 할 선의 길이다(_shows). 첫 구간과 마지막 구간에서는 흰 바탕 앞뒤로 그
+        길이만큼 선이 보이는 자리만 보고, 선 위 가운데 자리가 그렇지 않으면 그 자리가 없는 것으로 친다."""
+        last = len(points) - 2
+
+        def shown(j: int, spot: Point) -> bool:
+            need = (show[0] if j == 0 else 0.0, show[1] if j == last else 0.0)
+            if need == (0.0, 0.0):
+                return True
+            c = clip(points[j], points[j + 1], grow(lines_box(*spot, lines), BG_MARGIN))
+            return c is None or (math.dist(points[j], c[0]) >= need[0] and math.dist(c[1], points[j + 1]) >= need[1])
+
         k = _segments_by_length(points)[0]
         p, q = points[k], points[k + 1]
-        if not (slide or _room(p, q, grow(lines_box(0, 0, lines), LABEL_CLEAR)) >= 0):
+        middle = _along(p, q)
+        if shown(k, middle) and (slide or _room(p, q, grow(lines_box(0, 0, lines), LABEL_CLEAR)) >= 0):
+            best = self._best(lines, [middle], avoid, on=(owner, k))
+            if best.free or not slide:
+                return self._keep(best), k, False
+        elif not slide:
             return None
-        best = self._best(lines, [_along(p, q)], avoid, on=(owner, k))
-        if best.free or not slide:
-            return self._keep(best), k, False
         for j, band, rings in on_spots(points, lines):
             pool = self._pool(band, avoid)  # 구간마다 한 번만 거른다
             for ring in rings:
-                found = self._best(lines, ring, avoid, pool, on=(owner, j))
-                if found.free:
+                ring = [spot for spot in ring if shown(j, spot)]
+                if ring and (found := self._best(lines, ring, avoid, pool, on=(owner, j))).free:
                     return self._keep(found), j, True
         return None
+
+
+def _shows(heads: tuple[Union[Line, Polygon], ...], marks: tuple[HeadMark, ...], points: tuple[Point, ...]
+           ) -> tuple[float, float]:
+    """선의 처음·끝에서 선 위에 얹은 이름의 흰 바탕까지 보여야 할 선의 길이: LINE_SHOW에 그 끝의 선 끝 모양이 선을 따라 차지하는
+    길이(모양의 점을 끝 구간 방향으로 비춘 가장 먼 거리 — 소켓 반원처럼 선 밖으로 휘는 모양은 0)를 더한다."""
+    out = []
+    for tip, toward in ((points[0], points[1]), (points[-1], points[-2])):
+        ln = math.dist(tip, toward)
+        ux, uy = (toward[0] - tip[0]) / ln, (toward[1] - tip[1]) / ln
+        reach = max((max((x - tip[0]) * ux + (y - tip[1]) * uy for x, y in h.points) for h, m in zip(heads, marks)
+                     if m.tip == tip), default=0.0)
+        out.append(LINE_SHOW + max(reach, 0.0))
+    return out[0], out[1]
 
 
 def _end_shape(r: Relation, t: RelationType, key: str) -> Optional[EndShape]:
@@ -1401,9 +1432,11 @@ def layout(diagram: Diagram) -> Layout:
     segments: list[Segment] = []
     owners: list[str] = []
     paths: list[Optional[int]] = []  # 선분마다 그 관계 선의 구간 번호(선 끝 모양은 None)
+    shows: dict[str, tuple[float, float]] = {}
     for p in bare:
         drawn = len(sketch.records)
-        line, _, _ = _draw_relation(sketch, p, spec.relations[p.relation.kind], by_key)
+        line, heads, marks = _draw_relation(sketch, p, spec.relations[p.relation.kind], by_key)
+        shows[p.owner] = _shows(heads, marks, p.points)
         for rec in sketch.records[drawn:]:
             for j, s in enumerate(outline([rec])):
                 segments.append(s)
@@ -1411,7 +1444,7 @@ def layout(diagram: Diagram) -> Layout:
                 paths.append(j if rec is line else None)
     avoids: dict[frozenset[str], Obstacles] = {}  # 끝을 품은 요소들마다 한 번만 만든다
     spots = _Spots(segments, owners, paths)
-    out, widened = _labels(spots, bare, placed, lines_of, avoids, wide=True, on=True)
+    out, widened = _labels(spots, bare, placed, lines_of, avoids, shows, wide=True, on=True)
     # 걸린 것이 없으면 선 옆 배치가 더 나을 수 없다. 선 위에 얹은 이름이 없으면 이 배치가 곧 넓힌 조건의 선 옆 배치라, 넓혀서 옮긴
     # 이름이 없을 때도 선 옆 배치가 같게 나온다
     if spots.misses(0) != (0, 0) and (widened or any(lab.segment is not None for p in out for lab in p.labels)):
@@ -1429,19 +1462,21 @@ def _beside_layout(segments: list[Segment], owners: list[str], bare: list[Placed
     조건으로도 놓아 보고, 그림 전체의 두 수가 더 작은 쪽을 쓴다(둘 다 같으면 넓힌 쪽) — 옮긴 이름이 뒤 관계의 글자가 쓸 자리를
     차지해 뒤 글자가 밀리면 넓혀서 더 나빠질 수 있다."""
     spots = _Spots(segments, owners)
-    out, widened = _labels(spots, bare, placed, lines_of, avoids, wide=True, on=False)
+    out, widened = _labels(spots, bare, placed, lines_of, avoids, {}, wide=True, on=False)
     if widened and spots.misses(0) != (0, 0):  # 걸린 것이 없으면 좁은 조건이 더 나을 수 없다
         narrow = _Spots(segments, owners)
-        kept, _ = _labels(narrow, bare, placed, lines_of, avoids, wide=False, on=False)
+        kept, _ = _labels(narrow, bare, placed, lines_of, avoids, {}, wide=False, on=False)
         if spots.misses(0) > narrow.misses(0):
             return kept, narrow.misses(0)
     return out, spots.misses(0)
 
 
 def _labels(spots: _Spots, bare: list[PlacedRelation], placed: tuple[PlacedBox, ...], lines_of: Mapping[str, tuple[str, ...]],
-            avoids: dict[frozenset[str], Obstacles], wide: bool, on: bool) -> tuple[list[PlacedRelation], bool]:
+            avoids: dict[frozenset[str], Obstacles], shows: Mapping[str, tuple[float, float]], wide: bool, on: bool
+            ) -> tuple[list[PlacedRelation], bool]:
     """관계마다 선 글자를 놓은 관계들과, 좁은 조건이라면 옮기지 않았을 이름이 남았는지(pick_name의 wide). 남지 않았으면 좁은 조건으로
-    놓은 것과 같다 — 그런 이름이 없는 관계는 앞 글자가 같으면 같게 놓이므로. on이면 이름을 선 위에 얹는다(_relation_labels).
+    놓은 것과 같다 — 그런 이름이 없는 관계는 앞 글자가 같으면 같게 놓이므로. on이면 이름을 선 위에 얹는다(_relation_labels —
+    shows는 관계마다 선의 처음·끝에서 흰 바탕까지 보여야 할 선의 길이, _shows).
     avoids는 끝을 품은 요소들마다의 피할 것을 모아 둔다."""
     out = []
     widened = False
@@ -1452,13 +1487,14 @@ def _labels(spots: _Spots, bare: list[PlacedRelation], placed: tuple[PlacedBox, 
             avoids[held] = obstacles(placed, held)
         avoid = avoids[held]
         start = len(spots.labels)
-        labels, moved, wider = _relation_labels(spots, r, p.owner, points, avoid, slide=True, wide=wide, on=on)
+        show = shows.get(p.owner, (0.0, 0.0))
+        labels, moved, wider = _relation_labels(spots, r, p.owner, points, avoid, show, slide=True, wide=wide, on=on)
         if moved and (missed := spots.misses(start)) != (0, 0):
             # 옮긴 이름(빈 자리다) 때문에 같은 관계의 다중도가 빈 자리를 못 찾았을 수 있다. 이름을 가운데(선 위에 얹은 이름이면 선 위
             # 가운데 자리 — 글자가 가장 긴 구간에 들지 않아 그 자리가 없으면 선 옆 가운데 후보, 선 옆 이름이면 가운데 후보)에 둔 것과
             # 견주어 걸린 것이 더 적을 때(같으면 피할 것에 걸린 글자가 더 적을 때)만 옮긴 쪽을 쓰고, 둘 다 같으면 가운데에 둔다
             slid, tail = labels, spots.cut(start)
-            labels, _, _ = _relation_labels(spots, r, p.owner, points, avoid, slide=False, wide=wide,
+            labels, _, _ = _relation_labels(spots, r, p.owner, points, avoid, show, slide=False, wide=wide,
                                             on=slid[0].segment is not None)
             if spots.misses(start) > missed:
                 spots.cut(start)
@@ -1472,7 +1508,7 @@ def _labels(spots: _Spots, bare: list[PlacedRelation], placed: tuple[PlacedBox, 
 
 
 def _relation_labels(spots: _Spots, r: Relation, owner: str, points: tuple[Point, ...], avoid: Obstacles,
-                     slide: bool, wide: bool, on: bool) -> tuple[list[Label], bool, bool]:
+                     show: tuple[float, float], slide: bool, wide: bool, on: bool) -> tuple[list[Label], bool, bool]:
     """관계 하나의 선 글자를 이름 → from 다중도 → to 다중도 차례로 놓는다. 이름을 선을 따라 옮겼는지와, 좁은 조건이라면 옮기지 않았을
     이름인지도 돌려준다(pick_name). on이면 이름을 그 관계의 선 위에 얹고(pick_on_line), 얹을 빈 자리가 없으면 선 옆에 놓는다. 같은
     요소로 돌아오는 고리 선의 이름은 늘 선 옆에 놓는다 — 고리는 짧은 구간 셋 이상이라 얹으면 고리 모양을 가린다."""
@@ -1480,7 +1516,7 @@ def _relation_labels(spots: _Spots, r: Relation, owner: str, points: tuple[Point
     moved = wider = False
     if r.label_lines:
         lines = r.label_lines
-        got = spots.pick_on_line(lines, points, avoid, owner, slide) if on and r.source != r.target else None
+        got = spots.pick_on_line(lines, points, avoid, owner, slide, show) if on and r.source != r.target else None
         if got is not None:
             (x, y), k, moved = got
             labels.append(Label("name", lines, x, y, k))
