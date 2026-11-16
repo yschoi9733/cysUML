@@ -53,7 +53,7 @@ TRIANGLE_AT_END = [END, (282, 15), (282, 33)]
 
 @pytest.mark.parametrize("relation, dash, polygon, arrows", [
     ({"kind": "association"}, None, None, [END]),
-    ({"kind": "association", "navigable": "both"}, None, None, [END, START]),
+    ({"kind": "association", "navigable": "both"}, None, None, [START, END]),  # 끝 모양은 from 쪽, to 쪽 차례로 그린다
     ({"kind": "association", "navigable": "from"}, None, None, [START]),
     ({"kind": "association", "navigable": "none"}, None, None, []),
     ({"kind": "aggregation"}, None, ("white", DIAMOND_AT_START), [END]),

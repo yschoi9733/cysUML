@@ -694,3 +694,267 @@ def test_shape_sets_the_gap_between_itself_and_its_outside_name():
     near, far = (draw([el(k, "Api", 0, 0)], spec=spec).layout.boxes[0] for k in ("dot", "far"))
     assert far.height == near.height + 12 - B.NAME_SEP
     assert far.zones[0].rect[1] == 24 + 12 and near.zones[0].rect[1] == 24 + B.NAME_SEP
+
+
+# ---------------------------------------------------------------- 같은 부모로 오는 공유 줄기 종류마다 향하는 점
+
+
+def two_kinds_to(parent, *relations, more=(), spec=SPEC):
+    """부모 P 아래 A(0, 200)·B(300, 200)가 상속·실체화로 P에 온다(입력은 실체화 먼저). relations·more는 더 그을 관계·둘 요소."""
+    return draw([parent, el("class", "A", 0, 200), el("class", "B", 300, 200), *more],
+                [rel("realization", "B", "P"), rel("generalization", "A", "P"), *relations], spec)
+
+
+def test_two_trunk_kinds_get_a_point_either_side_of_the_parent_in_the_tools_order():
+    # 입력 차례와 상관없이 도구가 받는 관계 차례(상속, 실체화)로 왼쪽부터, 가운데(245, 24)에서 AIM_SPLIT/2씩. 꺾는 점 없이 비스듬히
+    # 오는 선은 그 점 바로 아래에서 오지 않으니 그대로 가운데를 향한다
+    d = two_kinds_to(el("class", "P", 200, 0))
+    p, half = d.layout.by_key["P"], B.AIM_SPLIT / 2
+    assert p.anchor == (245, 24)
+    assert p.aims == (("generalization", (245 - half, 24)), ("realization", (245 + half, 24)))
+    assert [r.aim for r in d.layout.relations] == [None, None]
+
+
+def test_lines_not_coming_from_right_under_a_point_keep_aiming_at_the_middle():
+    # 실체화하는 C는 P 바로 아래에서 곧게, 상속하는 J는 P 옆에서 들어온다 — 점은 정해지지만 C->P는 곧은 세로 선 그대로다
+    d = draw([el("interface", "P", 200, 0), el("class", "C", 200, 200), el("interface", "J", -100, 0)],
+             [rel("realization", "C", "P"), rel("generalization", "J", "P")])
+    assert d.layout.by_key["P"].aims != ()
+    assert [r.points for r in d.layout.relations][0] == ((245, 200), (245, 42))
+
+
+def test_lines_given_the_side_edge_recipe_are_drawn_as_before():
+    # 한 종류는 아래 변 가운데로, 다른 종류는 오른쪽 변으로 들인 그림(옛 요령)은 어느 선도 점 바로 아래·위에서 오지 않아 그대로다
+    elements = [el("interface", "P", 200, 0, width=140), el("interface", "A", 0, 102, width=140),
+                el("class", "B", 400, 102, width=140)]
+    relations = [rel("generalization", "A", "P", via=[[70, 72], [270, 72]]),
+                 rel("realization", "B", "P", via=[[470, 92], [370, 92], [370, 21]])]
+    d = draw(elements, relations)
+    assert [r.aim for r in d.layout.relations] == [None, None]
+    assert [r.points[-1] for r in d.layout.relations] == [(270, 42), (340, 21)] and K.check(d).passed
+
+
+@pytest.mark.parametrize("dx, follows", [(0, True), (B.AIM_EPS / 2, True), (-B.AIM_EPS / 2, True), (B.AIM_EPS * 2, False)])
+def test_a_line_follows_its_kinds_point_only_from_right_under_it(dx, follows):
+    # 마지막 꺾는 점이 그 점에서 AIM_EPS 안이면 그 점을 쓰려던 선으로 보고 x를 맞춰 끝 구간을 세운다. 꺾는 점 없이 곧게 잇는 선은
+    # 자식 가운데가 AIM_EPS 안이면 따른다
+    half = B.AIM_SPLIT / 2
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200)],
+             [rel("generalization", "A", "P", via=[[45, 120], [245 - half + dx, 120]]), rel("realization", "B", "P")])
+    a = d.layout.relations[0]
+    assert a.aim == ((245 - half, 24) if follows else None)
+    if follows:
+        assert a.points[-2:] == ((245 - half, 120), (245 - half, 48))
+    straight = draw([el("class", "P", 200, 0), el("class", "A", 200 - half + dx, 200), el("class", "B", 400, 200)],
+                    [rel("generalization", "A", "P"), rel("realization", "B", "P")])
+    s = straight.layout.relations[0]
+    assert s.aim == ((245 - half, 24) if follows else None)
+    if follows:
+        assert s.points == ((245 - half, 200), (245 - half, 48))  # 자식 가운데가 비켜나도 그 점의 x로 곧게
+    assert B.AIM_EPS < B.AIM_SPLIT / 4  # 가운데(점에서 AIM_SPLIT/2)를 뜻한 선과 헷갈리지 않는다
+
+
+@pytest.mark.parametrize("via", [[], [[231.76, 150]]])
+def test_a_line_from_a_child_a_little_off_the_point_rises_upright_and_shares_the_triangle(via):
+    # 자식 A의 가운데(231.76)가 상속 점(230)에서 AIM_EPS 안이면, 꺾는 점이 없거나 첫 꺾는 점이 그 x로 맞춰진 선은 자식에서부터 230으로
+    # 곧게 올라간다 — 기울면 끝 삼각형이 점에서 비켜나, 같은 점으로 꺾어 오는 C의 상속 선 삼각형과 겹친다
+    d = draw([el("class", "P", 200, 0), el("class", "A", 186.76, 200), el("class", "C", 0, 200), el("class", "B", 400, 200)],
+             [rel("generalization", "A", "P", via=via), rel("generalization", "C", "P", via=[[45, 120], [230, 120]]),
+              rel("realization", "B", "P", via=[[445, 120], [260, 120]])])
+    a = d.layout.relations[0]
+    assert a.points[0] == (230, 200) and a.points[-1] == (230, 48)
+    assert all(p[0] == 230 for p in a.points)
+    assert K.check(d).passed
+
+
+def test_overlap_hint_names_the_point_a_line_did_not_follow():
+    # 상속은 상속 점(230)을 따르고, 실체화는 가운데(245) 바로 아래에서 곧게 와 가운데로 간다 — 두 삼각형이 겹치는 항목의 고치는
+    # 법이 따르지 않은 실체화의 점만, 종류 이름을 붙여 알린다. 실체화 선은 꺾는 점이 없으니 도구 설명처럼 자식 가운데도 든다(꺾는
+    # 점이 있는 선만이면 "마지막 꺾는 점을"만 — test_classcheck의 공유 줄기 테스트)
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 200, 200)],
+             [rel("generalization", "A", "P", via=[[45, 120], [230, 120]]), rel("realization", "B", "P")])
+    (f,) = [f for f in K.check(d).failures if f.kind == "head_overlap"]
+    assert f.hint.endswith(' 실체화 선은 마지막 꺾는 점(꺾는 점이 없으면 자식 가운데)을 결과의 부모 자리 뒤에 덧붙은 같은 종류의 '
+                           '점("실체화 향하는 점 260, 24") 바로 아래에 둔다.')
+
+
+def test_overlap_hint_says_right_above_the_point_for_a_parent_drawn_below():
+    # 위 그림을 위아래로 뒤집어 부모가 아래에 있다 — 선이 위 변으로 들어오니 꺾는 점을 그 점 바로 위에 두라고 한다
+    d = draw([el("class", "P", 200, 300), el("class", "A", 0, 100), el("class", "B", 200, 100)],
+             [rel("generalization", "A", "P", via=[[45, 200], [230, 200]]), rel("realization", "B", "P")])
+    (f,) = [f for f in K.check(d).failures if f.kind == "head_overlap"]
+    assert '같은 종류의 점("실체화 향하는 점 260, 324") 바로 위에 둔다' in f.hint and "바로 아래" not in f.hint
+
+
+def test_overlap_hint_says_nothing_of_the_points_for_a_line_entering_a_side_edge():
+    # 실체화 선이 P의 오른쪽 변으로 들어오고, D에서 P로 가는 연관 선이 그 가로 구간에 포개진다 — 옆 변으로 들어온 선은 그 점을
+    # 따라도 곧게 앉지 않으니 고치는 법에 점을 붙이지 않는다
+    d = draw([el("class", "P", 200, 0, width=140), el("class", "A", 0, 200), el("class", "B", 400, 200),
+              el("class", "D", 500, 0)],
+             [rel("generalization", "A", "P", via=[[45, 150], [255, 150]]), rel("realization", "B", "P", via=[[445, 24]]),
+              rel("association", "D", "P")])
+    assert d.layout.relations[1].points[-1] == (340, 24)
+    failures = K.check(d).failures
+    assert any(f.kind == "line_overlap" for f in failures)
+    assert all("향하는 점" not in f.hint for f in failures)
+
+
+def test_overlap_hint_says_nothing_of_the_points_where_lines_meet_far_from_the_parent():
+    # 실체화 선은 가운데(245)로 가 P에서는 상속 삼각형과 겹치고, B 위 세로 구간에서는 D->B 연관 선과 포개진다 — 그 점을 따르면
+    # 풀리는 것은 P에서 겹친 것뿐이라, 먼 포개짐의 고치는 법에는 점을 붙이지 않는다
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 600, 300), el("class", "D", 600, 0)],
+             [rel("generalization", "A", "P", via=[[45, 120], [230, 120]]),
+              rel("realization", "B", "P", via=[[645, 150], [245, 150]]), rel("association", "D", "B")])
+    failures = K.check(d).failures
+    (head,) = [f for f in failures if f.kind == "head_overlap"]
+    (far,) = [f for f in failures if f.kind == "line_overlap"]
+    assert '같은 종류의 점("실체화 향하는 점 260, 24") 바로 아래에 둔다' in head.hint
+    assert "향하는 점" not in far.hint
+
+
+def test_a_bend_moved_onto_the_point_and_into_a_box_names_where_it_was_moved():
+    # A의 왼쪽 변(229) 바로 왼쪽에 준 꺾는 점(228, 210)은 상속 점의 x(230)로 맞추면 A 안에 든다 — 오류 글이 맞춘 자리도 적어, A 밖에
+    # 준 점을 안이라고 하는 것처럼 읽히지 않게 한다
+    with pytest.raises(InputError) as e:
+        draw([el("class", "P", 200, 0), el("class", "A", 229, 200), el("class", "B", 400, 200)],
+             [rel("generalization", "A", "P", via=[[228, 210]]), rel("realization", "B", "P")])
+    assert "꺾는 점 (228.0, 210.0)(상속 향하는 점의 x에 맞추면 (230, 210))이 from" in str(e.value)
+
+
+def test_a_zigzag_of_bends_near_the_point_is_not_folded_into_one_stem():
+    # 상속 점(180) 가까이의 세 꺾는 점은 아래로(100→150) 갔다가 위로(150→80) 오는 지그재그다 — 그 점에서 멀어지는 쪽으로 이어진 끝
+    # 두 점만 세로 줄로 맞추고, 앞 점(184, 100)은 그대로 둬 받은 선이 되짚어 가는 선이 되지 않는다
+    d = draw([el("class", "P", 150, 0), el("class", "A", -100, 200), el("class", "B", 400, 200)],
+             [rel("generalization", "A", "P", via=[[-55, 100], [184, 100], [176, 150], [182, 80]]), rel("realization", "B", "P")])
+    assert d.layout.relations[0].points[2:] == ((184, 100), (180, 150), (180, 80), (180, 48))
+    assert K.check(d).passed
+
+
+def test_a_start_shape_is_drawn_toward_the_start_the_line_was_given():
+    # 자식에서부터 곧게 올린 선(출발 끝을 230으로 옮김)의 from 쪽 끝 모양도 옮긴 점(230, 224)을 받는다 — 옛 anchor(231.76)를 받으면
+    # 소켓처럼 그 점을 보고 그리는 모양이 선에서 비켜난다
+    seen = []
+
+    def mark(c, tip, frm, at, o):
+        seen.append(at)
+        return c.line((tip, frm), owner=o)
+
+    marked = B.RelationType("상속", end=B.TRIANGLE_HEAD, start=B.EndShape("표시", 0, mark), trunk=True, role="자식",
+                            reflexive=False)
+    draw([el("class", "P", 200, 0), el("class", "A", 186.76, 200), el("class", "B", 400, 200)],
+         [rel("generalization", "A", "P"), rel("realization", "B", "P")],
+         B.Spec(SHAPES, {**RELATIONS, "flow": FLOW, "generalization": marked}))
+    assert seen and set(seen) == {(230, 224)}
+
+
+def test_a_stem_of_bends_under_the_point_is_set_upright_without_a_zero_length_piece():
+    # 그 점(230)으로 곧게 올라가는 끝 꺾는 점들은 모두 x를 맞춰 세로 줄이 곧게 서고, 맞춰서 같아진 연달은 점은 하나로 줄인다
+    half = B.AIM_SPLIT / 2
+    for via, stem in [([[45, 150], [230.05, 150], [229.96, 110]], [(230, 150), (230, 110)]),
+                      ([[45, 150], [230, 150], [230, 110], [230.05, 110]], [(230, 150), (230, 110)])]:
+        d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200)],
+                 [rel("generalization", "A", "P", via=via), rel("realization", "B", "P", via=[[345, 120], [245 + half, 120]])])
+        assert d.layout.relations[0].points[1:] == ((45, 150), *stem, (245 - half, 48))
+        assert K.check(d).passed
+
+
+def test_three_trunk_kinds_are_not_split_and_the_description_says_nothing_of_points():
+    # 세 종류를 받는 도구의 요령은 도구 설명에 없으니 엔진도 나누지 않고(이 PR 전처럼 가운데), 설명을 만들다 멈추지도 않는다 — 부모로
+    # 셋이 다 오든 둘만 오든 같다
+    spec = B.Spec(SHAPES, {**RELATIONS, "extends": B.RelationType("확장", end=B.TRIANGLE_HEAD, trunk=True, role="자식")})
+    boxes = [el("class", "P", 200, 0, width=300), el("class", "A", 0, 200), el("class", "B", 200, 200), el("class", "C", 400, 200)]
+    for kinds in (("generalization", "realization", "extends"), ("generalization", "extends")):
+        d = draw(boxes, [rel(k, child, "P") for k, child in zip(kinds, "ABC")], spec)
+        assert d.layout.by_key["P"].aims == (), kinds
+    assert "종류마다 향하는 점" not in guide.relation_fields(spec) and guide.trunk_aims(spec) == ""
+    # 엔진과 도구 설명이 함께 쓰는 판정: 두 종류를 받고 둘 다 끝 모양이 삼각형인 도구만 그 차례로, 나머지는 빈 튜플(좁은 모양
+    # 판정이 삼각형 크기로 셈한다)
+    assert B.split_kinds(SPEC) == ("generalization", "realization") and B.split_kinds(spec) == ()
+    other_end = B.Spec(SHAPES, {**RELATIONS, "realization": B.RelationType("실체화", end=B.FILLED_DIAMOND, trunk=True)})
+    assert B.trunk_kinds(other_end) == ("generalization", "realization") and B.split_kinds(other_end) == ()
+
+
+def test_a_bend_joined_sideways_to_the_stem_is_not_moved():
+    # 자식 가운데(230.3)에서 올라온 꺾는 점은 마지막 꺾는 점(230)과 같은 높이로 가로로 이어져 세로 줄이 아니다 — 옮기지 않는다
+    d = draw([el("class", "P", 200, 0), el("class", "A", 185.3, 200), el("class", "B", 400, 200)],
+             [rel("generalization", "A", "P", via=[[230.3, 150], [230, 150]]), rel("realization", "B", "P")])
+    assert d.layout.relations[0].points[1:] == ((230.3, 150), (230, 150), (230, 48))
+
+
+def test_lines_of_one_kind_within_the_rounding_share_one_triangle():
+    # 두 자식이 결과 글의 반올림 안에서 조금씩 다른 x(230.04·229.97)를 주어도 같은 점으로 맞춰 삼각형 하나를 함께 쓴다
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "A2", -200, 200), el("class", "B", 300, 200)],
+             [rel("generalization", "A", "P", via=[[45, 120], [230.04, 120]]),
+              rel("generalization", "A2", "P", via=[[-155, 120], [229.97, 120]]),
+              rel("realization", "B", "P", via=[[345, 120], [260, 120]])])
+    assert [r.points[-1] for r in d.layout.relations] == [(230, 48), (230, 48), (260, 48)]
+    assert K.check(d).passed
+
+
+def test_lines_from_the_side_keep_aiming_at_the_middle_beside_split_lines():
+    # 아래 변으로 두 종류가 제 점을 향해 들어오고, 실체화 하나는 오른쪽 변으로 가로로 들어온다 — 그 선은 가운데 높이 그대로다
+    half = B.AIM_SPLIT / 2
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200), el("class", "Q", 500, 0)],
+             [rel("generalization", "A", "P", via=[[45, 120], [245 - half, 120]]),
+              rel("realization", "B", "P", via=[[345, 120], [245 + half, 120]]), rel("realization", "Q", "P")])
+    assert [r.aim for r in d.layout.relations] == [(245 - half, 24), (245 + half, 24), None]
+    assert d.layout.relations[2].points[-1] == (290, 24) and K.check(d).passed
+
+
+def test_two_kinds_coming_in_through_the_top_edge_are_split_too():
+    half = B.AIM_SPLIT / 2
+    d = draw([el("class", "P", 200, 300), el("class", "A", 0, 100), el("class", "B", 300, 100)],
+             [rel("generalization", "A", "P", via=[[45, 250], [245 - half, 250]]),
+              rel("realization", "B", "P", via=[[345, 250], [245 + half, 250]])])
+    assert [r.points[-1] for r in d.layout.relations] == [(245 - half, 300), (245 + half, 300)] and K.check(d).passed
+
+
+def test_one_trunk_kind_or_other_kinds_keep_the_middle():
+    one = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200)],
+               [rel("generalization", "A", "P"), rel("generalization", "B", "P"), rel("dependency", "A", "P"),
+                rel("association", "B", "P")])
+    assert one.layout.by_key["P"].aims == ()
+    # 나뉜 부모에서 나가는 상속과, 그 부모로 오는 다른 관계는 가운데를 향한다
+    d = two_kinds_to(el("class", "P", 200, 0), rel("generalization", "P", "G"), rel("association", "Q", "P"),
+                     more=[el("class", "G", 200, -150), el("class", "Q", 500, 0)])
+    lines = {r.owner: r.points for r in d.layout.relations}
+    assert lines["P->G"][0] == (245, 0) and lines["Q->P"][-1] == (290, 24)
+    assert d.layout.by_key["G"].aims == () and d.layout.by_key["Q"].aims == ()
+
+
+@pytest.mark.parametrize("width, split", [(B.AIM_EDGE, True), (B.AIM_EDGE - 1, False)])  # 도구 설명이 알리는 가장 좁은 변
+def test_parent_too_narrow_for_two_triangles_side_by_side_keeps_the_middle(width, split):
+    p = two_kinds_to(el("class", "P", 200, 0, width=width)).layout.by_key["P"]
+    assert p.width == width and bool(p.aims) == split
+
+
+def test_lines_of_each_kind_end_on_the_bottom_edge_under_their_own_point():
+    # 마지막 꺾는 점을 그 종류가 향하는 점 바로 아래에 주면 선 끝(과 삼각형 끝)이 아래 변의 그 x에 곧게 닿아, 두 삼각형이 나란히
+    # 놓이고 검사에 합격한다
+    half = B.AIM_SPLIT / 2
+    d = draw([el("class", "P", 200, 0), el("class", "A", 0, 200), el("class", "B", 300, 200)],
+             [rel("generalization", "A", "P", via=[[45, 120], [245 - half, 120]]),
+              rel("realization", "B", "P", via=[[345, 120], [245 + half, 120]])])
+    assert [r.points[-1] for r in d.layout.relations] == [(245 - half, 48), (245 + half, 48)]
+    assert [m.tip for r in d.drawn for m in r.marks] == [(245 - half, 48), (245 + half, 48)]
+    assert K.check(d).passed
+
+
+def test_two_kinds_aim_either_side_of_a_point_off_the_middle():
+    # 가운데에서 비켜난 점을 향하는 모양(aims_aside)은 그 점에서 양쪽으로 나눈다
+    class Aside(B.Shape):
+        aims_aside = True
+
+        def size(self, e):
+            return 140, 48
+
+        def anchor(self, e, rect):
+            return rect[0] + 60, rect[1] + 24
+
+        def draw(self, c, p):
+            c.rect(p.rect[0], p.rect[1], p.width, p.height, owner=p.key)
+
+    spec = B.Spec({**SHAPES, "aside": Aside()}, RELATIONS)
+    p = two_kinds_to(el("aside", "P", 200, 0), spec=spec).layout.by_key["P"]
+    half = B.AIM_SPLIT / 2
+    assert p.anchor == (260, 24) and p.aims == (("generalization", (260 - half, 24)), ("realization", (260 + half, 24)))

@@ -76,7 +76,11 @@ It gets back the check result, the size and place of every box as drawn, the sav
 The check **fails** when boxes overlap, a line runs through a box, a label or another line's arrowhead, or labels
 overlap. Crossing lines and the picture size are reported but don't fail. Inheritance lines from several children to
 one parent may join into one trunk that shares a single triangle (realization lines too, but not mixed with
-inheritance); the tool description tells the assistant how to give the bend points for it.
+inheritance); the tool description tells the assistant how to give the bend points for it. When both kinds come
+to one parent, the result lists a point for each kind either side of the point the parent's lines aim at (usually its
+middle); a line whose last bend point sits right below its kind's point goes straight up to it, so the two triangles
+sit side by side. A parent too narrow for two triangles (a class drawn narrower than 48px, or in the package,
+component and deployment tools an icon-style artifact) gets no points.
 
 Relations must follow UML notation, and the tool rejects the input otherwise: a generalization joins two boxes of the
 same kind (a class and an abstract class count as one kind), never runs in a cycle, and neither a generalization nor a
@@ -406,7 +410,10 @@ uvx cysuml
 - **클래스도**는 `draw_class_diagram`으로 그린다. 어시스턴트가 상자의 왼쪽 위 자리와, 필요하면 관계선의 꺾는 점을 준다. 결과로
   검사 결과, 상자마다 그린 자리와 크기, 저장한 그림·입력 파일 경로, 그림을 돌려준다. 상자끼리 겹치거나, 선이 상자·글자·다른 선의 화살촉을
   지나거나, 글자끼리 겹치면 불합격이다. 선끼리 엇갈린 곳과 그림 크기는 알려 주기만 하고 불합격이 아니다. 같은 부모로 가는
-  상속끼리, 실체화끼리는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 써도 된다(꺾는 점을 주는 법은 도구 설명에 있다). 관계는
+  상속끼리, 실체화끼리는 여러 선을 한 줄기로 모아 삼각형 하나를 함께 써도 된다(꺾는 점을 주는 법은 도구 설명에 있다). 같은
+  부모로 상속과 실체화가 함께 오면 결과가 부모에서 선이 향하는 점(보통 가운데) 양옆에 종류마다 향하는 점을 함께 돌려주고,
+  마지막 꺾는 점을 그 선과 같은 종류의 점 바로 아래에 둔 선은 그 점으로 곧게 올라가 두 삼각형이 나란히 놓인다. 삼각형 둘이
+  나란히 들지 않는 좁은 부모(48px보다 좁게 그려진 클래스, 다른 도구의 문서 아이콘 아티팩트)에는 점이 붙지 않는다. 관계는
   UML 표기를 따라야 하고, 어기면 그리지 않고 입력 오류로 돌려준다 — 상속은 같은 종류끼리(클래스와 추상 클래스는 같은 종류)
   긋고, 고리를 이루거나 자기 자신으로 가는 상속·실체화는 받지 않는다. 인터페이스가 하는 실체화와 인터페이스가 아닌 것으로 가는
   실체화는 그리되 알림을 준다. 패키지도·컴포넌트도·배치도(deployment diagram)도 같은 규칙을 쓴다. 거기서 패키지와 제공

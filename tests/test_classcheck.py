@@ -338,7 +338,18 @@ def test_shared_trunk_of_an_inheritance_tree_passes(kind):
 @pytest.mark.parametrize("kind_a, kind_b", [("generalization", "realization"), ("association", "association"),
                                             ("generalization", "association")])
 def test_shared_trunk_of_other_relations_fails(kind_a, kind_b):
-    assert kinds(tree(kind_a, kind_b)) == ["line_overlap"]
+    # 상속·실체화가 함께 오는 P에는 종류마다 향하는 점(180·210)이 정해지지만, 그 점 바로 아래가 아닌 가운데(195)로 모은 선은 그대로
+    # 가운데를 향해 포개진다
+    r = tree(kind_a, kind_b)
+    assert kinds(r) == ["line_overlap"]
+    # 고치는 법은 점을 따르지 않은 선이 걸렸을 때만 결과에 덧붙은 그 종류의 점을 알린다
+    aims = ('상속·실체화 선은 마지막 꺾는 점을 결과의 부모 자리 뒤에 덧붙은 같은 종류의 점("상속 향하는 점 180, 24", "실체화 향하는 점 210, 24")'
+            ' 바로 아래에 둔다')
+    assert (aims in r.failures[0].hint) == (kind_b == "realization"), r.failures[0].hint
+    if kind_b == "realization":
+        d = C.render({"classes": [box("P", 150, 0), box("C1", 0, 200), box("C2", 300, 200)],
+                      "relations": [rel("realization", "C2", "P"), rel("generalization", "C1", "P")]})
+        assert d.layout.by_key["P"].aims == (("generalization", (180, 24)), ("realization", (210, 24)))
 
 
 def test_siblings_with_slightly_shifted_triangles_are_not_a_trunk():

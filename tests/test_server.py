@@ -273,55 +273,97 @@ def test_tools_taking_inheritance_tell_how_to_share_one_trunk(name):
                    "    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다",
                    "자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다"):
         assert phrase in text, phrase
+    half, narrow = boxdiagram.AIM_SPLIT // 2, boxdiagram.AIM_EDGE
+    to = "으로" if edge == "변" else "로"
     within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if outside else ""
-    named = ", 부모의 모양 밖 이름이 오른쪽에 있거나" if outside else ""
-    two = ("    - 같은 부모로 상속·실체화가 함께 오면 종류마다 줄기를 따로 둔다",
-           f"세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {guide.TRUNK_SIDE}, 줄기 높이 y2 = y + {guide.TRUNK_SPLIT}"
-           "(첫 줄기보다 아래, 자식 쪽)",
-           "via에 [자식 가운데 x, y2], [x2, y2], [x2, 부모 가운데 y] 세 점을 주어",
-           "자식 가운데 x가 x2와 같으면 [x2, 부모 가운데 y] 하나만 준다.",
-           f"걸리거나, 부모 오른쪽 {edge}에 다른 선이 닿거나{named}, 첫 종류 자식의 가운데 x가 x2에서 {guide.TRUNK_NEAR}px "
-           f"안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 {edge}의 x(왼{within}) − {guide.TRUNK_SIDE}로 두어",
-           f"왼쪽도 그렇게 막히면 걸린 {noun}를 옮기거나 자식 차례를 바꾼다.",
-           f"y2가 자식 {noun}들의 위 {edge}보다 {guide.TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
-           f"{guide.TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다.")
-    for phrase in two:  # 줄기 종류가 하나인 도구(유즈케이스도)에는 두 줄기를 나누는 법이 없다
+    away = f"(부모의 모양 밖 이름이 오른쪽에 있으면 처음부터 다음 문장의 왼쪽 x2로 왼쪽 {edge}에 들인다)" if outside else ""
+    split = guide.TRUNK_SPLIT
+    two = (f"    - 같은 부모로 상속·실체화가 함께 오면 종류마다 향하는 점이 정해진다 — 상속은 가운데에서 왼쪽으로 {half}px, 실체화는 "
+           f'오른쪽으로 {half}px이고, 결과의 그 부모 자리 뒤에 "상속 향하는 점 x, y, 실체화 향하는 점 x, y"로 덧붙는다(덧붙은 값을 '
+           "그대로 쓴다).",
+           f"상속 선은 상속 향하는 점, 실체화 선은 실체화 향하는 점 바로 아래(x가 같게 — {boxdiagram.AIM_EPS}px 안이면 그 점에 "
+           "맞춘다)에 마지막 꺾는 점을 두면 그 점을 향해 곧게 들어가 두 종류의 삼각형이 나란히 놓인다.",
+           "꺾는 점 없이 곧게 잇는 선은 자식 가운데가 그 점 바로 아래면 그 점을 향하고, 그 밖의 선은 그대로 가운데를 향한다.",
+           "그러니 위 두 점의 [부모 가운데 x, y] 대신 상속 자식은 [상속 향하는 점의 x, 줄기 높이 y]를, 실체화 자식은 [실체화 향하는 "
+           "점의 x, 줄기 높이 y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 x와 같으면 그 점 하나만 주거나 꺾는 점 "
+           "없이 곧게 잇는다).",
+           f"    - 상속 자식의 가운데 x가 모두 실체화 향하는 점과 실체화 자식들보다 {guide.TRUNK_CLEAR}px 이상 왼쪽에 있고, 실체화 "
+           f"자식의 가운데 x가 모두 상속 향하는 점보다 {guide.TRUNK_CLEAR}px 이상 오른쪽에 있으면 두 가로 줄기가 떨어지니 같은 높이 "
+           "y에 둔다.",
+           f"아니면 같은 높이에서 두 가로 줄기가 포개지거나 한 줄로 이어져 보이니, 한 종류의 줄기를 y + {split}(자식 쪽)에 둔다. "
+           f"그때 위 줄기 종류의 자식 가운데 x가 다른 종류의 향하는 점 x에서 {guide.TRUNK_NEAR}px 안이면 세로 줄끼리 포개지니 그 자식을 "
+           "옮긴다.",
+           f"    - 종류마다 향하는 점이 있으면 줄기 높이 y(두 높이면 위 줄기)를 부모 아래 {edge}에서 "
+           f"{boxdiagram.TRIANGLE[0] + guide.TRUNK_CLEAR}px(삼각형 길이 + {guide.TRUNK_CLEAR}) 이상 떼어 다른 종류의 삼각형 밑을 "
+           "지나지 않게 한다.",
+           f"줄기를 y와 y + {split} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 아래 줄기를 자식 {noun}들의 위 {edge}보다 "
+           f"{guide.TRUNK_CLEAR}px 이상 위에 둔다 — 부모와 자식 사이를 {guide.TRUNK_ROOM}px 이상 띄우고 y를 부모와 자식 사이 "
+           "한가운데에 두면 다 맞는다.",
+           f"    - 결과의 부모 자리 뒤에 종류마다 향하는 점이 덧붙지 않으면(부모 아래 {edge}" + ("이" if edge == "변" else "가")
+           + f" {narrow}px보다 좁아 삼각형 둘이 나란히 들지 않을 때 등) 한 종류만 위대로 아래 {edge} 가운데에 모으고, 다른 종류는 "
+           f"옆 {edge}{to} 들인다.",
+           f"세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {guide.TRUNK_SIDE}로 정하고, 그 종류의 자식마다 via에 [자식 "
+           f"가운데 x, y + {split}], [x2, y + {split}], [x2, 부모 가운데 y] 세 점을 준다(자식 가운데 x가 x2와 같으면 [x2, 부모 "
+           f"가운데 y] 하나만){away}.",
+           f"x2 줄(y + {split}에서 부모 가운데 y까지)에 다른 {noun}가 걸리거나, 부모 "
+           f"오른쪽 {edge}에 다른 선이 닿거나, 아래 {edge}{to} 가는 자식의 가운데 x가 x2에서 {guide.TRUNK_NEAR}px 안이면 거울처럼 "
+           f"x2 = 부모 왼쪽 {edge}의 x(왼{within}) − {guide.TRUNK_SIDE}로 두어 왼쪽 {edge}{to} 들인다. 양쪽 다 막히면 걸린 "
+           f"{noun}를 옮기거나 자식 차례를 바꾼다.")
+    for phrase in two:  # 줄기 종류가 하나인 도구(유즈케이스도)에는 종류마다 향하는 점이 없다
         assert (phrase in text) == (len(trunks) > 1), phrase
     # 가운데는 그 도구의 결과에 덧붙는 것으로 셈한다 — 패키지를 받는 도구는 향하는 점, 모양 밖 이름이 있는 도구(유즈케이스도의
     # 액터·컴포넌트도의 막대사탕)는 모양 자리
     aims = any(boxdiagram.aims_off_center(s) for s in spec.shapes.values())
-    assert ("향하는 점이 덧붙어 있으면 그 점을 쓴다" in text) == aims == ("package" in spec.shapes)
+    assert ('관계 이름이 붙지 않은 "향하는 점 x, y"가 덧붙어 있으면 그 점을 쓴다' in text) == aims == ("package" in spec.shapes)
     assert ("모양 자리가 덧붙어 있으면 모양 자리로 셈한다" in text) == outside
     assert ('모양 밖 이름은 name_side "left"·"right"로 옆에 쓴다 — 위·아래면 줄기가 이름을 지난다' in text) == outside
 
 
 def test_trunk_numbers_fit_together():
-    # 둘째 줄기를 옆 변으로 들이는 끝 구간이 끝 모양보다 길고(짧으면 입력 오류), 가장 좁은 간격에서 y를 가운데에 두면 둘째 줄기가
-    # 자식 위 변에서 TRUNK_CLEAR 떨어진다. 붙어 감 판정(BOX_CLEARANCE)보다 넉넉하다
-    # 가장 좁은 간격에서 첫 줄기를 가운데에 두어도 첫 줄기 끝 구간이 끝 모양보다 길다
+    # 가장 좁은 간격에서 위 줄기를 가운데에 두어도 끝 구간이 끝 모양보다 길고, 아래 줄기 종류의 삼각형(아래 변에서 끝 모양 길이까지)과도
+    # 검사 여유 넘게 떨어진다
     for name in TRUNK_TOOLS:
         spec = PLACED_TOOLS[name][2]
         longest = max(t.end.length for t in spec.relations.values() if t.trunk and t.end is not None)
-        assert guide.TRUNK_SIDE > longest and guide.TRUNK_ROOM / 2 > longest
+        assert guide.TRUNK_ROOM / 2 - longest > boxcheck.OVERLAP_GAP
+        assert guide.TRUNK_SIDE > longest  # 좁은 부모의 옆 변으로 들이는 끝 구간이 끝 모양보다 길다(짧으면 입력 오류)
+    # 그때 아래 줄기가 자식 위 변에서 TRUNK_CLEAR 떨어지고, 그 거리는 붙어 감 판정(BOX_CLEARANCE)보다 넉넉하다
     assert guide.TRUNK_ROOM / 2 - guide.TRUNK_SPLIT >= guide.TRUNK_CLEAR > boxcheck.BOX_CLEARANCE
+    # 두 높이일 때 위 줄기는 다른 종류의 삼각형 밑변(아래 변 + 삼각형 길이)에서 TRUNK_CLEAR 떨어지라고 하고(실측: 3px부터 합격 —
+    # 선 끝 모양 검사 여유 OVERLAP_GAP 2), 가운데에 두면 그만큼 떨어진다
+    triangle = boxdiagram.TRIANGLE[0]
+    assert guide.TRUNK_CLEAR > boxcheck.OVERLAP_GAP and guide.TRUNK_ROOM / 2 >= triangle + guide.TRUNK_CLEAR
     assert guide.TRUNK_NEAR > boxcheck.OVERLAP_GAP
+    # 아래 변에 나란히 놓인 두 삼각형 사이(한 종류의 세로 줄과 다른 종류의 삼각형 사이는 더 넓다)도 검사 여유보다 넓다
+    assert boxdiagram.AIM_SPLIT - 2 * boxdiagram.TRIANGLE[1] > boxcheck.OVERLAP_GAP
 
 
 NUM = r"(-?[\d.]+)"
-PLACE = re.compile(rf"([^\s(),:]+)\({NUM}, {NUM}, {NUM}×{NUM}(?:, 모양 {NUM}, {NUM}, {NUM}×{NUM})?(?:, 향하는 점 {NUM}, {NUM})?\)")
+PLACE = re.compile(rf"([^\s(),:]+)\({NUM}, {NUM}, {NUM}×{NUM}(?:, 모양 {NUM}, {NUM}, {NUM}×{NUM})?(?:, 향하는 점 {NUM}, {NUM})?"
+                   rf"((?:, [^\s(),:]+ 향하는 점 {NUM}, {NUM})*)\)")
+KIND_AIM = re.compile(rf", ([^\s(),:]+) 향하는 점 {NUM}, {NUM}")
 INNER = {"kind": "class", "name": "Inner", "in": "P", "left": 300, "top": 44}  # 부모 패키지를 오른쪽·아래로 넓힌다
 
 
 def middles(name, field, args):
-    """도구를 불러 결과 글의 자리에서 요소마다 (자리, 가운데 x, 가운데 y, 향하는 점이 붙었는지)를 설명대로 읽는다 — 모양 자리가
-    덧붙어 있으면 자리는 모양 자리이고, 향하는 점이 덧붙어 있으면 그 점이 가운데다."""
+    """도구를 불러 결과 글의 자리를 읽는다(read_places)."""
     (r,) = run(server.mcp, (name, args))[2]
+    out = read_places(text(r))
+    assert set(out) == {b.get("id", b.get("name")) for b in args[field]}, text(r)
+    return out
+
+
+def read_places(result):
+    """결과 글의 자리에서 요소마다 (자리, 가운데 x, 가운데 y, 향하는 점이 붙었는지, {관계 이름: 종류마다 향하는 점})를 설명대로
+    읽는다 — 모양 자리가 덧붙어 있으면 자리는 모양 자리이고, 향하는 점이 덧붙어 있으면 그 점이 가운데다."""
     out = {}
-    for key, *nums in PLACE.findall(text(r)):
+    places = next(line for line in result.splitlines() if " 자리(왼, 위, 폭×높이): " in line)  # 검사 항목의 자리는 읽지 않는다
+    for m in PLACE.finditer(places.split(": ", 1)[1]):
+        key, nums = m.group(1), m.groups()[1:11]
         left, top, width, height = map(float, nums[4:8] if nums[4] else nums[:4])
         aim = tuple(map(float, nums[8:])) if nums[8] else (left + width / 2, top + height / 2)
-        out[key] = ((left, top, width, height), *aim, bool(nums[8]))
-    assert set(out) == {b.get("id", b.get("name")) for b in args[field]}, text(r)
+        kinds = {label: (float(x), float(y)) for label, x, y in KIND_AIM.findall(m.group(12))}
+        out[key] = ((left, top, width, height), *aim, bool(nums[8]), kinds)
     return out
 
 
@@ -369,7 +411,7 @@ def test_use_case_trunk_given_as_the_description_says(tmp_path, kind, more, pass
     """유즈케이스도 일반화 — 액터는 결과에 덧붙는 모양 자리(사람 모양)로 가운데와 위·아래 변을 셈한다."""
     parent = {"kind": kind, "name": "P", "left": 200, "top": 0, **more}
     first = {"file_name": "trunk", "elements": [parent], "out_dir": str(tmp_path)}
-    (left, top, width, height), px, _, _ = middles("draw_use_case_diagram", "elements", first)["P"]
+    (left, top, width, height), px, *_ = middles("draw_use_case_diagram", "elements", first)["P"]
     child_top = top + height + 60
     boxes = [parent] + [{**more, "kind": kind, "name": f"C{i}", "left": x, "top": child_top} for i, x in enumerate((0, 200, 400))]
     args = {"file_name": "trunk", "elements": boxes, "out_dir": str(tmp_path)}
@@ -383,64 +425,104 @@ def test_use_case_trunk_given_as_the_description_says(tmp_path, kind, more, pass
 
 
 R, G = "realization", "generalization"
-TWO_KINDS = (R, R, G, G), (0, 200, 400, 600)
+LABEL = {R: "실체화", G: "상속"}
+CHILD = {R: "class", G: "interface"}  # 실체화는 클래스가, 상속은 인터페이스가 한다
+LEFTS = (0, 200, 400, 600)
 
 
-def two_kinds(tmp_path, name, field, kinds, lefts, side="right", room=guide.TRUNK_ROOM, parent_kind="interface", more=(),
+def two_kinds(tmp_path, name, field, kinds, lefts=LEFTS, room=guide.TRUNK_ROOM, upper=None, together=False, more=(),
               others=()):
-    """부모 P(왼 200, 폭 140) 아래 room 띄운 줄에 자식(kinds[i] — 실체화는 클래스, 상속은 인터페이스)을 두고, 설명대로 첫 종류는
-    아래 변에, 다른 종류는 side 쪽 변에 모은다. more·others는 더 둘 요소·관계. (줄기를 준 그림 결과 글, 두 종류를 한 줄기로
-    모은 그림 결과 글)."""
-    parent = {"kind": parent_kind, "name": "P", "left": 200, "top": 0, "width": 140}
-    (left, top, width, height), px, py, _ = middles(name, field, {"file_name": "trunk", field: [parent],
-                                                                  "out_dir": str(tmp_path)})["P"]
+    """인터페이스 P(왼 200, 폭 140) 아래 room 띄운 줄에 자식(kinds[i])을 두고, 설명대로 종류마다 향하는 점(상속은 가운데에서
+    왼쪽으로, 실체화는 오른쪽으로 AIM_SPLIT/2)으로 꺾는 점을 준다. 줄기 높이 y는 부모와 자식 사이 가운데 — upper를 주면 그 종류는
+    y에, 다른 종류는 y + TRUNK_SPLIT에 두고, 주지 않으면 둘 다 y에 둔다. together면 두 종류를 부모 가운데 한 점으로 모은다.
+    more·others는 더 둘 요소·관계. (결과 글, 그 결과의 P 자리 뒤에 덧붙은 종류마다 향하는 점)."""
+    parent = {"kind": "interface", "name": "P", "left": 200, "top": 0, "width": 140}
+    (left, top, width, height), px, py, *_ = middles(name, field, {"file_name": "trunk", field: [parent],
+                                                                   "out_dir": str(tmp_path)})["P"]
     child_top = top + height + room
-    boxes = [parent, *more] + [{"kind": "class" if k == R else "interface", "name": f"C{i}", "left": x, "top": child_top,
-                                "width": 140} for i, (k, x) in enumerate(zip(kinds, lefts))]
+    boxes = [parent, *more] + [{"kind": CHILD[k], "name": f"C{i}", "left": x, "top": child_top, "width": 140}
+                               for i, (k, x) in enumerate(zip(kinds, lefts))]
     args = {"file_name": "trunk", field: boxes, "out_dir": str(tmp_path)}
     m = middles(name, field, args)
     assert m["P"][:3] == ((left, top, width, height), px, py)
+    half = boxdiagram.AIM_SPLIT / 2
     y = (top + height + child_top) / 2
-    y2 = y + guide.TRUNK_SPLIT
-    x2 = left + width + guide.TRUNK_SIDE if side == "right" else left - guide.TRUNK_SIDE
-    trunks, together = list(others), list(others)
+    relations = list(others)
     for i, k in enumerate(kinds):
         cx = m[f"C{i}"][1]
-        first = [[px, y]] if cx == px else [[cx, y], [px, y]]
-        if k == kinds[0]:
-            via = first
-        else:
-            via = [[x2, py]] if cx == x2 else [[cx, y2], [x2, y2], [x2, py]]
-        trunks.append({"kind": k, "from": f"C{i}", "to": "P", "via": via})
-        together.append({"kind": k, "from": f"C{i}", "to": "P", "via": first})
-    return [text(r) for r in run(server.mcp, (name, {**args, "relations": trunks}), (name, {**args, "relations": together}))[2]]
+        ax = px if together else px - half if k == G else px + half
+        yk = y + guide.TRUNK_SPLIT if upper is not None and k != upper else y
+        relations.append({"kind": k, "from": f"C{i}", "to": "P", "via": [[ax, yk]] if cx == ax else [[cx, yk], [ax, yk]]})
+    (r,) = run(server.mcp, (name, {**args, "relations": relations}))[2]
+    return text(r), read_places(text(r))["P"][4]
 
 
 @pytest.mark.parametrize("name, field", [("draw_class_diagram", "classes"), ("draw_package_diagram", "elements")])
-@pytest.mark.parametrize("kinds", [(R, R, G, G), (G, R, G, R)])
+@pytest.mark.parametrize("kinds, upper", [((G, G, R, R), None), ((R, R, G, G), R), ((R, R, G, G), G), ((G, R, G, R), G),
+                                          ((R, G, R, G), R)])
 @pytest.mark.parametrize("room", [guide.TRUNK_ROOM, 120])
-def test_two_kinds_to_one_parent_given_as_the_description_says_pass(tmp_path, name, field, kinds, room):
-    """인터페이스 P를 클래스가 실체화하고 인터페이스가 상속한다 — 첫 종류는 아래 변에, 다른 종류는 그보다 아래 줄기로 오른쪽 변에.
-    부모와 자식 사이는 설명이 말하는 가장 좁은 간격(TRUNK_ROOM)과 넉넉한 간격. 두 종류를 한 줄기로 모으면 불합격이다."""
-    passed, together = two_kinds(tmp_path, name, field, kinds, TWO_KINDS[1], room=room)
+def test_two_kinds_to_one_parent_given_as_the_description_says_pass(tmp_path, name, field, kinds, upper, room):
+    """인터페이스 P를 클래스가 실체화하고 인터페이스가 상속한다 — 결과에 덧붙는 종류마다의 향하는 점(가운데 270의 왼쪽·오른쪽
+    AIM_SPLIT/2)으로 줄기를 따로 모은다. 상속 자식이 모두 왼쪽, 실체화 자식이 모두 오른쪽이면 같은 높이에, 아니면 한 종류를
+    TRUNK_SPLIT 아래에. 간격은 설명이 말하는 가장 좁은 것(TRUNK_ROOM)과 넉넉한 것."""
+    passed, aims = two_kinds(tmp_path, name, field, kinds, room=room, upper=upper)
     assert passed.startswith("합격"), passed
-    assert together.startswith("불합격")
+    half = boxdiagram.AIM_SPLIT / 2
+    assert [(k, x) for k, (x, _) in aims.items()] == [("상속", 270 - half), ("실체화", 270 + half)]
 
+
+@pytest.mark.parametrize("kinds, lefts, passes", [
+    ((G, G, R, R), LEFTS, True),
+    ((G, G, R), (0, 200, 400), True),  # 상속 자식 C1(가운데 270)이 두 점(255·285) 사이여도 실체화 점·자식보다 왼쪽이면 된다
+    ((R, R, G, G), LEFTS, False),
+    ((G, R, G, R), LEFTS, False),
+])
+def test_two_kinds_at_one_height_overlap_unless_each_kind_keeps_to_its_side(tmp_path, kinds, lefts, passes):
+    # 설명의 같은 높이 조건 — 상속 자식이 모두 실체화 점·자식보다 왼쪽이고 실체화 자식이 모두 상속 점보다 오른쪽이면 합격, 아니면
+    # 두 가로 줄기가 포개진다
+    same, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", kinds, lefts=lefts)
+    if passes:
+        assert same.startswith("합격"), same
+    else:
+        assert same.startswith("불합격") and "선끼리 포개진다" in same, same
+
+
+def test_two_kinds_gathered_to_the_parent_middle_fail(tmp_path):
+    together, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", (G, G, R, R), together=True)
+    assert together.startswith("불합격"), together
+
+
+def test_child_right_under_its_kinds_aim_gets_one_point(tmp_path):
+    # 상속 자식 C1의 가운데 x(255)가 상속 향하는 점과 같아 [255, y] 하나만 받는다 — 두 점을 주면 같은 점이 이어져 입력 오류
+    passed, aims = two_kinds(tmp_path, "draw_class_diagram", "classes", (G, G, R), lefts=(-100, 185, 400))
+    assert aims["상속"][0] == 255 and passed.startswith("합격"), passed
+
+
+@pytest.mark.parametrize("shift, passes", [(0, False), (guide.TRUNK_NEAR + 1, True)])
+def test_upper_kind_child_right_under_the_other_kinds_aim_overlaps(tmp_path, shift, passes):
+    # 위 줄기(상속) 자식 C1의 가운데 x가 실체화 향하는 점(285)과 같으면 그 세로 줄이 아래 줄기(실체화)의 마지막 세로 줄과 포개진다 —
+    # 설명대로 TRUNK_NEAR 밖으로 옮기면 합격
+    result, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", (R, G, R), lefts=(-100, 215 + shift, 500), upper=G)
+    assert result.startswith("합격" if passes else "불합격"), result
 
 
 @pytest.mark.parametrize("name_side, chosen, other", [("right", "left", "right"), ("left", "right", "left")])
-def test_second_trunk_goes_away_from_the_parent_name_outside_the_shape(tmp_path, name_side, chosen, other):
-    """이름을 모양 밖 옆에 쓰는 부모(아이콘 표기 아티팩트) — 아티팩트가 상속하고 클래스가 실현한다. 설명대로 둘째 줄기는 이름 반대쪽
-    변(이름이 오른쪽이면 왼쪽 거울)에 모으고 x2는 모양 자리로 셈한다. 이름 쪽 변으로 모으면 그 이름을 지난다."""
+def test_parent_too_narrow_for_two_triangles_takes_the_other_kind_on_a_side(tmp_path, name_side, chosen, other):
+    """이름을 모양 밖 옆에 쓰는 부모(아이콘 표기 아티팩트, 폭 30)는 삼각형 둘이 나란히 들지 않아 향하는 점이 나뉘지 않는다(덧붙지
+    않는다) — 클래스가 실현하고 아티팩트가 상속한다. 설명대로 한 종류는 아래 변에, 다른 종류는 y + TRUNK_SPLIT 줄기로 이름 반대쪽
+    옆 변에 들인다(마지막 꺾는 점은 모양 자리 변에서 TRUNK_SIDE 밖). 이름 쪽 변으로 들이면 그 이름을 지난다."""
     parent = {"kind": "artifact_icon", "id": "P", "name": "app.jar", "left": 200, "top": 0, "name_side": name_side}
     first = {"file_name": "trunk", "elements": [parent], "out_dir": str(tmp_path)}
-    (left, top, width, height), px, py, _ = middles("draw_package_diagram", "elements", first)["P"]
+    (left, top, width, height), px, py, *_ = middles("draw_package_diagram", "elements", first)["P"]
+    assert width < boxdiagram.AIM_EDGE
     y = top + height + 30
     kinds = (R, G, R, G)
     boxes = [parent] + [{"kind": "class" if k == R else "artifact", "name": f"C{i}", "left": x, "top": top + height + 60,
-                         "width": 140} for i, (k, x) in enumerate(zip(kinds, TWO_KINDS[1]))]
+                         "width": 140} for i, (k, x) in enumerate(zip(kinds, LEFTS))]
     args = {"file_name": "trunk", "elements": boxes, "out_dir": str(tmp_path)}
-    m = middles("draw_package_diagram", "elements", args)
+    straight = [{"kind": k, "from": f"C{i}", "to": "P"} for i, k in enumerate(kinds)]
+    m = middles("draw_package_diagram", "elements", {**args, "relations": straight})
+    assert m["P"][4] == {}
 
     def draw_to(side):
         x2 = left + width + guide.TRUNK_SIDE if side == "right" else left - guide.TRUNK_SIDE
@@ -460,14 +542,45 @@ def test_second_trunk_goes_away_from_the_parent_name_outside_the_shape(tmp_path,
     assert crossed.startswith("불합격") and "이름 칸" in crossed, crossed
 
 
+@pytest.mark.parametrize("more, others, blocked", [
+    ([{"name": "S", "left": 260, "top": 0}], [], "선이 상자를 지난다"),  # 오른쪽 세로 줄에 다른 상자
+    ([{"name": "Q", "left": 400, "top": 0}], [{"kind": "association", "from": "P", "to": "Q", "navigable": "none"}],
+     "선끼리 포개진다"),  # 오른쪽 변 가운데에서 같은 높이의 Q로 나가는 선
+])
+def test_narrow_parent_takes_the_other_kind_on_the_left_when_the_right_is_taken(tmp_path, more, others, blocked):
+    """폭 40 클래스 P는 아래 변이 AIM_EDGE보다 좁아 향하는 점이 정해지지 않는다 — 상속은 아래 변에, 실체화(클래스로 가니 표기 규칙
+    알림이 붙는다)는 옆 변으로 들인다.
+    오른쪽 세로 줄이 다른 상자에 걸리거나 오른쪽 변에 다른 선이 닿으면 설명대로 왼쪽으로 들여야 합격한다."""
+    boxes = [{"name": "P", "left": 200, "top": 0, "width": 40}, *more,
+             {"name": "A", "left": 0, "top": 108}, {"name": "B", "left": 300, "top": 108}]
+    args = {"file_name": "narrow", "classes": boxes, "out_dir": str(tmp_path)}
+    m = middles("draw_class_diagram", "classes", {**args, "relations": [{"kind": G, "from": "A", "to": "P"},
+                                                                         {"kind": R, "from": "B", "to": "P"}]})
+    (left, top, width, height), px, py, _, aims = m["P"]
+    assert width < boxdiagram.AIM_EDGE and aims == {}
+    y = (top + height + 108) / 2
+
+    def draw_to(side):
+        x2 = left + width + guide.TRUNK_SIDE if side == "right" else left - guide.TRUNK_SIDE
+        y2 = y + guide.TRUNK_SPLIT
+        relations = [*others, {"kind": G, "from": "A", "to": "P", "via": [[m["A"][1], y], [px, y]]},
+                     {"kind": R, "from": "B", "to": "P", "via": [[m["B"][1], y2], [x2, y2], [x2, py]]}]
+        (r,) = run(server.mcp, ("draw_class_diagram", {**args, "relations": relations}))[2]
+        return text(r)
+
+    right = draw_to("right")
+    assert right.startswith("불합격") and blocked in right, right
+    assert draw_to("left").startswith("합격"), draw_to("left")
+
+
 @pytest.mark.parametrize("name, parent, end", [
     ("draw_package_diagram", {"kind": "package", "name": "P"}, "패키지('P')는"),
     ("draw_component_diagram", {"kind": "lollipop", "id": "P", "name": "Payment API", "name_side": "right"},
      "제공 인터페이스 원('P')은"),
 ])
 def test_two_kinds_cannot_meet_at_a_package_or_ball_parent(tmp_path, name, parent, end):
-    """패키지·제공 인터페이스 원은 상속의 끝이 될 수 없어(#37) 상속과 실체화 두 종류가 이 부모에 모이는 그림은 입력 오류다 — 둘째
-    줄기를 옆 변에 모으는 법은 두 종류를 받는 부모(클래스·인터페이스·컴포넌트 등)에만 쓰인다."""
+    """패키지·제공 인터페이스 원은 상속의 끝이 될 수 없어(#37) 상속과 실체화 두 종류가 이 부모에 모이는 그림은 입력 오류다 — 종류마다
+    향하는 점을 나누는 것은 두 종류를 받는 부모(클래스·인터페이스·컴포넌트 등)에만 쓰인다."""
     boxes = [{**parent, "left": 200, "top": 0}, {"kind": "class", "name": "C0", "left": 0, "top": 150},
              {"kind": "component", "name": "C1", "left": 400, "top": 150}]
     relations = [{"kind": R, "from": "C0", "to": "P"}, {"kind": G, "from": "C1", "to": "P"}]
@@ -476,34 +589,21 @@ def test_two_kinds_cannot_meet_at_a_package_or_ball_parent(tmp_path, name, paren
     assert r.is_error and f"relations[1]: {end} 상속의 끝이 될 수 없다" in text(r), text(r)
 
 
-@pytest.mark.parametrize("kinds, lefts, more", [
-    ((R, R, G, G), TWO_KINDS[1], [{"kind": "class", "name": "S", "left": 360, "top": 0}]),  # x2 줄에 다른 상자
-    ((G, R, G), (0, 500, 300), []),  # 첫 종류 자식 C2의 가운데 x(370)가 x2와 같다
-])
-def test_second_trunk_goes_to_the_left_when_the_right_column_is_taken(tmp_path, kinds, lefts, more):
-    right, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", kinds, lefts, more=more)
-    assert right.startswith("불합격")
-    left, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", kinds, lefts, side="left", more=more)
-    assert left.startswith("합격"), left
-
-
-def test_second_trunk_goes_to_the_left_when_a_line_leaves_the_right_side(tmp_path):
-    # 부모 오른쪽 변 가운데에서 같은 높이의 Q로 연관선이 나가면 둘째 줄기 끝 구간이 그 선과 포개진다
-    more = [{"kind": "class", "name": "Q", "left": 480, "top": 0}]
-    others = [{"kind": "association", "from": "P", "to": "Q", "navigable": "none"}]
-    right, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", (R, G, R, G), TWO_KINDS[1], more=more, others=others)
-    assert right.startswith("불합격") and "선끼리 포개진다" in right
-    left, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", (R, G, R, G), TWO_KINDS[1], side="left", more=more,
-                        others=others)
-    assert left.startswith("합격"), left
-
-
-@pytest.mark.parametrize("lefts, side", [((0, 300), "right"), ((300, 100), "left")])
-def test_second_kind_child_right_under_the_column_gets_one_point(tmp_path, lefts, side):
-    # 둘째 종류 자식의 가운데 x가 x2(오른쪽 370, 왼쪽 170)와 같으면 [x2, 부모 가운데 y] 하나만 — 세 점을 주면 앞 점과 같아 입력 오류
-    kinds = (G, R) if side == "right" else (R, G)
-    passed, _ = two_kinds(tmp_path, "draw_class_diagram", "classes", kinds, lefts, side=side)
-    assert passed.startswith("합격"), passed
+def test_result_adds_the_point_each_kind_aims_at_after_the_place(tmp_path):
+    # UML 1 표기 컴포넌트 P는 비켜난 향하는 점(상자 가운데) 뒤에 종류마다 그 점의 왼쪽·오른쪽 AIM_SPLIT/2를 덧붙인다. 한 종류만
+    # 받거나 받지 않는 요소에는 덧붙지 않는다
+    boxes = [{"kind": "component_icon", "name": "P", "left": 200, "top": 0, "width": 140},
+             {"kind": "class", "name": "A", "left": 0, "top": 150},
+             {"kind": "component_icon", "name": "B", "left": 400, "top": 150},
+             {"kind": "class", "name": "D", "left": 400, "top": 300}]
+    relations = [{"kind": R, "from": "A", "to": "P"}, {"kind": G, "from": "B", "to": "P"}, {"kind": R, "from": "D", "to": "B"}]
+    (r,) = run(server.mcp, ("draw_component_diagram", {"file_name": "aims", "elements": boxes, "relations": relations,
+                                                       "out_dir": str(tmp_path)}))[2]
+    assert ("요소 자리(왼, 위, 폭×높이): P(200, 0, 140×48, 향하는 점 274, 24, 상속 향하는 점 259, 24, 실체화 향하는 점 289, 24), "
+            "A(0, 150, 90×48), B(400, 150, 98×48, 향하는 점 453, 174), D(400, 300, 90×48)") in text(r), text(r)
+    assert 274 - boxdiagram.AIM_SPLIT / 2 == 259
+    m = middles("draw_component_diagram", "elements", {"file_name": "aims", "elements": boxes, "out_dir": str(tmp_path)})
+    assert m["P"][4] == {}  # 관계가 없으면 나누지 않는다
 
 
 def test_relation_fields_say_where_lines_start_for_each_tool():
@@ -528,13 +628,22 @@ def test_new_tools_tell_what_the_result_adds_to_the_places_of_their_shapes():
         if spec.extended:
             assert guide.places_result(spec) in tools[name].description, name
     assert guide.places_result(packagediagram.SPEC).startswith(guide.PLACES_RESULT + "\n" + guide.OUTSIDE_PLACES + "\n" + aim)
-    # 유즈케이스도: 액터의 모양 자리는 붙고, 액터·유즈케이스가 향하는 점은 가운데를 정수로 내린 점이라 붙이지 않는다
+    # 상속·실체화를 함께 받는 도구는 종류마다 향하는 점을 덧붙인다고 끝에 적는다 — 클래스도 결과 설명도 같은 글을 쓴다
+    kinds = ('  같은 부모로 상속·실체화가 함께 오는 {0}는 그 {0}의 자리 뒤에 종류마다 향하는 점을 "상속 향하는 점 x, y, 실체화 향하는 점 x, '
+             'y"로 덧붙인다(마지막 꺾는 점 — 꺾는 점이 없으면 자식 가운데 — 이 그 점 바로 아래인 그 종류의 선이 그 점을 향한다. '
+             "공유 줄기를 종류마다 그 점으로 모을 때 쓴다. 모양이 좁아 두 종류의 삼각형이 나란히 들지 않으면 덧붙지 않는다).")
+    assert guide.places_result(packagediagram.SPEC).endswith("\n" + kinds.format("요소"))
+    class_aims = kinds.format("상자")
+    assert guide.trunk_aims(classdiagram.SPEC) == class_aims and class_aims in server.CLASS_TOOL
+    # 유즈케이스도: 액터의 모양 자리는 붙고, 액터·유즈케이스가 향하는 점은 가운데를 정수로 내린 점이라 붙이지 않는다. 공유 줄기는
+    # 일반화 하나뿐이라 종류마다 향하는 점도 없다
     assert guide.places_result(usecasediagram.SPEC) == guide.PLACES_RESULT + "\n" + guide.OUTSIDE_PLACES
-    assert "향하는 점" not in server.CLASS_TOOL and "향하는 점" not in usecasediagram.TOOL
-    # 비켜난 점을 향하는 모양도 모양 밖 이름도 없는 도구는 PLACES_RESULT만
+    assert guide.trunk_aims(usecasediagram.SPEC) == "" and "향하는 점" not in usecasediagram.TOOL
+    assert '"향하는 점 x, y"' not in server.CLASS_TOOL  # 클래스도에는 비켜난 점을 향하는 모양이 없다
+    # 비켜난 점을 향하는 모양도 모양 밖 이름도 공유 줄기 종류 둘도 없는 도구는 PLACES_RESULT만
     plain = boxdiagram.Spec({k: s for k, s in packagediagram.SPEC.shapes.items()
                              if not boxdiagram.aims_off_center(s) and not s.outside_name},
-                            classdiagram.RELATIONS, extended=True)
+                            {k: t for k, t in classdiagram.RELATIONS.items() if k != "realization"}, extended=True)
     assert guide.places_result(plain) == guide.PLACES_RESULT
 
 

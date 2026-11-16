@@ -8,7 +8,8 @@
   상태도·액티비티도의 via 설명도 쓴다.
 - NESTING(마): 요소 안에 요소 두기.
 - NAME_SIDE(바): 모양 밖 이름의 쪽.
-- places_result(사): 새 도구의 결과 글 설명. 그 도구의 모양에 따라 자리 뒤에 덧붙는 것(모양 자리·선이 향하는 점)도 적는다.
+- places_result(사): 새 도구의 결과 글 설명. 그 도구의 모양과 관계에 따라 자리 뒤에 덧붙는 것(모양 자리·선이 향하는 점·종류마다
+  향하는 점)도 적는다. 종류마다 향하는 점(trunk_aims)은 클래스도 결과 설명도 쓴다.
 - spacing_tips(아): AI가 배치하는 그림의 배치 요령 끝 두 항목(요소 사이 띄우기·요소 크기).
 - box_tool(자): 상자 그림(공용 엔진 boxdiagram이 그리는 그림) 도구 설명 전체. 그림 모듈은 제 소개·입력·표기·요령만 넘긴다.
 """
@@ -17,20 +18,20 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from .boxcheck import KINDS, bend_away
-from .boxdiagram import (ARROW, ARROW_HEAD, ELEMENT_WORDS, LABEL_LINE, NAVIGABLE, NEST_PAD, SIDES, RelationType, Spec, Words,
-                          aims_off_center, josa)
+from .boxdiagram import (AIM_EDGE, AIM_EPS, AIM_SPLIT, ARROW, ARROW_HEAD, ELEMENT_WORDS, LABEL_LINE, NAVIGABLE, NEST_PAD,
+                         SIDES, RelationType, Spec, Words, aims_off_center, josa, kind_aim, split_kinds, trunk_kinds)
 from .canvas import MIN_SCALE, SCALE
 from .report import fmt_num
 
 MAX_IMAGE_EDGE = 1568  # 돌려주는 그림의 긴 변 상한(px). Claude는 이보다 큰 그림을 어차피 줄여서 본다
 DEFAULT_DIR = "diagrams"
 INPUT_SUFFIX = ".cysuml.json"  # 그림 옆에 저장하는 입력 파일의 끝. package.json 같은 남의 파일과 이름이 겹치지 않게 cysUML만 쓴다
-# 같은 부모로 종류가 다른 두 줄기를 둘 때의 수(px). 맞물리는 조건은 test_server가 본다
-TRUNK_SPLIT = 20  # 둘째 줄기는 첫 줄기보다 이만큼 아래(자식 쪽)에 둔다
-TRUNK_SIDE = 30  # 둘째 줄기를 부모 옆 변으로 들일 때 그 변에서 떼는 거리. 끝 구간이 끝 모양 길이보다 길어야 한다
-TRUNK_CLEAR = 10  # 둘째 줄기가 자식 위 변에서 떨어져야 하는 거리(실측 5px까지 합격 — 붙어 감 판정은 4px)
-TRUNK_ROOM = 60  # 부모와 자식 사이 간격. 첫 줄기를 가운데에 두면 둘째 줄기가 자식 위 변에서 TRUNK_CLEAR 떨어진다
-TRUNK_NEAR = 4  # 첫 종류 자식의 세로 줄이 둘째 줄기의 세로 줄에서 이만큼 안이면 포개진다(boxcheck.OVERLAP_GAP 2 + 여유)
+# 같은 부모로 종류가 다른 두 줄기를 높이를 달리해 둘 때의 수(px). 맞물리는 조건은 test_server가 본다
+TRUNK_SPLIT = 20  # 한 종류의 줄기를 다른 종류의 줄기보다 이만큼 아래(자식 쪽)에 둔다
+TRUNK_CLEAR = 10  # 아래 줄기가 자식 위 변에서 떨어져야 하는 거리(실측 5px까지 합격 — 붙어 감 판정은 4px)
+TRUNK_ROOM = 60  # 부모와 자식 사이 간격. 위 줄기를 가운데에 두면 아래 줄기가 자식 위 변에서 TRUNK_CLEAR 떨어진다
+TRUNK_NEAR = 4  # 위 줄기 종류 자식의 세로 줄이 아래 줄기의 마지막 세로 줄에서 이만큼 안이면 포개진다(boxcheck.OVERLAP_GAP 2 + 여유)
+TRUNK_SIDE = 30  # 좁은 부모로 한 종류를 옆 변으로 들일 때 마지막 꺾는 점을 그 변에서 떼는 거리. 끝 구간이 끝 모양 길이보다 길어야 한다
 
 KIND_NAMES = {  # 불합격 종류(boxcheck.KINDS)를 도구 설명에 쓰는 말. "요소"는 도구의 말(클래스도는 상자)로 바꿔 쓴다(kind_names)
     "box_overlap": "요소끼리 겹치거나 붙음",
@@ -109,14 +110,34 @@ def _holds(spec: Spec) -> bool:
     return any(s.holds for s in spec.shapes.values())
 
 
+def _types(spec: Spec, kinds: Iterable[str]) -> list[RelationType]:
+    return [spec.relations[k] for k in kinds]
+
+
+def trunk_aims(spec: Spec) -> str:
+    """결과 글의 자리 뒤에 덧붙는 종류마다의 향하는 점(boxdiagram._split_aims) 설명. 엔진이 나누지 않는 도구(split_kinds가 빈
+    튜플)는 빈 글."""
+    types = _types(spec, split_kinds(spec))
+    if not types:
+        return ""
+    noun, labels = spec.words.noun, _joined(t.label for t in types)
+    shown = ", ".join(kind_aim(t.label, "x", "y") for t in types)
+    return (f"  같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오는 {noun}{josa(noun, '은', '는')} 그 {noun}의 자리 뒤에 종류마다 "
+            f"향하는 점을 \"{shown}\"로 덧붙인다(마지막 꺾는 점 — 꺾는 점이 없으면 자식 가운데 — 이 그 점 바로 아래인 그 종류의 선이 "
+            f"그 점을 향한다. 공유 줄기를 종류마다 그 점으로 모을 때 쓴다. 모양이 좁아 두 종류의 삼각형이 나란히 들지 않으면 덧붙지 "
+            f"않는다).")
+
+
 def places_result(spec: Spec) -> str:
     """새 도구의 결과 글 설명 — PLACES_RESULT 뒤에, 그 도구의 모양에 따라 자리 뒤에 덧붙는 것(모양 밖 이름의 모양 자리, 선이 향하는
-    점)을 적는다."""
+    점, 종류마다 향하는 점)을 적는다."""
     lines = [PLACES_RESULT] + ([OUTSIDE_PLACES] if _outside(spec) else [])
     if kinds := _aiming(spec):
         named = "·".join(f'"{k}"' for k in kinds)
         lines.append(f"  선이 모양 가운데에서 비켜난 점을 향하는 요소(kind {named})는 그 뒤에 그 점을 \"향하는 점 x, y\"로 "
                      "덧붙인다(꺾는 점을 그 점의 위아래나 옆에 줄 때 쓴다).")
+    if aims := trunk_aims(spec):
+        lines.append(aims)
     return "\n".join(lines)
 
 MEMBERS = """속성·연산은 한 줄 문자열(그대로 쓴다)이나 객체다. 속성 객체는 name(필수)·type·default·visibility(기본 "-")·static, \
@@ -227,8 +248,7 @@ def relation_fields(spec: Spec) -> str:
     lines.append(f"  - via: 꺾는 점 [[x, y], …]. 선은 {middle}에서 첫 꺾는 점(없으면 {other})으로 가는 선이 "
                  f"{noun} {edge}{josa(edge, '과', '와')} 만나는 곳에서 시작한다. 자기 자신으로 가는 관계는 꺾는 점이 둘 이상 있어야 "
                  f"한다{never_self}." + (f" {arrow_bend(spec.words)}" if arrows else ""))
-    trunks = [t for t in types.values() if t.trunk]
-    if trunks:
+    if trunks := _types(spec, trunk_kinds(spec)):
         lines.append(_trunk(trunks, spec))
     if rules := spec.rules.guide(spec):
         lines.append(rules)
@@ -245,7 +265,7 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
     ga = josa(head, "이", "가")
     outside = _outside(spec)
     shape = " — 모양 자리가 덧붙어 있으면 모양 자리로 셈한다(반 픽셀이면 정수로 내린다)" if outside else ""
-    aim = ". 향하는 점이 덧붙어 있으면 그 점을 쓴다" if _aiming(spec) else ""
+    aim = ". 관계 이름이 붙지 않은 \"향하는 점 x, y\"가 덧붙어 있으면 그 점을 쓴다" if _aiming(spec) else ""
     middle = f"결과의 {noun} 자리에서 왼 + 폭/2, 위 + 높이/2{shape}{aim}"
     edges = "(모양 자리가 덧붙어 있으면 모양 자리의 변)" if outside else ""
     sides = '(모양 밖 이름은 name_side "left"·"right"로 옆에 쓴다 — 위·아래면 줄기가 이름을 지난다)' if outside else ""
@@ -257,21 +277,39 @@ def _trunk(types: list[RelationType], spec: Spec) -> str:
              f"정한다. 부모 아래 {edge}에서 {head} 길이 {fmt_num(longest)}px보다 가까우면 입력 오류다.",
              f"    - 자식(from)마다 via에 [자식 가운데 x, y]와 [부모 가운데 x, y] 두 점을 준다. 마지막 점이 모두 같아 {head}{ga} 한 자리에 "
              f"그려진다. 자식 가운데 x가 부모 가운데 x와 같으면 두 점이 같아지니 [부모 가운데 x, y] 하나만 준다."]
-    if len(types) > 1:
-        labels = _joined(t.label for t in types)
+    if split := split_kinds(spec):  # 엔진이 나누는 도구 — 왼쪽·오른쪽 종류를 엔진과 같은 판정에서 받는다
+        (first, second), half = (t.label for t in _types(spec, split)), fmt_num(AIM_SPLIT / 2)
+        narrow = fmt_num(AIM_EDGE)
+        to = josa(edge, "으로", "로")
         within = ", 모양 자리가 덧붙어 있으면 모양 자리로" if outside else ""
-        named = ", 부모의 모양 밖 이름이 오른쪽에 있거나" if outside else ""
-        lines += [f"    - 같은 부모로 {labels}{josa(labels, '이', '가')} 함께 오면 종류마다 줄기를 따로 둔다. 한 종류는 위대로 아래 "
-                  f"{edge}에 모은다. 다른 종류는 세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {TRUNK_SIDE}, 줄기 높이 "
-                  f"y2 = y + {TRUNK_SPLIT}(첫 줄기보다 아래, 자식 쪽)로 정하고 자식마다 via에 [자식 가운데 x, y2], [x2, y2], "
-                  f"[x2, 부모 가운데 y] 세 점을 주어 부모 오른쪽 {edge}에 모은다. 자식 가운데 x가 x2와 같으면 [x2, 부모 가운데 y] "
-                  f"하나만 준다.",
-                  f"    - x2 줄(y2에서 부모 가운데 y까지)에 다른 {noun}{josa(noun, '이', '가')} 걸리거나, 부모 오른쪽 {edge}에 다른 "
-                  f"선이 닿거나{named}, 첫 종류 자식의 가운데 x가 x2에서 {TRUNK_NEAR}px 안이면 왼쪽으로 거울처럼 x2 = 부모 왼쪽 "
-                  f"{edge}의 x(왼{within}) − {TRUNK_SIDE}로 두어 왼쪽 {edge}에 모은다. 왼쪽도 그렇게 막히면 걸린 "
-                  f"{noun}{josa(noun, '을', '를')} 옮기거나 자식 차례를 바꾼다.",
-                  f"    - 두 줄기를 둘 때는 y2가 자식 {noun}들의 위 {edge}보다 {TRUNK_CLEAR}px 이상 위여야 한다 — 부모와 자식 사이를 "
-                  f"{TRUNK_ROOM}px 이상 띄우고, y를 가운데보다 아래로 내리지 않는다. y2를 y보다 위에 두면 첫 줄기와 포개진다."]
+        away = f"(부모의 모양 밖 이름이 오른쪽에 있으면 처음부터 다음 문장의 왼쪽 x2로 왼쪽 {edge}에 들인다)" if outside else ""
+        lines += [f"    - 같은 부모로 {first}·{second}{josa(second, '이', '가')} 함께 오면 종류마다 향하는 점이 정해진다 — "
+                  f"{first}{josa(first, '은', '는')} 가운데에서 왼쪽으로 {half}px, {second}{josa(second, '은', '는')} 오른쪽으로 "
+                  f"{half}px이고, 결과의 그 부모 자리 뒤에 \"{first} 향하는 점 x, y, {second} 향하는 점 x, y\"로 덧붙는다(덧붙은 값을 "
+                  f"그대로 쓴다). {first} 선은 {first} 향하는 점, {second} 선은 {second} 향하는 점 바로 아래(x가 같게 — "
+                  f"{fmt_num(AIM_EPS)}px 안이면 그 점에 맞춘다)에 마지막 꺾는 점을 두면 그 점을 향해 곧게 들어가 두 종류의 {head}{ga} "
+                  f"나란히 놓인다. 꺾는 점 없이 곧게 잇는 선은 자식 가운데가 그 점 바로 아래면 그 점을 향하고, 그 밖의 선은 그대로 "
+                  f"가운데를 향한다. 그러니 위 두 점의 [부모 가운데 x, y] 대신 {first} 자식은 [{first} 향하는 점의 x, 줄기 높이 y]를, "
+                  f"{second} 자식은 [{second} 향하는 점의 x, 줄기 높이 y]를 주어 종류마다 줄기를 따로 모은다(자식 가운데 x가 그 점의 "
+                  f"x와 같으면 그 점 하나만 주거나 꺾는 점 없이 곧게 잇는다).",
+                  f"    - {first} 자식의 가운데 x가 모두 {second} 향하는 점과 {second} 자식들보다 {TRUNK_CLEAR}px 이상 왼쪽에 있고, "
+                  f"{second} 자식의 가운데 x가 모두 {first} 향하는 점보다 {TRUNK_CLEAR}px 이상 오른쪽에 있으면 두 가로 줄기가 떨어지니 "
+                  f"같은 높이 y에 둔다. 아니면 같은 높이에서 두 가로 줄기가 포개지거나 한 줄로 이어져 보이니, 한 종류의 줄기를 "
+                  f"y + {TRUNK_SPLIT}(자식 쪽)에 둔다. 그때 위 줄기 종류의 자식 가운데 x가 다른 종류의 향하는 점 x에서 {TRUNK_NEAR}px "
+                  f"안이면 세로 줄끼리 포개지니 그 자식을 옮긴다.",
+                  f"    - 종류마다 향하는 점이 있으면 줄기 높이 y(두 높이면 위 줄기)를 부모 아래 {edge}에서 "
+                  f"{fmt_num(longest + TRUNK_CLEAR)}px({head} 길이 + {TRUNK_CLEAR}) 이상 떼어 다른 종류의 {head} 밑을 지나지 않게 한다. "
+                  f"줄기를 y와 y + {TRUNK_SPLIT} 두 높이에 둘 때는(위 항목과 아래 좁은 부모 항목) 아래 줄기를 자식 {noun}들의 위 "
+                  f"{edge}보다 {TRUNK_CLEAR}px 이상 위에 둔다 — 부모와 자식 사이를 {TRUNK_ROOM}px 이상 띄우고 y를 부모와 자식 사이 "
+                  f"한가운데에 두면 다 맞는다.",
+                  f"    - 결과의 부모 자리 뒤에 종류마다 향하는 점이 덧붙지 않으면(부모 아래 {edge}{josa(edge, '이', '가')} "
+                  f"{narrow}px보다 좁아 {head} 둘이 나란히 들지 않을 때 등) 한 종류만 위대로 아래 {edge} 가운데에 모으고, 다른 종류는 "
+                  f"옆 {edge}{to} 들인다. 세로 줄 x2 = 부모 오른쪽 {edge}의 x(왼 + 폭{within}) + {TRUNK_SIDE}로 정하고, 그 종류의 "
+                  f"자식마다 via에 [자식 가운데 x, y + {TRUNK_SPLIT}], [x2, y + {TRUNK_SPLIT}], [x2, 부모 가운데 y] 세 점을 준다(자식 "
+                  f"가운데 x가 x2와 같으면 [x2, 부모 가운데 y] 하나만){away}. x2 줄(y + {TRUNK_SPLIT}에서 부모 가운데 y까지)에 다른 "
+                  f"{noun}{josa(noun, '이', '가')} 걸리거나, 부모 오른쪽 {edge}에 다른 선이 닿거나, 아래 {edge}{to} 가는 자식의 가운데 "
+                  f"x가 x2에서 {TRUNK_NEAR}px 안이면 거울처럼 x2 = 부모 왼쪽 {edge}의 x(왼{within}) − {TRUNK_SIDE}로 두어 왼쪽 "
+                  f"{edge}{to} 들인다. 양쪽 다 막히면 걸린 {noun}{josa(noun, '을', '를')} 옮기거나 자식 차례를 바꾼다."]
     return "\n".join(lines)
 
 

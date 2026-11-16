@@ -31,7 +31,7 @@ from . import (activitydiagram, boxcheck, boxdiagram, classcheck, classdiagram, 
                packagediagram, sequencecheck, sequencediagram, statediagram, usecasediagram)
 from .canvas import MIN_SCALE, SCALE
 from .guide import (COMMON_INPUT, DEFAULT_DIR, IMAGE_RESULT, INPUT_RESULT, INPUT_SUFFIX, MAX_IMAGE_EDGE, MEMBERS, SAVED_INPUT,
-                    flow, relation_fields, spacing_tips)
+                    flow, relation_fields, spacing_tips, trunk_aims)
 from .parsing import InputError
 from .report import Report, fmt_num, fmt_rect
 from .sequencediagram import MAX_FRAMES, MAX_MESSAGES, MAX_NOTES, MAX_PARTICIPANTS, LayoutError
@@ -94,6 +94,7 @@ CLASS_TOOL = f"""클래스도를 그려 PNG와 입력 파일로 저장하고, �
 
 결과
 - 글: 검사 결과, 상자마다 그린 자리와 크기, 저장한 그림·입력 파일 경로와 그림 픽셀 크기.
+{trunk_aims(classdiagram.SPEC)}
 {IMAGE_RESULT}
 {INPUT_RESULT}
 - classes·relations·file_name이 틀리면 그리지 않고 틀린 곳을 classes[0].left 꼴 자리와 함께 모두 모아 오류로 돌려준다. \
@@ -295,10 +296,15 @@ def _save(png: bytes, record: bytes, out_dir: Optional[str], name: str) -> tuple
 
 def _places(drawing: boxdiagram.Drawing) -> list[str]:
     """AI가 배치하는 그림의 요소마다 그린 자리(클래스도는 "상자 자리"). 모양 밖 이름이 있는 요소는 모양 자리를, 선이 모양
-    가운데에서 비켜난 점을 향하는 요소(aims_aside를 켠 모양)는 그 점을 함께 적는다."""
+    가운데에서 비켜난 점을 향하는 요소(aims_aside를 켠 모양)는 그 점을, 공유 줄기를 받는 관계 종류마다 향하는 점이 나뉜 요소
+    (PlacedBox.aims)는 "상속 향하는 점 x, y"처럼 종류마다의 점을 함께 적는다."""
+    relations = drawing.layout.spec.relations
+
     def one(p: boxdiagram.PlacedBox) -> str:
+        assert p.anchor is not None
         shape = f", 모양 {fmt_rect(p.shape_rect)}" if p.shape_rect != p.rect else ""
         aim = f", 향하는 점 {fmt_num(p.anchor[0])}, {fmt_num(p.anchor[1])}" if boxdiagram.aims_off_center(p.shape) else ""
+        aim += "".join(f", {boxdiagram.kind_aim(relations[k].label, fmt_num(x), fmt_num(y))}" for k, (x, y) in p.aims)
         return f"{p.key}({fmt_rect(p.rect)}{shape}{aim})"
     noun = drawing.layout.spec.words.noun
     return [f"{noun} 자리(왼, 위, 폭×높이): " + ", ".join(one(p) for p in drawing.layout.boxes)]

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
 from .boxdiagram import (ARROW_BEND, ARROW_HEAD, BOX_WORDS, LABEL_CLEAR, NEST_PAD, PLACE_EPS, Drawing, HeadMark, Layout, NameZone,
-                         PlacedBox, PlacedRelation, Words, josa)
+                         PlacedBox, PlacedRelation, SIDE_EPS, TRIANGLE, Words, josa, kind_aim)
 from .canvas import Line, Point, Polygon
 from .geom import (Border, Box, RectBorder, Segment, alongside, axis_gap, between, border_gap, crossings, distance, enters,
                    grow, hits, inside, meets, outline, overlap, span)
@@ -167,6 +167,16 @@ class _Head:
         return self.near(other.edges) or other.near(self.edges)
 
 
+@dataclass(frozen=True)
+class _MissedAim:
+    """도착 요소의 종류마다 향하는 점을 따르지 않고 위·아래 변으로 가운데에 들어간 선의 그 점."""
+
+    label: str  # 관계 종류 이름
+    point: Point
+    side: int  # 들어온 변 — 아래 1·위 -1
+    near: Box  # 도착 요소를 끝 삼각형 길이만큼 넓힌 곳 — 걸린 곳이 여기 닿아야 그 점을 따라 풀린다
+
+
 @dataclass(frozen=True, eq=False)
 class _Relation:
     index: int
@@ -179,6 +189,7 @@ class _Relation:
     end_shape: Optional[_Head]  # to 쪽 끝의 삼각형·마름모
     trunk: bool  # 공유 줄기를 받는 관계 종류인지
     holders: frozenset[str]  # 끝 요소를 품은 요소들
+    missed_aim: Optional[_MissedAim] = None
 
     @property
     def owner(self) -> str:
@@ -285,8 +296,15 @@ def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:
         path = tuple(zip(points, points[1:]))
         segments = path + tuple(e for h in heads for e in h.edges)
         end = next((h for h in heads if h.closed and math.dist(h.tip, points[-1]) <= LINE_EPS), None)
+        target, missed = lay.by_key[p.relation.target], None
+        point = target.aim_of(p.relation.kind)
+        if point is not None and p.aim is None and p.relation.source != p.relation.target:
+            _, top, _, bottom = target.border.bounds
+            side = next((s for s, edge in ((1, bottom), (-1, top)) if abs(points[-1][1] - edge) <= SIDE_EPS), 0)
+            if side:
+                missed = _MissedAim(lay.kind_of(p.relation).label, point, side, grow(target.border.bounds, TRIANGLE[0]))
         rel = _Relation(i, p, points, heads, path, segments, _cover(segments), end, lay.kind_of(p.relation).trunk,
-                        lay.holders(p.relation))
+                        lay.holders(p.relation), missed)
         relations.append(rel)
         labels += [_Label(rel, lab.role, " ".join(t.text for t in texts), span(pt for t in texts for pt in (t.box[:2], t.box[2:])))
                    for lab, texts in zip(p.labels, d.labels, strict=True)]
@@ -595,6 +613,28 @@ def _line_overlaps(relations: list[_Relation], pairs: Pairs) -> tuple[list[Findi
     return retraces, overlaps
 
 
+def _aim_hint(rels: Iterable[_Relation], where: Box) -> str:
+    """걸린 선 가운데 도착 요소의 종류마다 향하는 점을 따르지 않고 위·아래 변으로 가운데에 들어간 선이 있고 걸린 곳(where)이 그 도착
+    요소 가까이(_MissedAim.near)면, 고치는 법 끝에 그 점을 쓰라는 말을 붙인다 — 두 종류를 가운데 한 점으로 모아 포개지거나 겹친
+    그림이 그 점으로 곧게 풀린다. 도착 요소에서 먼 곳에서 걸린 선은 그 점을 따라도 풀리지 않아 붙이지 않는다. 들어온 변 쪽(아래
+    변이면 점 바로 아래, 위 변이면 바로 위)에 마지막 꺾는 점을 두라고 하고, 꺾는 점 없는 선이 섞이면 도구 설명(guide.trunk_aims)처럼
+    자식 가운데도 든다. 옆 변으로 들어온 선은 그 점을 따라도 곧게 앉지 않아 _read가 missed_aim을 두지 않는다."""
+    straight: dict[_MissedAim, bool] = {}  # 그 점마다, 꺾는 점 없는 선이 있는지
+    for r in rels:
+        if (m := r.missed_aim) is not None and meets(where, m.near):
+            straight[m] = straight.get(m, False) or not r.via
+    what = "마지막 꺾는 점(꺾는 점이 없으면 자식 가운데)을" if any(straight.values()) else "마지막 꺾는 점을"
+    groups = []
+    for side, at in ((1, "바로 아래"), (-1, "바로 위")):
+        chosen = [m for m in straight if m.side == side]
+        if chosen:
+            kinds = "·".join(dict.fromkeys(m.label for m in chosen))
+            shown = ", ".join(f"\"{kind_aim(m.label, fmt_num(m.point[0]), fmt_num(m.point[1]))}\"" for m in chosen)
+            groups.append(f"{kinds} 선은 {what + ' 결과의 부모 자리 뒤에 덧붙은 ' if not groups else ''}같은 종류의 "
+                          f"점({shown}) {at}에")
+    return f" {', '.join(groups)} 둔다." if groups else ""
+
+
 def _merged_overlaps(overlaps: list[Overlap]) -> Iterator[Finding]:
     """같은 자리에서 포개진 짝들(공유 줄기에 포개진 선 등)은 한 항목으로 묶는다."""
     found = _Places()
@@ -603,7 +643,8 @@ def _merged_overlaps(overlaps: list[Overlap]) -> Iterator[Finding]:
         _add(found.get(where, lambda: (where, []))[1], r, o)
     for where, rels in found.values():
         yield Finding("line_overlap", _owners(rels), where, f"선끼리 포개진다: {_titles(rels)}, 자리 ({fmt_rect(where)}).",
-                      "포개진 선은 한 선으로 보여 관계 하나가 사라진다 — 한 선에 꺾는 점(via)을 주거나 고쳐 두 선을 떼어 놓는다.")
+                      "포개진 선은 한 선으로 보여 관계 하나가 사라진다 — 한 선에 꺾는 점(via)을 주거나 고쳐 두 선을 떼어 놓는다."
+                      + _aim_hint(rels, where))
 
 
 def _overlap_pieces(overlaps: list[Overlap]) -> dict[frozenset[str], list[Segment]]:
@@ -650,7 +691,8 @@ def _lines_through_heads(relations: list[_Relation], pairs: Pairs, near: dict[fr
         else:
             whose = "·".join(f"관계 {o.name}" for o in sorted(owners, key=_index))
             problem = f"선이 다른 관계의 선 끝 모양에 닿는다: {_titles(passers)}, {whose}의 {h.name}(자리 {fmt_rect(where)})."
-            hint = f"닿은 선 끝 모양이 어느 선의 것인지 헷갈린다 — 그 선에 꺾는 점(via)을 주어 비켜 가게 하거나 {w.noun}를 옮긴다."
+            hint = (f"닿은 선 끝 모양이 어느 선의 것인지 헷갈린다 — 그 선에 꺾는 점(via)을 주어 비켜 가게 하거나 {w.noun}를 옮긴다."
+                    + _aim_hint([*passers, *owners], where))
         yield Finding("line_through_head", _owners(passers, owners), where, problem, hint)
 
 
@@ -683,10 +725,11 @@ def _head_overlaps(relations: list[_Relation], pairs: Pairs, near: dict[frozense
     for entry in found:
         shapes = [(h, sorted(rels, key=_index)) for h, rels in entry.values()]
         parts = [f"{'·'.join(f'관계 {x.name}' for x in rels)}의 {h.name}(자리 {fmt_rect(span(h.points))})" for h, rels in shapes]
-        yield Finding("head_overlap", _owners(*(rels for _, rels in shapes)), span(pt for h, _ in shapes for pt in h.points),
+        where = span(pt for h, _ in shapes for pt in h.points)
+        yield Finding("head_overlap", _owners(*(rels for _, rels in shapes)), where,
                       f"선 끝 모양끼리 겹친다: {', '.join(parts)}.",
                       f"겹친 모양은 어느 선의 것인지 헷갈린다 — 꺾는 점(via)을 주어 한 선이 {w.noun}의 다른 곳에 닿게 하거나 "
-                      f"{w.noun}를 옮긴다.")
+                      f"{w.noun}를 옮긴다." + _aim_hint((r for _, rels in shapes for r in rels), where))
 
 
 def _lines_through_labels(relations: list[_Relation], labels: list[_Label], w: Words) -> Iterator[Finding]:
