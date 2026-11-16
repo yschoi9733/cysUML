@@ -250,10 +250,13 @@ class _Relation:
 
 @dataclass(frozen=True, eq=False)
 class _Label:
+    """segment는 이름을 그 관계의 선 위에 얹었을 때 얹은 구간의 번호다(Label.segment)."""
+
     relation: _Relation
     role: str
     text: str
     box: Box
+    segment: Optional[int] = None
 
     @property
     def title(self) -> str:
@@ -306,7 +309,8 @@ def _read(drawing: Drawing) -> tuple[list[_Box], list[_Relation], list[_Label]]:
         rel = _Relation(i, p, points, heads, path, segments, _cover(segments), end, lay.kind_of(p.relation).trunk,
                         lay.holders(p.relation), missed)
         relations.append(rel)
-        labels += [_Label(rel, lab.role, " ".join(t.text for t in texts), span(pt for t in texts for pt in (t.box[:2], t.box[2:])))
+        labels += [_Label(rel, lab.role, " ".join(t.text for t in texts), span(pt for t in texts for pt in (t.box[:2], t.box[2:])),
+                          lab.segment)
                    for lab, texts in zip(p.labels, d.labels, strict=True)]
     return boxes, relations, labels
 
@@ -733,12 +737,16 @@ def _head_overlaps(relations: list[_Relation], pairs: Pairs, near: dict[frozense
 
 
 def _lines_through_labels(relations: list[_Relation], labels: list[_Label], w: Words) -> Iterator[Finding]:
-    """같은 글자를 같은 자리에서 지나는 선들(공유 줄기)은 한 항목으로 묶는다."""
+    """같은 글자를 같은 자리에서 지나는 선들(공유 줄기)은 한 항목으로 묶는다. 그 관계의 선 위에 얹은 이름은 얹은 구간 하나만 빼고
+    본다 — 같은 관계의 다른 구간·선 끝 모양과 다른 관계의 선은 지나면 걸린다."""
     found = _Places()
     for k, lab in enumerate(labels):
         wide = grow(lab.box, TEXT_CLEARANCE)
         for r in relations:
-            if meets(r.bounds, wide) and (parts := _parts(r.segments, wide)):
+            segments = r.segments  # 관계선 구간(path 차례) 다음에 선 끝 모양 테두리
+            if r is lab.relation and lab.segment is not None:
+                segments = segments[:lab.segment] + segments[lab.segment + 1:]
+            if meets(r.bounds, wide) and (parts := _parts(segments, wide)):
                 where = _cover(parts)
                 _add(found.get((k, where), lambda: (lab, where, []))[2], r)
     for lab, where, rels in found.values():

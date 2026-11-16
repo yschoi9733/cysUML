@@ -1,4 +1,5 @@
 """배치도(deployment diagram): 노드 안에 두기, 통신 경로(화살촉 없는 연관), «deploy», 노드 안의 노드, 자리 잡기 요령의 수치."""
+import math
 import string
 
 import pytest
@@ -285,16 +286,20 @@ def sent_from(outer, sender, side, gap, make, end="Tomcat", offset=20):
     return report([sender_at(outer, sender, side, gap, end, offset), *outer], [make(sender["name"], end)])
 
 
-def moved_off_the_middle(drawing):
-    """선 하나뿐인 그림에서 이름 글자가 가운데 후보 둘이 아닌 자리(선을 따라 옮긴 자리)에 놓였는지."""
+def moved_on_the_line(drawing):
+    """선 하나뿐인 그림에서 이름 글자를 선 위에 얹은 채 선 위 가운데 자리(가장 긴 구간의 가운데)가 아닌 자리로 옮겼는지."""
     (r,) = drawing.layout.relations
     (label,) = r.labels
-    return (label.x, label.y) not in B.name_spots(r.points, label.lines)
+    longest = max(range(len(r.points) - 1), key=lambda k: math.dist(r.points[k], r.points[k + 1]))
+    middle = tuple((a + b) / 2 for a, b in zip(r.points[longest], r.points[longest + 1]))
+    return label.segment is not None and (label.x, label.y) != pytest.approx(middle)
 
 
 def middle_only(monkeypatch):
-    """선을 따라 더 볼 자리를 없애 이름 글자를 가운데 후보에만 둔다(옮기기 전 도구와 같다)."""
+    """선을 따라 더 볼 자리(선 옆 slide_spots·선 위 on_spots)를 없애 이름 글자를 가운데에만 둔다 — 선 위 가운데 자리가 빈
+    자리면 거기, 아니면 선 옆 가운데 후보다."""
     monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    monkeypatch.setattr(B, "on_spots", lambda points, lines: iter(()))
 
 
 @pytest.mark.parametrize("label", LABELS)
@@ -392,14 +397,14 @@ def test_sender_with_room_for_the_label_passes_and_a_long_label_needs_more_than_
 
 @pytest.mark.parametrize("side, label, offset", [("left", "deploy", 20), ("right", "deploy", 20), ("below", "three-lines", 40)])
 def test_label_whose_middle_spots_sit_on_a_node_border_moves_along_the_line_and_passes(monkeypatch, side, label, offset):
-    # 세 겹 노드 안 Tomcat으로 기본 간격에서 보내면 선 가운데의 이름 자리 둘이 다 끝을 품은 노드 테두리에 걸린다(가운데에만 두면
-    # 불합격). 도구가 선을 따라 빈 자리로 옮겨 합격한다 — 아래에서 보내는 세 줄 글자도 같다
+    # 세 겹 노드 안 Tomcat으로 기본 간격에서 보내면 선 가운데(선 위 가운데 자리와 선 옆 가운데 후보 둘)가 다 끝을 품은 노드
+    # 테두리에 걸린다(가운데에만 두면 불합격). 도구가 선 위에 얹은 채 빈 자리로 옮겨 합격한다 — 아래에서 보내는 세 줄 글자도 같다
     make, lines = LABELS[label]
     data = ([sender_at(DEEP, el("artifact", "a.war", 0, 0), side, basic_gap(side), offset=offset), *DEEP],
             [make("a.war", "Tomcat")])
     d = draw(*data)
     assert K.check(d).passed, K.check(d).summary()
-    assert moved_off_the_middle(d)
+    assert moved_on_the_line(d)
     with monkeypatch.context() as m:
         middle_only(m)
         assert kinds(report(*data)) == ["text_on_box"]
@@ -453,13 +458,13 @@ def test_label_above_with_the_bend_passes_with_room_for_it(outer, left, label):
 @pytest.mark.parametrize("left", [-20, 190])
 @pytest.mark.parametrize("label", ["deploy", "two-lines"])
 def test_label_above_with_the_bend_moves_off_the_outer_border_at_the_basic_spacing(monkeypatch, left, label):
-    # 요령의 꺾는 점을 주고 바깥 노드 윗변에서 기본 간격(60px)만 떼면 선 가운데의 이름 자리 둘이 다 바깥 노드 테두리에 걸린다
-    # (가운데에만 두면 불합격). 도구가 선을 따라 빈 자리로 옮겨 합격한다
+    # 요령의 꺾는 점을 주고 바깥 노드 윗변에서 기본 간격(60px)만 떼면 선 가운데(선 위 가운데 자리와 선 옆 가운데 후보 둘)가 다
+    # 바깥 노드 테두리에 걸린다(가운데에만 두면 불합격). 도구가 선 위에 얹은 채 빈 자리로 옮겨 합격한다
     make, lines = LABELS[label]
     sender = above(OUTER, el("artifact", "w", 0, 0), left, VERTICAL_GAP)
     data = ([sender, *OUTER], [make("w", "Tomcat", via=tip_bend(OUTER, sender))])
     d = draw(*data)
-    assert K.check(d).passed and moved_off_the_middle(d)
+    assert K.check(d).passed and moved_on_the_line(d)
     with monkeypatch.context() as m:
         middle_only(m)
         (f,) = report(*data).failures

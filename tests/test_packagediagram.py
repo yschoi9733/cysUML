@@ -15,6 +15,13 @@ from cysuml.parsing import InputError
 from cysuml.shapes import DEPTH
 
 
+def middle_only(monkeypatch):
+    """선을 따라 더 볼 자리(선 옆 slide_spots·선 위 on_spots)를 없애 이름 글자를 가운데에만 둔다 — 선 위 가운데 자리가 빈
+    자리면 거기, 아니면 선 옆 가운데 후보다."""
+    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    monkeypatch.setattr(B, "on_spots", lambda points, lines: iter(()))
+
+
 def el(kind, name, left, top, **more):
     return {"kind": kind, "name": name, "left": left, "top": top, **more}
 
@@ -309,12 +316,12 @@ def test_label_of_a_line_leaving_a_node_upward_keeps_off_the_band():
 
 
 def test_label_on_the_band_and_line_along_the_front_top_edge_fail(monkeypatch):
-    # 선 가운데가 띠 높이(y=8)라 이름 자리 둘 다 띠에 걸린다. 선을 따라 노드 위 빈 곳으로 옮겨 합격하고, 가운데에만 두면(옮길
-    # 자리가 없을 때) 띠에 걸려 불합격이다
+    # 선 가운데가 띠 높이(y=8)라 선 위 가운데 자리와 선 옆 가운데 후보 둘이 다 띠에 걸린다. 선 위에 얹은 채 노드 안 빈 곳으로
+    # 옮겨 합격하고, 가운데에만 두면(옮길 자리가 없을 때) 선 옆 가운데 후보에 놓여 띠에 걸려 불합격이다
     scene = ([*SERVER, el("class", "T", 20, -84)], [rel("association", "Api", "T", name="uses")])
     assert report(*scene).passed
     with monkeypatch.context() as m:
-        m.setattr(B, "slide_spots", lambda points, lines: iter(()))
+        middle_only(m)
         r = report(*scene)
     assert kinds(r) == ["text_on_box"] and r.failures[0].elements == ("Api->T", "서버")
     # 앞면 윗변(y=8) 3px 아래를 따라 왼쪽으로 가다 위로 나간다
@@ -450,12 +457,13 @@ def test_line_through_a_part_of_a_component_icon_fails_and_is_not_called_a_name_
 def test_element_or_label_on_a_part_of_a_component_icon_fails(monkeypatch):
     # A는 상자(x 8부터)에는 닿지 않고 튀어나온 부품 네모(x 0~16)에만 걸친다
     assert kinds(report([el("component_icon", "C", 0, 0), el("class", "A", -88, 0)])) == ["box_overlap"]
-    # 세로선 T→U(x −30)의 가운데가 위쪽 부품 네모(0, 6, 16×6) 높이에 온다. 이름 자리 둘 가운데 왼쪽은 상자 D가 막아 오른쪽(네모 위)에
-    # 놓인다. 선을 따라 옮기면 빈 곳이 있어 합격하고, 가운데에만 두면(옮길 자리가 없을 때) 네모에 겹쳐 불합격이다
+    # 세로선 T→U(x −30)의 가운데가 위쪽 부품 네모(0, 6, 16×6) 높이에 온다. 선 위 가운데 자리와 왼쪽 자리는 상자 D가 막아, 선 옆
+    # 가운데 후보로는 오른쪽(네모 위)에 놓인다. 선 위에 얹은 채 옮기면 빈 곳이 있어 합격하고, 가운데에만 두면(옮길 자리가 없을 때)
+    # 네모에 겹쳐 불합격이다
     scene = ([el("component_icon", "C", 0, 0), el("class", "T", -75, -246), el("class", "U", -75, 206),
               el("class", "D", -135, -20)], [rel("association", "T", "U", name="uses")])
     assert report(*scene).passed
-    monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    middle_only(monkeypatch)
     (f,) = report(*scene).failures
     assert f.kind == "text_on_box" and f.elements == ("T->U", "C")
 

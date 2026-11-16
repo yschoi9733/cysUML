@@ -214,13 +214,15 @@ def test_moving_the_other_line_away_from_the_multiplicity_passes():
 
 
 def middle_only(monkeypatch):
-    """선을 따라 더 볼 자리를 없애 이름 글자를 가운데 후보에만 둔다 — 검사가 글자에 걸린 것을 잡는지 보려고."""
+    """선을 따라 더 볼 자리(선 옆 slide_spots·선 위 on_spots)를 없애 이름 글자를 가운데에만 둔다 — 선 위 가운데 자리가 빈
+    자리면 거기, 아니면 선 옆 가운데 후보다."""
     monkeypatch.setattr(B, "slide_spots", lambda points, lines: iter(()))
+    monkeypatch.setattr(B, "on_spots", lambda points, lines: iter(()))
 
 
 def test_name_crossed_by_another_line_fails(monkeypatch):
-    # 세로선이 이름 후보 둘(가로선 가운데 위아래)을 다 지난다. 이름은 선을 따라 옆 빈 곳으로 옮겨 합격하고, 가운데에만 두면(옮길
-    # 자리가 없을 때) 이름이 선 위에 놓여 불합격이다
+    # 세로선이 가로선 가운데(선 위 가운데 자리와 선 옆 가운데 후보 둘)를 지난다. 이름은 가로선 위에 얹은 채 옆 빈 곳으로 옮겨
+    # 합격하고, 가운데에만 두면(옮길 자리가 없을 때) 선 옆 가운데 후보에 놓여 세로선이 이름을 지나 불합격이다
     scene = ([box("A", 0, 0), box("B", 300, 0), box("C", 150, -200), box("D", 150, 200)],
              [rel("association", "A", "B", name="places"), rel("association", "C", "D")])
     assert report(*scene).passed
@@ -230,8 +232,8 @@ def test_name_crossed_by_another_line_fails(monkeypatch):
 
 
 def test_line_through_its_own_label_names_one_element(monkeypatch):
-    # 가장 긴 첫 구간 (90, 24)–(400, 24)의 가운데 위아래가 이름 자리인데, 같은 선의 돌아 내려오는 마지막 구간(x=245)이 둘 다
-    # 지난다. 이름은 선을 따라 옮겨 합격하고, 가운데에만 두면 그 선이 이름을 지나 불합격이다
+    # 가장 긴 첫 구간 (90, 24)–(400, 24)의 가운데(선 위 가운데 자리와 위아래 자리)를 같은 선의 돌아 내려오는 마지막 구간(x=245)이
+    # 지난다. 이름은 첫 구간 위에서 옮겨 합격하고, 가운데에만 두면 선 옆 가운데 후보에 놓여 그 선이 이름을 지나 불합격이다
     scene = ([box("A", 0, 0), box("B", 200, 280)],
              [rel("association", "A", "B", name="x", via=[[400, 24], [400, -10], [245, -10]])])
     assert report(*scene).passed
@@ -239,6 +241,38 @@ def test_line_through_its_own_label_names_one_element(monkeypatch):
     own = [f for f in report(*scene).failures if f.kind == "line_through_text"]
     assert own and all(f.elements == ("A->B",) for f in own)
     assert own[0].hint == K.LABEL_HINT
+
+
+def put_name(monkeypatch, owner, x, y, segment):
+    """자리 잡기가 관계 owner의 이름을 (x, y)에 놓고 얹은 구간을 segment로 적은 것으로 바꾼다 — 검사를 따로 보려고."""
+    real = B.layout
+
+    def moved(diagram):
+        lay = real(diagram)
+        rels = tuple(dataclasses.replace(r, labels=tuple(dataclasses.replace(lab, x=x, y=y, segment=segment)
+                                                         if lab.role == "name" else lab for lab in r.labels))
+                     if r.owner == owner else r for r in lay.relations)
+        return dataclasses.replace(lay, relations=rels)
+
+    monkeypatch.setattr(B, "layout", moved)
+
+
+@pytest.mark.parametrize("x, segment, passers", [
+    (300, 0, None),  # 얹은 구간은 글자를 지나도 걸리지 않는다
+    (245, 0, ("A->B",)),  # 같은 선의 다른 구간(돌아 내려오는 x 245)은 걸린다
+    (150, 0, ("C->D", "A->B")),  # 다른 관계의 선(x 150)은 걸린다
+    (300, None, ("A->B",)),  # 얹은 구간을 적지 않은 글자(선 옆 글자)는 그 구간에도 걸린다
+])
+def test_check_skips_only_the_segment_a_name_sits_on(monkeypatch, x, segment, passers):
+    scene = ([box("A", 0, 0), box("B", 200, 280), box("C", 105, -200), box("D", 105, 200)],
+             [rel("association", "A", "B", name="x", via=[[400, 24], [400, -10], [245, -10]]), rel("association", "C", "D")])
+    put_name(monkeypatch, "A->B", x, 24, segment)
+    r = report(*scene)
+    if passers is None:
+        assert r.passed, r.summary()
+    else:
+        (f,) = r.failures
+        assert f.kind == "line_through_text" and f.elements == passers and "이름 'x'" in f.problem
 
 
 def test_labels_placed_where_the_layout_found_room_pass():
@@ -282,13 +316,14 @@ def test_label_with_room_above_the_line_passes():
 
 
 def test_label_blocked_only_in_the_middle_moves_along_the_line_and_passes():
-    # C·D가 선 가운데(x 120~260)만 막으면 이름은 선을 따라 그 옆 빈 곳으로 옮겨 합격한다
+    # C·D가 선 가운데(x 120~260)만 막으면 이름은 선 위에 얹은 채 그 옆 빈 곳으로 옮겨 합격한다
     assert boxed_in_name(19, left=120, width=140).passed
 
 
 def test_labels_of_stacked_relations_overlap(monkeypatch):
-    # 같은 두 상자 사이의 세 관계는 한 선에 포개지고, 이름 자리 둘을 앞의 둘이 쓰고 나면 셋째 이름은 선을 따라 옆 빈 곳으로 옮겨
-    # 겹치지 않는다(선끼리 포개진 것은 남는다). 가운데에만 두면 셋째 이름이 겹친다
+    # 같은 두 상자 사이의 세 관계는 한 선에 포개진다. 포개진 선 위에는 다른 관계의 선이 지나 이름을 얹을 빈 자리가 없어 선 옆에
+    # 놓고, 선 옆 가운데 후보 둘을 앞의 둘이 쓰고 나면 셋째 이름은 선을 따라 옆 빈 곳으로 옮겨 겹치지 않는다(선끼리 포개진 것은
+    # 남는다). 가운데에만 두면 셋째 이름이 겹친다
     scene = ([box("A", 0, 0), box("B", 300, 0)],
              [rel("association", "A", "B", name="a"), rel("dependency", "A", "B", name="b"),
               rel("association", "B", "A", name="c")])
