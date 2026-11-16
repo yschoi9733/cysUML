@@ -205,7 +205,7 @@ def test_multiplicity_crossed_by_another_line_fails():
     (f,) = r.failures
     assert f.kind == "line_through_text" and f.elements == ("C->D", "A->B")
     assert "to 쪽 다중도 '0..* {ordered, unique}'" in f.problem and "relations[1]" in f.problem
-    assert f.hint.startswith("선 글자 자리는 도구가 그 글자가 붙은 선 둘레의 빈 곳에서 고른다 — ")
+    assert f.hint.startswith("선 글자 자리는 도구가 그 글자가 붙은 선 위(관계 이름)와 선 둘레의 빈 곳에서 고른다 — ")
 
 
 def test_moving_the_other_line_away_from_the_multiplicity_passes():

@@ -408,9 +408,9 @@ def test_a_loop_of_in_is_told_once():
 
 
 def test_report_passed_text_follows_the_tool_words():
-    assert K.Report.PASSED == "합격 — 선이 상자·글자를 지나거나 겹친 곳이 없다."  # 클래스에서 읽으면 클래스도 도구의 말
+    assert K.Report.PASSED == "합격 — 선이 상자·글자를 지나거나 겹친 곳이 없다(관계 이름이 얹힌 그 선 구간은 빼고)."  # 클래스에서 읽으면 클래스도 도구의 말
     r = report([el("class", "A", 0, 0)])
-    assert r.PASSED == "합격 — 선이 요소·글자를 지나거나 겹친 곳이 없다." and r.summary().startswith(r.PASSED)
+    assert r.PASSED == "합격 — 선이 요소·글자를 지나거나 겹친 곳이 없다(관계 이름이 얹힌 그 선 구간은 빼고)." and r.summary().startswith(r.PASSED)
     assert r.SHRINK == "요소를 가까이 모으거나 배율을 낮춘다"
 
 

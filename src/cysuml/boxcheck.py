@@ -1,7 +1,8 @@
 """AI가 배치하는 그림의 공용 검사: 그린 결과(boxdiagram.Drawing)를 읽어 합격·불합격과 알림을 낸다.
 
 불합격은 문서에 못 넣는 그림이다 — 선(선 끝 모양 포함)이 요소·글자·다른 선을 가로지르거나 그것들에 붙어 한데
-보이는 것, 요소나 글자끼리 겹치는 것이다. 종류는 KINDS에 낸 차례대로 있다. 선끼리 엇갈린 곳, 읽기에서 나온 표기 규칙 알림, 그림
+보이는 것, 요소나 글자끼리 겹치는 것이다. 관계 이름은 자리 잡기가 그 관계의 선 위에 얹고(boxdiagram), 이름이 얹힌 그 선
+구간은 이름을 지나도 된다. 종류는 KINDS에 낸 차례대로 있다. 선끼리 엇갈린 곳, 읽기에서 나온 표기 규칙 알림, 그림
 크기는 알림으로만 준다.
 상속·실체화처럼 공유 줄기를 받는 관계에서 자식 여럿의 선이 한 줄기로 부모의 한 삼각형에 모이는 것은 포개짐으로도, 선 끝
 모양에 닿는 것으로도 치지 않는다. 공유 줄기처럼 여러 선이 한 자리에 겹쳐 그려진 곳이 걸리면 한 항목으로 묶어 알린다.
@@ -57,8 +58,8 @@ NESTED_KINDS = ("inner_off_area", "line_through_name", "line_along_container")  
 
 
 def label_hint(w: Words) -> str:
-    return (f"선 글자 자리는 도구가 선 둘레의 빈 곳에서 고르는데 빈 곳이 없었다 — {w.noun}를 떼어 놓거나, 꺾는 점(via)을 주어 "
-            "선 둘레를 비운다.")
+    return (f"선 글자 자리는 도구가 선 위(관계 이름)와 선 둘레의 빈 곳에서 고르는데 빈 곳이 없었다 — {w.noun}를 떼어 놓거나, "
+            "꺾는 점(via)을 주어 선 둘레를 비운다.")
 
 
 def crossing_hint(w: Words) -> str:
@@ -73,7 +74,7 @@ def bend_away(w: Words) -> str:
 
 
 def _passed(w: Words) -> str:
-    return f"합격 — 선이 {w.noun}·글자를 지나거나 겹친 곳이 없다."
+    return f"합격 — 선이 {w.noun}·글자를 지나거나 겹친 곳이 없다(관계 이름이 얹힌 그 선 구간은 빼고)."
 
 
 def _shrink(w: Words) -> str:
@@ -751,8 +752,8 @@ def _lines_through_labels(relations: list[_Relation], labels: list[_Label], w: W
                 _add(found.get((k, where), lambda: (lab, where, []))[2], r)
     for lab, where, rels in found.values():
         own = rels == [lab.relation]
-        hint = (label_hint(w) if own else "선 글자 자리는 도구가 그 글자가 붙은 선 둘레의 빈 곳에서 고른다 — 지나가는 선에 꺾는 "
-                f"점(via)을 주어 글자를 비켜 가게 하거나, {w.noun}를 옮겨 두 관계를 떼어 놓는다.")
+        hint = (label_hint(w) if own else "선 글자 자리는 도구가 그 글자가 붙은 선 위(관계 이름)와 선 둘레의 빈 곳에서 고른다 — "
+                f"지나가는 선에 꺾는 점(via)을 주어 글자를 비켜 가게 하거나, {w.noun}를 옮겨 두 관계를 떼어 놓는다.")
         yield Finding("line_through_text", _owners(rels, [lab.relation]), where,
                       f"선이 글자를 지난다: {_titles(rels)}, {lab.title}.", hint)
 
