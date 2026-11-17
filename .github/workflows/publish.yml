@@ -43,13 +43,13 @@ jobs:
         run: uv run --isolated --python 3.10 --resolution lowest-direct --no-editable pytest
       - name: server.json이 MCP 레지스트리 형식에 맞는지 보기
         # PyPI에 올린 버전은 되돌릴 수 없고 레지스트리 job은 그 뒤에 돈다 — 형식 오류는 PyPI에 올리기 전에 막는다.
-        # 검사 주소는 맞으면 200과 valid true, 형식이 틀리면 422(깨진 JSON은 400)와 JSON 오류 목록을 준다
+        # 검사 주소(바뀌지 않게 고정된 v0.1 API)는 맞으면 200과 valid true, 형식이 틀리면 422(깨진 JSON은 400)와 JSON 오류 목록을 준다
         run: |
           set -uo pipefail
           out="$RUNNER_TEMP/validate.json"
           code="$(curl --silent --show-error --retry 3 --retry-all-errors --max-time 30 -o "$out" -w '%{http_code}' \
             -X POST -H "Content-Type: application/json" --data-binary @server.json \
-            https://registry.modelcontextprotocol.io/v0/validate)" || code=000
+            https://registry.modelcontextprotocol.io/v0.1/validate)" || code=000
           cat "$out" 2>/dev/null && echo
           if [ "$code" = 200 ] && jq -e '.valid == true' "$out" >/dev/null 2>&1; then
             exit 0
@@ -70,9 +70,7 @@ jobs:
       - name: mcp-publisher를 받아 서명 확인
         run: |
           set -euo pipefail
-          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
-          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          archive="mcp-publisher_linux_amd64.tar.gz"  # 이 job이 아니라 레지스트리 job(ubuntu-latest, amd64)이 돌린다
           base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
           mkdir -p "$RUNNER_TEMP/publisher"
           cd "$RUNNER_TEMP/publisher"
@@ -115,7 +113,7 @@ jobs:
   registry:
     needs: publish
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25  # 다시 시도 다섯 번이 다 멈춰도(한 번에 로그인·올리기 1분씩, 조회 30초, 기다림 30초) 15분 안에 끝난다
     permissions:
       contents: read
       id-token: write
@@ -136,8 +134,8 @@ jobs:
           version="$(jq -r .version server.json)"
           url="https://registry.modelcontextprotocol.io/v0.1/servers/$(jq -rn --arg n "$name" '$n|@uri')/versions/$version"
           for try in 1 2 3 4 5; do
-            # 로그인 토큰은 5분이면 끝나므로 시도마다 새로 받는다
-            if "$publisher" login github-oidc && "$publisher" publish; then
+            # 로그인 토큰은 5분이면 끝나므로 시도마다 새로 받는다. 요청 하나가 멈춰 job 시간을 다 쓰지 않게 1분에 끊는다
+            if timeout 60 "$publisher" login github-oidc && timeout 60 "$publisher" publish; then
               exit 0
             fi
             # 앞선 시도가 들어갔는데 응답만 못 받았으면 다시 올릴 때 "이미 있는 버전" 오류가 난다
