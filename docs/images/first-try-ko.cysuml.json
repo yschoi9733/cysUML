@@ -1,0 +1,21 @@
+{
+  "tool": "draw_class_diagram",
+  "file_name": "first-try-ko",
+  "classes": [
+    {"name": "고객", "left": 0, "top": 0, "attributes": ["-이름: String", "-이메일: String"]},
+    {"name": "주문", "left": 240, "top": 0, "attributes": ["-번호: long", "-주문일: Date"], "operations": ["+합계(): Money"]},
+    {"name": "결제", "left": 500, "top": 0, "kind": "abstract", "width": 110, "attributes": ["-금액: Money"]},
+    {"name": "카드결제", "left": 500, "top": -140, "width": 110, "attributes": ["-카드번호: String"]},
+    {"name": "주문항목", "left": 240, "top": 200, "attributes": ["-수량: int"], "operations": ["+소계(): Money"]},
+    {"name": "상품", "left": 500, "top": 200, "attributes": ["-이름: String", "-가격: Money"]}
+  ],
+  "relations": [
+    {"kind": "association", "from": "고객", "to": "주문", "name": "주문한다", "from_multiplicity": "1", "to_multiplicity": "0..*"},
+    {"kind": "composition", "from": "주문", "to": "주문항목", "to_multiplicity": "1..*"},
+    {"kind": "association", "from": "주문항목", "to": "상품", "to_multiplicity": "1"},
+    {"kind": "association", "from": "고객", "to": "결제", "name": "낸다", "to_multiplicity": "0..*"},
+    {"kind": "association", "from": "주문", "to": "결제", "to_multiplicity": "0..1"},
+    {"kind": "generalization", "from": "카드결제", "to": "결제"}
+  ],
+  "scale": 1.6
+}

@@ -1,0 +1,19 @@
+{
+  "tool": "draw_sequence_diagram",
+  "file_name": "checkout",
+  "participants": [
+    {"name": "Customer", "kind": "actor"},
+    {"name": "Shop"},
+    {"name": "Payment"}
+  ],
+  "messages": [
+    {"from": "Customer", "to": "Shop", "name": "order()"},
+    {"from": "Shop", "to": "Payment", "name": "pay(amount)"},
+    {"from": "Payment", "to": "Shop", "kind": "reply", "name": "receipt"},
+    {"from": "Shop", "to": "Customer", "kind": "reply"}
+  ],
+  "frames": [
+    {"kind": "opt", "first": 1, "last": 2, "condition": "paid by card"}
+  ],
+  "scale": 1.6
+}

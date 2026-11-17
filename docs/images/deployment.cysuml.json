@@ -1,0 +1,20 @@
+{
+  "tool": "draw_deployment_diagram",
+  "file_name": "deployment",
+  "elements": [
+    {"kind": "node", "name": "PC", "stereotype": "device", "left": 0, "top": 0, "height": 220},
+    {"kind": "component", "name": "Browser", "in": "PC", "left": 20, "top": 66},
+    {"kind": "node", "name": "App Server", "stereotype": "device", "left": 240, "top": 0, "height": 220},
+    {"kind": "node", "name": "Tomcat", "stereotype": "executionEnvironment", "in": "App Server", "left": 260, "top": 66},
+    {"kind": "component", "name": "OrderService", "in": "Tomcat", "left": 280, "top": 132},
+    {"kind": "node", "name": "DB Server", "stereotype": "device", "left": 620, "top": 0, "height": 220},
+    {"kind": "artifact", "name": "orders.db", "in": "DB Server", "left": 640, "top": 66},
+    {"kind": "artifact", "name": "order.war", "left": 310, "top": 280}
+  ],
+  "relations": [
+    {"kind": "association", "from": "PC", "to": "App Server", "name": "HTTPS"},
+    {"kind": "association", "from": "App Server", "to": "DB Server", "name": "JDBC"},
+    {"kind": "dependency", "from": "order.war", "to": "Tomcat", "stereotype": "deploy"}
+  ],
+  "scale": 1.6
+}

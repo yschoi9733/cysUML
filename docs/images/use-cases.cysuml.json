@@ -1,0 +1,19 @@
+{
+  "tool": "draw_use_case_diagram",
+  "file_name": "use-cases",
+  "elements": [
+    {"kind": "system", "id": "shop", "name": "Online shop", "left": 160, "top": 0},
+    {"kind": "use_case", "name": "Browse items", "in": "shop", "left": 200, "top": 50},
+    {"kind": "use_case", "name": "Place order", "in": "shop", "left": 200, "top": 150},
+    {"kind": "use_case", "name": "Pay", "in": "shop", "left": 420, "top": 150},
+    {"kind": "actor", "name": "Customer", "left": 0, "top": 130, "name_side": "left"},
+    {"kind": "actor", "name": "Bank", "left": 660, "top": 157, "name_side": "right"}
+  ],
+  "relations": [
+    {"kind": "association", "from": "Customer", "to": "Browse items"},
+    {"kind": "association", "from": "Customer", "to": "Place order"},
+    {"kind": "dependency", "from": "Place order", "to": "Pay", "stereotype": "include"},
+    {"kind": "association", "from": "Pay", "to": "Bank"}
+  ],
+  "scale": 1.6
+}

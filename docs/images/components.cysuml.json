@@ -1,0 +1,20 @@
+{
+  "tool": "draw_component_diagram",
+  "file_name": "components",
+  "elements": [
+    {"kind": "package", "name": "web", "left": 0, "top": 0},
+    {"kind": "component", "name": "OrderController", "in": "web", "left": 20, "top": 44},
+    {"kind": "component", "name": "AdminController", "in": "web", "left": 220, "top": 44},
+    {"kind": "package", "name": "service", "left": 0, "top": 220},
+    {"kind": "component", "name": "OrderService", "in": "service", "left": 110, "top": 324},
+    {"kind": "lollipop", "name": "OrderApi", "in": "service", "left": 70, "top": 264, "name_side": "left"},
+    {"kind": "artifact", "name": "order-service.jar", "left": 400, "top": 324}
+  ],
+  "relations": [
+    {"kind": "association", "from": "OrderService", "to": "OrderApi"},
+    {"kind": "dependency", "from": "OrderController", "to": "OrderApi"},
+    {"kind": "dependency", "from": "AdminController", "to": "OrderApi"},
+    {"kind": "dependency", "from": "order-service.jar", "to": "OrderService", "stereotype": "manifest"}
+  ],
+  "scale": 1.6
+}

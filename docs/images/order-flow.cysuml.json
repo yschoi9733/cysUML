@@ -1,0 +1,23 @@
+{
+  "tool": "draw_activity_diagram",
+  "file_name": "order-flow",
+  "elements": [
+    {"kind": "initial", "id": "start", "left": 140, "top": 0},
+    {"kind": "action", "name": "Take order", "left": 95, "top": 60, "width": 110},
+    {"kind": "decision", "id": "stock?", "left": 135, "top": 150},
+    {"kind": "action", "name": "Ship", "left": 0, "top": 230},
+    {"kind": "action", "name": "Restock", "left": 200, "top": 230},
+    {"kind": "merge", "id": "done?", "left": 135, "top": 320},
+    {"kind": "final", "id": "end", "left": 138, "top": 400}
+  ],
+  "relations": [
+    {"from": "start", "to": "Take order"},
+    {"from": "Take order", "to": "stock?"},
+    {"from": "stock?", "to": "Ship", "name": "[in stock]", "via": [[45, 165]]},
+    {"from": "stock?", "to": "Restock", "name": "[out of stock]", "via": [[245, 165]]},
+    {"from": "Ship", "to": "done?", "via": [[45, 335]]},
+    {"from": "Restock", "to": "done?", "via": [[245, 335]]},
+    {"from": "done?", "to": "end"}
+  ],
+  "scale": 1.6
+}

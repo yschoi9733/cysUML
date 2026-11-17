@@ -1,0 +1,17 @@
+{
+  "tool": "draw_state_diagram",
+  "file_name": "order-states",
+  "elements": [
+    {"kind": "initial", "id": "start", "left": 85, "top": 0},
+    {"kind": "state", "name": "Waiting", "left": 25, "top": 60, "width": 140},
+    {"kind": "state", "name": "Checking", "left": 25, "top": 180, "width": 140, "actions": ["entry / reserve stock", "do / wait for payment"]},
+    {"kind": "final", "id": "end", "left": 83, "top": 340}
+  ],
+  "relations": [
+    {"from": "start", "to": "Waiting"},
+    {"from": "Waiting", "to": "Checking", "name": "order [in stock] / accept"},
+    {"from": "Waiting", "to": "Waiting", "name": "tick", "via": [[190, 68], [190, 92]]},
+    {"from": "Checking", "to": "end", "name": "paid"}
+  ],
+  "scale": 1.6
+}
