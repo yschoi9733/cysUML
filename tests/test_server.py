@@ -1176,6 +1176,42 @@ def test_readme_examples_draw_and_pass(tmp_path):
         assert not r.is_error and text(r).startswith("합격"), text(r)
 
 
+# README 그림 — 그림 PNG는 Pillow·FreeType 버전에 따라 글자 가장자리 픽셀이 달라질 수 있어 바이트로 견주지 않고, 그린 입력과 검사 결과를 본다
+IMAGES = README.parent / "docs" / "images"
+REDRAW = "uv run python scripts/readme_images.py"
+BEFORE_AFTER = {"first-try": False, "fixed": True, "first-try-ko": False, "fixed-ko": True}  # 맨 위 전후 그림 → 검사에 합격하는지
+
+
+def test_readme_example_images_are_drawn_from_the_current_examples():
+    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
+    for b in [b for b in blocks if "file_name" in b]:
+        saved = IMAGES / f"{b['file_name']}.cysuml.json"
+        expected = {"tool": EXAMPLES[b["file_name"]], **b, "scale": SCALE}
+        assert saved.is_file() and json.loads(saved.read_text(encoding="utf-8")) == expected, \
+            f"README 예시 {b['file_name']}의 그림이 지금 예시로 그린 것이 아니다 — {REDRAW}로 다시 그린다"
+
+
+def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path):
+    korean = README.read_text(encoding="utf-8").split("\n## 한국어\n", 1)[1]
+    for name, passes in BEFORE_AFTER.items():
+        record = json.loads((IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8"))
+        (r,) = run(server.mcp, (record.pop("tool"), {**record, "out_dir": str(tmp_path)}))[2]
+        assert not r.is_error and text(r).startswith("합격") == passes, (name, text(r))
+        if not passes:
+            crossing = [re.sub(r"^\d+\. ", "", line) for line in text(r).splitlines() if "선이 상자를 지난다" in line]
+            assert crossing, (name, text(r))
+            if name.endswith("-ko"):  # 한국어 절은 이 항목을 그대로 옮겨 보여 준다
+                assert f"> {crossing[0]}" in korean, f"README 한국어 절이 옮긴 검사 결과가 지금 결과와 다르다: {crossing[0]}"
+
+
+def test_readme_pictures_exist_and_cover_every_example():
+    names = re.findall(r"https://raw\.githubusercontent\.com/yschoi9733/cysUML/main/docs/images/([^)\s]+)",
+                       README.read_text(encoding="utf-8"))
+    assert {f"{n}.png" for n in [*EXAMPLES, *BEFORE_AFTER]} <= set(names)
+    for name in names:
+        assert (IMAGES / name).is_file(), f"README가 가리키는 docs/images/{name}이 없다 — {REDRAW}로 그린다"
+
+
 def test_command_serves_over_stdio(tmp_path):
     params = StdioServerParameters(command=sys.executable, args=["-m", "cysuml"], cwd=str(tmp_path))
     _, tools, results = run(params, CLASS, SEQUENCE)
