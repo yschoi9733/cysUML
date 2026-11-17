@@ -1,4 +1,5 @@
 # PyPI에는 비밀 값 없이 trusted publishing으로 올린다 — PyPI의 cysuml 프로젝트에 이 레포·이 파일 이름·환경 pypi를 등록해 둔다.
+# MCP 레지스트리에는 GitHub OIDC로 로그인해 올린다 — 따로 등록해 둘 것은 없다.
 name: publish
 
 on:
@@ -58,3 +59,57 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  # 레지스트리는 올리는 버전의 PyPI README에서 mcp-name 줄을 찾으므로 PyPI에 올린 뒤에 돈다
+  registry:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.7
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: mcp-publisher를 받아 서명 확인
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+      - name: MCP 레지스트리에 OIDC로 로그인
+        run: ./mcp-publisher login github-oidc
+      - name: MCP 레지스트리에 올리기(PyPI에 막 올린 판이 늦게 보이면 다시 시도)
+        run: |
+          set -uo pipefail
+          name="$(jq -r .name server.json)"
+          version="$(jq -r .version server.json)"
+          url="https://registry.modelcontextprotocol.io/v0.1/servers/$(jq -rn --arg n "$name" '$n|@uri')/versions/$version"
+          for try in 1 2 3 4 5; do
+            if ./mcp-publisher publish; then
+              exit 0
+            fi
+            # 앞선 시도가 들어갔는데 응답만 못 받았으면 다시 올릴 때 "이미 있는 버전" 오류가 난다
+            if curl --fail --silent --output /dev/null "$url"; then
+              echo "레지스트리에 $name $version 이 이미 있다"
+              exit 0
+            fi
+            if [ "$try" -lt 5 ]; then
+              sleep 30
+            fi
+          done
+          echo "::error::MCP 레지스트리에 $name $version 을 올리지 못했다 — PyPI에는 이미 올라갔으니 원인을 고친 뒤 이 job만 다시 돌린다"
+          exit 1
