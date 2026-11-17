@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.yschoi9733/cysuml",
+  "title": "cysUML",
+  "description": "MCP server for document-ready UML diagrams: the AI lays them out, cysUML draws and checks them.",
+  "repository": {
+    "url": "https://github.com/yschoi9733/cysUML",
+    "source": "github"
+  },
+  "version": "0.2.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "cysuml",
+      "version": "0.2.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
