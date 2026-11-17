@@ -1,4 +1,5 @@
 import base64
+import importlib.util
 import io
 import json
 import os
@@ -1167,24 +1168,27 @@ def test_calls_at_the_same_time_all_draw(tmp_path):
     assert len({(tmp_path / f"d{i}.png").read_bytes() for i in range(4)}) == 1
 
 
-def test_readme_examples_draw_and_pass(tmp_path):
+def _readme_images():
+    spec = importlib.util.spec_from_file_location("readme_images", README.parent / "scripts" / "readme_images.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+# README 그림 — 그림 PNG는 Pillow·FreeType 버전에 따라 글자 가장자리 픽셀이 달라질 수 있어 바이트로 견주지 않고, 그린 입력과 검사 결과를 본다.
+# 그림 자리와 전후 그림 목록은 그림을 다시 그리는 스크립트의 것을 쓴다
+README_IMAGES = _readme_images()
+IMAGES = README_IMAGES.IMAGES
+REDRAW = "uv run python scripts/readme_images.py"
+
+
+def test_readme_examples_draw_pass_and_match_their_pictures(tmp_path):
     blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
     examples = [b for b in blocks if "file_name" in b]
     assert sorted(b["file_name"] for b in examples) == sorted(EXAMPLES)
     for b in examples:
         (r,) = run(server.mcp, (EXAMPLES[b["file_name"]], {**b, "out_dir": str(tmp_path)}))[2]
         assert not r.is_error and text(r).startswith("합격"), text(r)
-
-
-# README 그림 — 그림 PNG는 Pillow·FreeType 버전에 따라 글자 가장자리 픽셀이 달라질 수 있어 바이트로 견주지 않고, 그린 입력과 검사 결과를 본다
-IMAGES = README.parent / "docs" / "images"
-REDRAW = "uv run python scripts/readme_images.py"
-BEFORE_AFTER = {"first-try": False, "fixed": True, "first-try-ko": False, "fixed-ko": True}  # 맨 위 전후 그림 → 검사에 합격하는지
-
-
-def test_readme_example_images_are_drawn_from_the_current_examples():
-    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
-    for b in [b for b in blocks if "file_name" in b]:
         saved = IMAGES / f"{b['file_name']}.cysuml.json"
         expected = {"tool": EXAMPLES[b["file_name"]], **b, "scale": SCALE}
         assert saved.is_file() and json.loads(saved.read_text(encoding="utf-8")) == expected, \
@@ -1193,9 +1197,9 @@ def test_readme_example_images_are_drawn_from_the_current_examples():
 
 def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path):
     korean = README.read_text(encoding="utf-8").split("\n## 한국어\n", 1)[1]
-    for name, passes in BEFORE_AFTER.items():
-        record = json.loads((IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8"))
-        (r,) = run(server.mcp, (record.pop("tool"), {**record, "out_dir": str(tmp_path)}))[2]
+    records = [json.loads((IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8")) for name in README_IMAGES.BEFORE_AFTER]
+    results = run(server.mcp, *[(record.pop("tool"), {**record, "out_dir": str(tmp_path)}) for record in records])[2]
+    for (name, passes), r in zip(README_IMAGES.BEFORE_AFTER.items(), results):
         assert not r.is_error and text(r).startswith("합격") == passes, (name, text(r))
         if not passes:
             crossing = [re.sub(r"^\d+\. ", "", line) for line in text(r).splitlines() if "선이 상자를 지난다" in line]
@@ -1207,7 +1211,7 @@ def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path)
 def test_readme_pictures_exist_and_cover_every_example():
     names = re.findall(r"https://raw\.githubusercontent\.com/yschoi9733/cysUML/main/docs/images/([^)\s]+)",
                        README.read_text(encoding="utf-8"))
-    assert {f"{n}.png" for n in [*EXAMPLES, *BEFORE_AFTER]} <= set(names)
+    assert {f"{n}.png" for n in [*EXAMPLES, *README_IMAGES.BEFORE_AFTER]} <= set(names)
     for name in names:
         assert (IMAGES / name).is_file(), f"README가 가리키는 docs/images/{name}이 없다 — {REDRAW}로 그린다"
 
