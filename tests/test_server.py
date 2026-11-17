@@ -1206,17 +1206,23 @@ def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path,
             assert text(r).startswith("불합격 — 1건"), (name, text(r))  # README가 "이 한 건으로"·"on exactly this"라고 적었다
             crossing = [re.sub(r"^\d+\. ", "", line) for line in text(r).splitlines() if "선이 상자를 지난다" in line]
             assert crossing, (name, text(r))
-            # 가려지는 선의 꺾는 점이 관계 이름 자리를 정한다(스크립트 머리말). 그린 결과에서 이름이 앉은 토막이 가린 상자 밖에 있고,
-            # 이름이 그 토막의 가운데쯤(가운데 3분의 1)에 앉았는지 본다
+            # 가려지는 선의 꺾는 점이 관계 이름 자리를 정한다(스크립트 머리말). README는 이름이 출발 상자와 가린 상자를 잇는 것처럼
+            # 보인다고 설명하므로, 그린 결과에서 이름이 선이 가린 상자에 들어가기 전 토막에 앉았는지(그 토막과 앞 토막들이 모두 가린
+            # 상자 밖), 그리고 그 토막의 가운데쯤(가운데 3분의 1)에 있는지 본다
             index = int(re.search(r"relations\[(\d+)\]", crossing[0]).group(1))
             drawing = classdiagram.render({k: args[k] for k in ("classes", "relations")}, args.get("scale", SCALE))
             x0, y0, x1, y1 = drawing.layout.by_key[re.search(r"상자 (\S+)\(", crossing[0]).group(1)].rect
             placed = drawing.layout.relations[index]
             (label,) = [x for x in placed.labels if x.role == "name"]
             assert label.segment is not None, f"{name}: 관계 이름이 선 위에 얹히지 않았다"
+
+            def covered(k):
+                (px, py), (qx, qy) = placed.points[k], placed.points[k + 1]
+                return x0 < (px + qx) / 2 < x1 and y0 < (py + qy) / 2 < y1
+
+            assert not covered(label.segment), f"{name}: 관계 이름이 가린 상자 밑 토막에 앉았다"
+            assert not any(covered(k) for k in range(label.segment)), f"{name}: 관계 이름이 가린 상자를 지난 뒤 토막에 앉았다"
             (px, py), (qx, qy) = placed.points[label.segment], placed.points[label.segment + 1]
-            mx, my = (px + qx) / 2, (py + qy) / 2
-            assert not (x0 < mx < x1 and y0 < my < y1), f"{name}: 관계 이름이 가린 상자 밑 토막에 앉았다"
             t = ((label.x - px) * (qx - px) + (label.y - py) * (qy - py)) / ((qx - px) ** 2 + (qy - py) ** 2)
             assert 1 / 3 <= t <= 2 / 3, f"{name}: 관계 이름이 앉은 토막의 가운데에서 벗어났다(토막 위 자리 {t:.2f})"
             if name.endswith("-ko"):  # 한국어 절은 이 항목을 그대로 옮겨 보여 준다
