@@ -34,29 +34,34 @@ jobs:
             echo "::error::태그 $GITHUB_REF_NAME 가 pyproject.toml 버전 $version 과 다르다 — 태그는 v$version 이어야 한다"
             exit 1
           fi
-      - name: server.json이 MCP 레지스트리 형식에 맞는지 보기
-        # PyPI에 올린 버전은 되돌릴 수 없고 레지스트리 job은 그 뒤에 돈다 — 형식 오류는 PyPI에 올리기 전에 막는다
-        run: |
-          set -uo pipefail
-          out="$RUNNER_TEMP/validate.json"
-          code="$(curl --silent --show-error --retry 3 --max-time 30 -o "$out" -w '%{http_code}' -X POST \
-            -H "Content-Type: application/json" --data-binary @server.json \
-            https://registry.modelcontextprotocol.io/v0/validate)" || code=000
-          cat "$out" 2>/dev/null && echo
-          if [ "$code" = 200 ] && jq -e '.valid == true' "$out" >/dev/null; then
-            exit 0
-          fi
-          if [ "$code" = 200 ] || [ "$code" = 422 ]; then
-            echo "::error::server.json이 MCP 레지스트리 검사를 통과하지 못했다 — 고친 커밋을 머지한 뒤 그 커밋에 태그를 옮겨 단다"
-          else
-            echo "::error::MCP 레지스트리 검사 주소에서 답을 받지 못했다(HTTP $code) — 잠시 뒤 이 job을 다시 돌린다"
-          fi
-          exit 1
       - run: uv build
       - name: 빌드한 휠을 설치한 환경에서 테스트
         run: uv run --isolated --no-project --with dist/*.whl --with pytest pytest
       - name: 지원하는 가장 낮은 파이썬 3.10과 pyproject.toml 의존성 하한에서 테스트
         run: uv run --isolated --python 3.10 --resolution lowest-direct --no-editable pytest
+      - name: server.json이 MCP 레지스트리 형식에 맞는지 보기
+        # PyPI에 올린 버전은 되돌릴 수 없고 레지스트리 job은 그 뒤에 돈다 — 형식 오류는 PyPI에 올리기 전에 막는다.
+        # 검사 주소는 맞으면 200과 valid true, 형식이 틀리면 422(깨진 JSON은 400)와 JSON 오류 목록을 준다
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/validate.json"
+          code="$(curl --silent --show-error --retry 3 --retry-all-errors --max-time 30 -o "$out" -w '%{http_code}' \
+            -X POST -H "Content-Type: application/json" --data-binary @server.json \
+            https://registry.modelcontextprotocol.io/v0/validate)" || code=000
+          cat "$out" 2>/dev/null && echo
+          if [ "$code" = 200 ] && jq -e '.valid == true' "$out" >/dev/null 2>&1; then
+            exit 0
+          fi
+          case "$code" in
+            200|400|422) answered=yes ;;
+            *) answered=no ;;
+          esac
+          if [ "$answered" = yes ] && jq -e 'type == "object"' "$out" >/dev/null 2>&1; then
+            echo "::error::server.json이 MCP 레지스트리 검사를 통과하지 못했다 — 고친 커밋을 머지한 뒤 그 커밋에 태그를 옮겨 단다"
+          else
+            echo "::error::MCP 레지스트리 검사 주소에서 검사 결과를 받지 못했다(HTTP $code) — 잠시 뒤 이 job을 다시 돌린다"
+          fi
+          exit 1
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist
@@ -82,6 +87,7 @@ jobs:
   registry:
     needs: publish
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
@@ -120,8 +126,8 @@ jobs:
               exit 0
             fi
             # 앞선 시도가 들어갔는데 응답만 못 받았으면 다시 올릴 때 "이미 있는 버전" 오류가 난다
-            if curl --fail --silent --output /dev/null "$url"; then
-              echo "레지스트리에 $name $version 이 이미 있다"
+            if curl --fail --silent --max-time 30 --output /dev/null "$url"; then
+              echo "::warning::레지스트리에 $name $version 이 이미 있어 성공으로 끝낸다 — 이번 시도가 올린 것인지는 모르니 레지스트리의 그 버전 내용을 확인한다"
               exit 0
             fi
             if [ "$try" -lt 5 ]; then
