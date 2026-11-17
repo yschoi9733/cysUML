@@ -1210,12 +1210,31 @@ def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path,
                 assert f"> {crossing[0]}" in korean, f"README 한국어 절이 옮긴 검사 결과가 지금 결과와 다르다: {crossing[0]}"
 
 
+def test_readme_before_after_english_and_korean_pictures_share_one_layout(readme_images):
+    # README 영어 절과 한국어 절은 같은 상자 이동을 말하므로, 이름만 다르고 자리·관계는 같아야 한다
+    def layout(name):
+        record = json.loads((readme_images.IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8"))
+        index = {c["name"]: i for i, c in enumerate(record["classes"])}
+        boxes = [(c["left"], c["top"], c.get("width"), c.get("kind")) for c in record["classes"]]
+        lines = [(r["kind"], index[r["from"]], index[r["to"]], r.get("from_multiplicity"), r.get("to_multiplicity"))
+                 for r in record["relations"]]
+        return boxes, lines
+
+    pairs = [(name.removesuffix("-ko"), name) for name in readme_images.BEFORE_AFTER if name.endswith("-ko")]
+    assert pairs
+    for english, korean in pairs:
+        assert layout(english) == layout(korean), f"{english}와 {korean}의 배치가 다르다"
+
+
 def test_readme_pictures_exist_and_cover_every_example(readme_images):
     names = re.findall(r"https://raw\.githubusercontent\.com/yschoi9733/cysUML/main/docs/images/([^)\s]+)",
                        README.read_text(encoding="utf-8"))
     assert {f"{n}.png" for n in [*EXAMPLES, *readme_images.BEFORE_AFTER]} <= set(names)
     for name in names:
         assert (readme_images.IMAGES / name).is_file(), f"README가 가리키는 docs/images/{name}이 없다 — {REDRAW}로 그린다"
+    expected = {f"{n}{ext}" for n in [*EXAMPLES, *readme_images.BEFORE_AFTER] for ext in (".png", ".cysuml.json")}
+    kept = {p.name for p in readme_images.IMAGES.iterdir() if not p.name.startswith(".")}
+    assert kept == expected, f"docs/images/에 쓰지 않는 파일 {sorted(kept - expected)}, 빠진 파일 {sorted(expected - kept)}"
 
 
 def test_command_serves_over_stdio(tmp_path):

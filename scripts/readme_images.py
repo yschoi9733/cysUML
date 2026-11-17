@@ -45,7 +45,10 @@ def before_after() -> list[tuple[str, dict]]:
     """전후 그림의 (도구, 입력) 목록 — 저장된 입력 파일에서 도구 이름을 떼어 낸다."""
     found = []
     for name in BEFORE_AFTER:
-        record = json.loads((IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8"))
+        try:
+            record = json.loads((IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"docs/images/{name}.cysuml.json을 읽지 못했다: {e}")
         if record.get("file_name") != name or "tool" not in record:
             raise SystemExit(f"docs/images/{name}.cysuml.json에 tool이 없거나 file_name이 {name}이 아니다")
         found.append((record.pop("tool"), record))

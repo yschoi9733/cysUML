@@ -20,7 +20,8 @@ and tells the assistant to move that box or bend the line:
 
 ![First try, which fails the check: the line from Customer to Payment is hidden under the OrderLine box, so pays looks like a relation between Customer and OrderLine, and OrderLine seems to have its own line to Payment](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/first-try.png)
 
-The assistant moved OrderLine to the right, moved Payment up into its place, drew again, and the check passed:
+The assistant moved OrderLine to the right, moved Payment and CardPayment up into the room it left, drew again, and
+the check passed:
 
 ![Fixed layout, which passes the check: Payment and CardPayment sit under Customer and no line crosses a box or a label](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/fixed.png)
 
@@ -429,7 +430,7 @@ AI가 배치하고 도구가 그리는, 문서용 UML 그림 MCP 서버다.
 
 ![첫 배치는 검사에 불합격한다: 고객에서 결제로 가는 선이 주문항목 상자 밑에 가려져, 낸다가 고객과 주문항목 사이의 관계처럼 보이고 주문항목에서 결제로 가는 선이 따로 있는 것처럼 보인다](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/first-try-ko.png)
 
-어시스턴트가 알려 준 대로 주문항목을 오른쪽으로 옮기고, 결제를 그 자리로 올려 다시 그리자 검사를 통과했다.
+어시스턴트가 알려 준 대로 주문항목을 오른쪽으로 옮기고, 빈 자리로 결제와 카드결제를 올려 다시 그리자 검사를 통과했다.
 
 ![고친 배치는 검사를 통과한다: 결제와 카드결제가 고객 아래에 있고 선이 상자나 글자를 지나지 않는다](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/fixed-ko.png)
 
