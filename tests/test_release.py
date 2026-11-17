@@ -21,6 +21,13 @@ def test_server_json_versions_follow_pyproject():
     assert [p["version"] for p in SERVER["packages"]] == [version], "server.json packages의 version도 같게 올린다"
 
 
+def test_readme_version_pins_follow_pyproject():
+    # README의 버전 고정 예시(uvx cysuml@<버전>, JSON args)는 그 판의 PyPI 페이지에 그대로 실려, 올린 뒤에는 고칠 수 없다
+    pins = re.findall(r"\bcysuml@([0-9][0-9A-Za-z.+-]*[0-9A-Za-z]|[0-9])", (ROOT / "README.md").read_text(encoding="utf-8"))
+    assert pins, "README에서 cysuml@<버전> 예시를 찾지 못했다 — 예시를 뺐으면 이 테스트도 고친다"
+    assert set(pins) == {project_field("version")}, f"README의 cysuml@ 예시를 pyproject.toml 버전과 같게 올린다: {pins}"
+
+
 def test_server_json_names_the_pypi_package():
     assert [(p["registryType"], p["identifier"]) for p in SERVER["packages"]] == [("pypi", project_field("name"))]
 
