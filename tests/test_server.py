@@ -1211,15 +1211,18 @@ def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path,
 
 
 def test_readme_before_after_english_and_korean_pictures_share_one_layout(readme_images):
-    # README 영어 절과 한국어 절은 같은 상자 이동을 말하므로, 이름만 다르고 자리·관계는 같아야 한다
+    # README 영어 절과 한국어 절은 같은 상자 이동을 말하므로, 글자(이름·속성·연산)만 다르고 나머지 입력은 같아야 한다.
+    # 글자 칸은 개수나 상자 번호로 바꾸고 나머지는 통째로 견준다
     def layout(name):
         record = json.loads((readme_images.IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8"))
         index = {c["name"]: i for i, c in enumerate(record["classes"])}
-        boxes = [(c["left"], c["top"], c.get("width"), c.get("height"), c.get("kind"), len(c.get("attributes", [])),
-                  len(c.get("operations", []))) for c in record["classes"]]
-        lines = [(r["kind"], index[r["from"]], index[r["to"]], r.get("from_multiplicity"), r.get("to_multiplicity"),
-                  r.get("via"), r.get("navigable"), "name" in r) for r in record["relations"]]
-        return boxes, lines
+        boxes = [{**{k: v for k, v in c.items() if k not in ("name", "attributes", "operations")},
+                  "attributes": len(c.get("attributes", [])), "operations": len(c.get("operations", []))}
+                 for c in record["classes"]]
+        lines = [{**{k: v for k, v in r.items() if k != "name"}, "from": index[r["from"]], "to": index[r["to"]],
+                  "name": "name" in r} for r in record["relations"]]
+        rest = {k: v for k, v in record.items() if k not in ("file_name", "classes", "relations")}
+        return boxes, lines, rest
 
     pairs = [(name.removesuffix("-ko"), name) for name in readme_images.BEFORE_AFTER if name.endswith("-ko")]
     assert pairs
@@ -1228,8 +1231,11 @@ def test_readme_before_after_english_and_korean_pictures_share_one_layout(readme
 
 
 def test_readme_pictures_exist_and_cover_every_example(readme_images):
-    names = re.findall(r"https://raw\.githubusercontent\.com/yschoi9733/cysUML/main/docs/images/([^)\s]+)",
-                       README.read_text(encoding="utf-8"))
+    readme = README.read_text(encoding="utf-8")
+    base = "https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/"
+    links = re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", readme)
+    assert all(link.startswith(base) for link in links), [link for link in links if not link.startswith(base)]  # PyPI에서 깨지지 않게
+    names = [link.removeprefix(base) for link in links]
     assert {f"{n}.png" for n in [*EXAMPLES, *readme_images.BEFORE_AFTER]} <= set(names)
     for name in names:
         assert (readme_images.IMAGES / name).is_file(), f"README가 가리키는 docs/images/{name}이 없다 — {REDRAW}로 그린다"
