@@ -1,4 +1,5 @@
 import base64
+import importlib.util
 import io
 import json
 import os
@@ -1167,13 +1168,99 @@ def test_calls_at_the_same_time_all_draw(tmp_path):
     assert len({(tmp_path / f"d{i}.png").read_bytes() for i in range(4)}) == 1
 
 
-def test_readme_examples_draw_and_pass(tmp_path):
+# README 그림 — 그림 PNG는 Pillow·FreeType 버전에 따라 글자 가장자리 픽셀이 달라질 수 있어 바이트로 견주지 않고, 그린 입력과 검사 결과를 본다.
+# 예시·전후 그림을 읽는 법과 그 목록은 그림을 다시 그리는 스크립트의 것을 쓴다
+REDRAW = "uv run python scripts/readme_images.py"
+
+
+@pytest.fixture(scope="module")
+def readme_images():
+    """scripts/readme_images.py 모듈. 스크립트가 깨져도 이 파일의 다른 테스트는 돌게 테스트 안에서 불러온다."""
+    spec = importlib.util.spec_from_file_location("readme_images", README.parent / "scripts" / "readme_images.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_readme_examples_draw_pass_and_match_their_pictures(tmp_path, readme_images):
     blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
-    examples = [b for b in blocks if "file_name" in b]
-    assert sorted(b["file_name"] for b in examples) == sorted(EXAMPLES)
-    for b in examples:
-        (r,) = run(server.mcp, (EXAMPLES[b["file_name"]], {**b, "out_dir": str(tmp_path)}))[2]
+    everywhere = sorted(b["file_name"] for b in blocks if "file_name" in b)
+    examples = readme_images.readme_examples()  # 그림 스크립트는 영어 부분의 첫 ## 제목 뒤에서만 읽는다 — 그 밖에 둔 예시는 그리지 못한다
+    assert sorted(b["file_name"] for _, b in examples) == everywhere == sorted(EXAMPLES)
+    results = run(server.mcp, *[(tool, {**b, "out_dir": str(tmp_path)}) for tool, b in examples])[2]
+    for (tool, b), r in zip(examples, results, strict=True):
+        assert tool == EXAMPLES[b["file_name"]], b["file_name"]
         assert not r.is_error and text(r).startswith("합격"), text(r)
+        saved = readme_images.IMAGES / f"{b['file_name']}.cysuml.json"
+        expected = {"tool": tool, "scale": SCALE, **b}
+        assert saved.is_file() and json.loads(saved.read_text(encoding="utf-8")) == expected, \
+            f"README 예시 {b['file_name']}의 그림이 지금 예시로 그린 것이 아니다 — {REDRAW}로 다시 그린다"
+
+
+def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path, readme_images):
+    korean = README.read_text(encoding="utf-8").split("\n## 한국어\n", 1)[1]
+    calls = [(tool, {**args, "out_dir": str(tmp_path)}) for tool, args in readme_images.before_after()]
+    for (name, passes), (_, args), r in zip(readme_images.BEFORE_AFTER.items(), calls, run(server.mcp, *calls)[2], strict=True):
+        assert not r.is_error and text(r).startswith("합격") == passes, (name, text(r))
+        if not passes:
+            assert text(r).startswith("불합격 — 1건"), (name, text(r))  # README가 "이 한 건으로"·"on exactly this"라고 적었다
+            crossing = [re.sub(r"^\d+\. ", "", line) for line in text(r).splitlines() if "선이 상자를 지난다" in line]
+            assert crossing, (name, text(r))
+            # 가려지는 선의 꺾는 점이 관계 이름 자리를 정한다(스크립트 머리말). README는 이름이 출발 상자와 가린 상자를 잇는 것처럼
+            # 보인다고 설명하므로, 그린 결과에서 이름이 선이 가린 상자에 들어가기 전 토막에 앉았는지(그 토막과 앞 토막들이 모두 가린
+            # 상자 밖), 그리고 그 토막의 가운데쯤(가운데 3분의 1)에 있는지 본다
+            index = int(re.search(r"relations\[(\d+)\]", crossing[0]).group(1))
+            drawing = classdiagram.render({k: args[k] for k in ("classes", "relations")}, args.get("scale", SCALE))
+            x0, y0, x1, y1 = drawing.layout.by_key[re.search(r"상자 (\S+)\(", crossing[0]).group(1)].rect
+            placed = drawing.layout.relations[index]
+            (label,) = [x for x in placed.labels if x.role == "name"]
+            assert label.segment is not None, f"{name}: 관계 이름이 선 위에 얹히지 않았다"
+
+            def covered(k):
+                (px, py), (qx, qy) = placed.points[k], placed.points[k + 1]
+                return x0 < (px + qx) / 2 < x1 and y0 < (py + qy) / 2 < y1
+
+            assert not covered(label.segment), f"{name}: 관계 이름이 가린 상자 밑 토막에 앉았다"
+            assert not any(covered(k) for k in range(label.segment)), f"{name}: 관계 이름이 가린 상자를 지난 뒤 토막에 앉았다"
+            (px, py), (qx, qy) = placed.points[label.segment], placed.points[label.segment + 1]
+            t = ((label.x - px) * (qx - px) + (label.y - py) * (qy - py)) / ((qx - px) ** 2 + (qy - py) ** 2)
+            assert 1 / 3 <= t <= 2 / 3, f"{name}: 관계 이름이 앉은 토막의 가운데에서 벗어났다(토막 위 자리 {t:.2f})"
+            if name.endswith("-ko"):  # 한국어 절은 이 항목을 그대로 옮겨 보여 준다
+                assert f"> {crossing[0]}" in korean, f"README 한국어 절이 옮긴 검사 결과가 지금 결과와 다르다: {crossing[0]}"
+
+
+def test_readme_before_after_english_and_korean_pictures_share_one_layout(readme_images):
+    # README 영어 절과 한국어 절은 같은 상자 이동을 말하므로, 글자(이름·속성·연산)만 다르고 나머지 입력은 같아야 한다.
+    # 글자 칸은 개수나 상자 번호로 바꾸고 나머지는 통째로 견준다
+    def layout(name):
+        record = json.loads((readme_images.IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8"))
+        index = {c["name"]: i for i, c in enumerate(record["classes"])}
+        boxes = [{**{k: v for k, v in c.items() if k not in ("name", "attributes", "operations")},
+                  "attributes": len(c.get("attributes", [])), "operations": len(c.get("operations", []))}
+                 for c in record["classes"]]
+        lines = [{**{k: v for k, v in r.items() if k != "name"}, "from": index[r["from"]], "to": index[r["to"]],
+                  "name": "name" in r} for r in record["relations"]]
+        rest = {k: v for k, v in record.items() if k not in ("file_name", "classes", "relations")}
+        return boxes, lines, rest
+
+    pairs = [(name.removesuffix("-ko"), name) for name in readme_images.BEFORE_AFTER if name.endswith("-ko")]
+    assert pairs
+    for english, korean in pairs:
+        assert layout(english) == layout(korean), f"{english}와 {korean}의 배치가 다르다"
+
+
+def test_readme_pictures_exist_and_cover_every_example(readme_images):
+    readme = README.read_text(encoding="utf-8")
+    base = "https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/"
+    links = re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", readme)
+    assert all(link.startswith(base) for link in links), [link for link in links if not link.startswith(base)]  # PyPI에서 깨지지 않게
+    names = [link.removeprefix(base) for link in links]
+    assert {f"{n}.png" for n in [*EXAMPLES, *readme_images.BEFORE_AFTER]} <= set(names)
+    for name in names:
+        assert (readme_images.IMAGES / name).is_file(), f"README가 가리키는 docs/images/{name}이 없다 — {REDRAW}로 그린다"
+    expected = {f"{n}{ext}" for n in [*EXAMPLES, *readme_images.BEFORE_AFTER] for ext in (".png", ".cysuml.json")}
+    kept = {p.name for p in readme_images.IMAGES.iterdir() if not p.name.startswith(".")}
+    assert kept == expected, f"docs/images/에 쓰지 않는 파일 {sorted(kept - expected)}, 빠진 파일 {sorted(expected - kept)}"
 
 
 def test_command_serves_over_stdio(tmp_path):

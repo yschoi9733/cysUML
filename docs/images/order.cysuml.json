@@ -1,0 +1,12 @@
+{
+  "tool": "draw_class_diagram",
+  "file_name": "order",
+  "classes": [
+    {"name": "Order", "left": 0, "top": 0, "attributes": ["-id: long"]},
+    {"name": "Customer", "left": 200, "top": 0}
+  ],
+  "relations": [
+    {"kind": "association", "from": "Order", "to": "Customer", "name": "places", "to_multiplicity": "1"}
+  ],
+  "scale": 1.6
+}

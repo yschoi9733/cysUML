@@ -6,14 +6,28 @@ An MCP server for document-ready UML diagrams: the AI lays them out, cysUML draw
 
 [한국어 안내](#한국어)
 
-Auto-layout tools are quick, but lines often run through boxes and labels, and the result is hard to fix by hand.
-cysUML takes the other way round: your AI assistant decides where every box goes, cysUML draws exactly that and
-checks the drawing. If a line crosses a box or a label, the check fails and says what to move. The assistant fixes
-the layout and draws again until the check passes.
+Auto-layout tools keep boxes apart, but they decide where everything goes: it is hard to get the arrangement you
+want, one more class can reshuffle the whole picture, and labels can still crowd the lines. cysUML takes the other way
+round: your AI assistant decides where every box goes, cysUML draws exactly that and checks the drawing. An assistant
+placing boxes itself can get it wrong, so if boxes overlap, a line runs through a box or a label, or labels overlap,
+the check fails and says what to move. The assistant fixes the layout and draws again until the check passes.
 
 - Several kinds of UML diagram; the list is under [Use](#use). Sequence diagrams are laid out by cysUML from the order
   of participants and messages, and checked the same way.
 - PNG output. The fonts are bundled, so every machine draws the same picture, Korean text included.
+
+For example, here the assistant first put Product right under OrderLine, on the line from Customer to Payment. The
+line then passes under the Product box, which hides it, and the picture says something the model doesn't: Product is
+not related to Customer or Payment, yet it looks as if `pays` joined Customer to Product, and as if Product had its own
+line to Payment. The check fails on exactly this and tells the assistant to move that box or change the line's bend
+points:
+
+![First try, which fails the check: the line from Customer to Payment is hidden under the Product box, so pays looks like a relation between Customer and Product, and Product seems to have its own line to Payment](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/first-try.png)
+
+The assistant moved Product to the right of OrderLine, pulled Payment and CardPayment left into the room it left,
+drew again, and the check passed:
+
+![Fixed layout, which passes the check: Product sits to the right of OrderLine, and the line from Customer to Payment runs clear](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/fixed.png)
 
 ## Install
 
@@ -74,6 +88,8 @@ optional bend points:
 }
 ```
 
+![The class diagram this example draws](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/order.png)
+
 It gets back the check result, the size and place of every box as drawn, the saved file paths, and the picture.
 The check **fails** when boxes overlap, a line runs through a box, a label or another line's arrowhead, or labels
 overlap. A relation's name is drawn on top of that relation's line, which breaks around the name, so the stretch of
@@ -120,6 +136,8 @@ names the one it sits in with `in`, and the outer element grows right and down t
 }
 ```
 
+![The package diagram this example draws](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/packages.png)
+
 It gets back the same things as the class diagram tool, with the place of every element (and, for a package, the
 point its lines aim at, since that is not the middle of the package). Besides the class diagram
 checks, the check fails when an element inside another sits too close to its edge or name tab, or a line runs along
@@ -158,6 +176,8 @@ an arrowhead in this tool unless `navigable` is given, and each user points at t
 }
 ```
 
+![The component diagram this example draws](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/components.png)
+
 It gets back the same things as the package diagram tool, and for each circle the place of the circle alone next to
 the place of the circle with its name. The checks are the same: a line through a circle or its name fails.
 
@@ -188,6 +208,8 @@ the same tool draws a textbook-style picture of UML 1 components and folded-page
 }
 ```
 
+![The component diagram this example draws](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/billing.png)
+
 ### Deployment diagrams
 
 The tool is `draw_deployment_diagram`. It shows which computers (nodes) the software runs on: components and
@@ -217,6 +239,8 @@ an element outside a node is a `dependency` with `"stereotype": "deploy"`:
 }
 ```
 
+![The deployment diagram this example draws](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/deployment.png)
+
 It gets back the same things as the package diagram tool, and the check fails in the same cases, such as a
 communication path running through a node it does not connect or through an element inside one.
 
@@ -245,6 +269,8 @@ stand outside it and write their name beside the figure, on the side `name_side`
   ]
 }
 ```
+
+![The use case diagram this example draws](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/use-cases.png)
 
 It gets back the same things as the package diagram tool. An actor's place covers the figure and its name, and the
 figure's own place comes after it. The check is the same as for package diagrams, and it also fails when a line runs
@@ -285,6 +311,8 @@ state lists its `entry /`, `do /` and `exit /` lines in `actions`, written as gi
 }
 ```
 
+![The state diagram this example draws](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/order-states.png)
+
 It gets back the same things as the package diagram tool. The check also fails when a line runs through the name and
 actions of a state it starts or ends in, or a label sits on them.
 
@@ -317,6 +345,8 @@ by flows. The guard of a flow out of a decision goes in its `name`, brackets inc
 }
 ```
 
+![The activity diagram this example draws](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/order-flow.png)
+
 It gets back the same things as the package diagram tool, and checks the same way.
 
 ### Sequence diagrams
@@ -338,6 +368,8 @@ cysUML spaces the lifelines to fit the text and draws the activation bars:
   "frames": [{"kind": "opt", "first": 1, "last": 2, "condition": "paid by card"}]
 }
 ```
+
+![The sequence diagram this example draws](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/checkout.png)
 
 It gets back the check result, the saved file paths, and the picture. As cysUML does the layout, a failed check is a
 cysUML bug. Each finding still says what to change in the input to get around it: the order of participants or
@@ -371,6 +403,11 @@ claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml
 
 To try the latest `main` before it is released, use `uvx --from git+https://github.com/yschoi9733/cysUML cysuml`.
 
+The pictures in this README live in `docs/images/` and are drawn with `uv run python scripts/readme_images.py`. The
+example pictures under [Use](#use) are drawn from the JSON examples above, so run it after changing one. The
+before/after pictures at the top are drawn from their input files, `docs/images/first-try.cysuml.json` and the like:
+edit those, then run it.
+
 ## License
 
 cysUML is under the [MIT License](https://github.com/yschoi9733/cysUML/blob/main/LICENSE). The bundled fonts are
@@ -384,12 +421,26 @@ and [`NotoSansKR-LICENSE.txt`](https://github.com/yschoi9733/cysUML/blob/main/sr
 
 AI가 배치하고 도구가 그리는, 문서용 UML 그림 MCP 서버다.
 
-자동 배치 도구는 빠르지만 선이 상자나 글자를 가로지르기 쉽고, 손으로 다듬기도 어렵다. cysUML은 반대로 간다. AI 어시스턴트가
-상자 자리를 정하면 cysUML은 그대로 그리고 그림을 검사한다. 선이 상자나 글자를 지나면 불합격이고, 무엇을 옮길지 알려 준다.
-어시스턴트는 배치를 고쳐 합격할 때까지 다시 그린다.
+자동 배치 도구는 상자끼리 겹치지 않게 놓아 주지만, 자리를 도구가 정한다. 원하는 모양으로 놓게 하기 어렵고, 클래스 하나만 더해도
+그림 전체가 뒤섞일 수 있고, 글자가 선에 붙어 어수선해지기도 한다. cysUML은 반대로 간다. AI 어시스턴트가 상자 자리를 정하면
+cysUML은 그대로 그리고 그림을 검사한다. 어시스턴트가 자리를 직접 잡다 보면 실수가 생기므로, 상자끼리 겹치거나, 선이 상자나
+글자를 지나거나, 글자끼리 겹치면 불합격이고 무엇을 옮길지 알려 준다. 어시스턴트는 배치를 고쳐 합격할 때까지 다시 그린다.
 
 - 여러 UML 그림을 그린다(목록은 아래 [쓰기](#쓰기)). 교류도는 참여자·메시지 차례를 받아 cysUML이 배치하고, 똑같이 검사한다.
 - PNG로 낸다. 글꼴을 함께 넣어 어느 컴퓨터에서든 같은 그림이 나오고, 한글도 그린다.
+
+예를 들어 어시스턴트가 처음에 상품을 주문항목 바로 아래, 고객과 결제를 잇는 선 위에 두면, 그 선이 상품 상자 밑으로 지나가
+가려진다. 그러면 그림이 모델에 없는 것을 말한다 — 상품은 고객·결제와 관계가 없는데, `낸다`가 고객과 상품 사이의 관계처럼
+보이고 상품에서 결제로 가는 선이 따로 있는 것처럼 보인다. 검사는 바로 이 한 건으로 불합격시키고 이렇게 알려 준다.
+
+> 선이 상자를 지난다: 선 고객->결제(relations[3]), 상자 상품(190, 240, 130×93). 그 상자를 옮기거나, 꺾는 점(via)을 고쳐 그 상자를 비켜 가게 한다.
+
+![첫 배치는 검사에 불합격한다: 고객에서 결제로 가는 선이 상품 상자 밑에 가려져, 낸다가 고객과 상품 사이의 관계처럼 보이고 상품에서 결제로 가는 선이 따로 있는 것처럼 보인다](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/first-try-ko.png)
+
+어시스턴트가 알려 준 대로 상품을 주문항목 오른쪽으로 옮기고, 빈자리만큼 결제와 카드결제를 왼쪽으로 당겨 다시 그리자 검사를
+통과했다.
+
+![고친 배치는 검사를 통과한다: 상품이 주문항목 오른쪽에 있고 고객에서 결제로 가는 선이 가려지지 않는다](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/fixed-ko.png)
 
 ### 설치
 
@@ -480,6 +531,10 @@ uvx cysuml
 `uv sync`로 준비하고 `uv run pytest`로 테스트한다. 작업 중인 코드를 Claude Code에서 써 보려면 다른 이름으로 등록한다:
 `claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml`. 아직 배포하지 않은 `main`의 최신 코드를 써 보려면
 `uvx --from git+https://github.com/yschoi9733/cysUML cysuml`로 띄운다.
+
+이 README의 그림은 `docs/images/`에 있고 `uv run python scripts/readme_images.py`로 그린다. 그림 도구마다 붙은 예시 그림은 영어
+안내 [Use](#use) 절의 JSON 예시로 그리므로, 그 예시를 고쳤으면 다시 돌린다. 맨 위 전후 그림은 `docs/images/first-try.cysuml.json`
+같은 입력 파일로 그리므로, 그 파일을 고친 뒤 돌린다.
 
 ### 라이선스
 

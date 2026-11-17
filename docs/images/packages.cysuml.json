@@ -1,0 +1,16 @@
+{
+  "tool": "draw_package_diagram",
+  "file_name": "packages",
+  "elements": [
+    {"kind": "package", "name": "web", "left": 0, "top": 0},
+    {"kind": "class", "name": "OrderController", "in": "web", "left": 20, "top": 44},
+    {"kind": "package", "name": "domain", "left": 0, "top": 180},
+    {"kind": "class", "name": "Order", "in": "domain", "left": 20, "top": 224},
+    {"kind": "class", "name": "Customer", "in": "domain", "left": 200, "top": 224}
+  ],
+  "relations": [
+    {"kind": "dependency", "from": "web", "to": "domain", "stereotype": "use"},
+    {"kind": "association", "from": "Order", "to": "Customer", "name": "places", "to_multiplicity": "1"}
+  ],
+  "scale": 1.6
+}
