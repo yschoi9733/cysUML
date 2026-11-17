@@ -4,10 +4,11 @@ An MCP server for document-ready UML diagrams: the AI lays them out, cysUML draw
 
 [한국어 안내](#한국어)
 
-Auto-layout tools are quick, but lines often run through boxes and labels, and the result is hard to fix by hand.
-cysUML takes the other way round: your AI assistant decides where every box goes, cysUML draws exactly that and
-checks the drawing. If a line crosses a box or a label, the check fails and says what to move. The assistant fixes
-the layout and draws again until the check passes.
+Auto-layout tools keep boxes apart, but they decide where everything goes: it is hard to get the arrangement you
+want, one more class can reshuffle the whole picture, and labels can still crowd the lines. cysUML takes the other way
+round: your AI assistant decides where every box goes, cysUML draws exactly that and checks the drawing. Placing boxes
+by hand can go wrong, so if a line runs through a box or a label, or labels overlap, the check fails and says what to
+move. The assistant fixes the layout and draws again until the check passes.
 
 - Several kinds of UML diagram; the list is under [Use](#use). Sequence diagrams are laid out by cysUML from the order
   of participants and messages, and checked the same way.
@@ -418,9 +419,10 @@ and [`NotoSansKR-LICENSE.txt`](https://github.com/yschoi9733/cysUML/blob/main/sr
 
 AI가 배치하고 도구가 그리는, 문서용 UML 그림 MCP 서버다.
 
-자동 배치 도구는 빠르지만 선이 상자나 글자를 가로지르기 쉽고, 손으로 다듬기도 어렵다. cysUML은 반대로 간다. AI 어시스턴트가
-상자 자리를 정하면 cysUML은 그대로 그리고 그림을 검사한다. 선이 상자나 글자를 지나면 불합격이고, 무엇을 옮길지 알려 준다.
-어시스턴트는 배치를 고쳐 합격할 때까지 다시 그린다.
+자동 배치 도구는 상자끼리 겹치지 않게 놓아 주지만, 자리를 도구가 정한다. 원하는 모양으로 놓게 하기 어렵고, 클래스 하나만 더해도
+그림 전체가 뒤섞일 수 있고, 글자가 선에 붙어 어수선해지기도 한다. cysUML은 반대로 간다. AI 어시스턴트가 상자 자리를 정하면
+cysUML은 그대로 그리고 그림을 검사한다. 자리를 직접 잡다 보면 실수가 생기므로, 선이 상자나 글자를 지나거나 글자끼리 겹치면
+불합격이고 무엇을 옮길지 알려 준다. 어시스턴트는 배치를 고쳐 합격할 때까지 다시 그린다.
 
 - 여러 UML 그림을 그린다(목록은 아래 [쓰기](#쓰기)). 교류도는 참여자·메시지 차례를 받아 cysUML이 배치하고, 똑같이 검사한다.
 - PNG로 낸다. 글꼴을 함께 넣어 어느 컴퓨터에서든 같은 그림이 나오고, 한글도 그린다.
