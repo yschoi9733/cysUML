@@ -1168,52 +1168,52 @@ def test_calls_at_the_same_time_all_draw(tmp_path):
     assert len({(tmp_path / f"d{i}.png").read_bytes() for i in range(4)}) == 1
 
 
-def _readme_images():
+# README 그림 — 그림 PNG는 Pillow·FreeType 버전에 따라 글자 가장자리 픽셀이 달라질 수 있어 바이트로 견주지 않고, 그린 입력과 검사 결과를 본다.
+# 예시·전후 그림을 읽는 법과 그 목록은 그림을 다시 그리는 스크립트의 것을 쓴다
+REDRAW = "uv run python scripts/readme_images.py"
+
+
+@pytest.fixture(scope="module")
+def readme_images():
+    """scripts/readme_images.py 모듈. 스크립트가 깨져도 이 파일의 다른 테스트는 돌게 테스트 안에서 불러온다."""
     spec = importlib.util.spec_from_file_location("readme_images", README.parent / "scripts" / "readme_images.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-# README 그림 — 그림 PNG는 Pillow·FreeType 버전에 따라 글자 가장자리 픽셀이 달라질 수 있어 바이트로 견주지 않고, 그린 입력과 검사 결과를 본다.
-# 그림 자리와 전후 그림 목록은 그림을 다시 그리는 스크립트의 것을 쓴다
-README_IMAGES = _readme_images()
-IMAGES = README_IMAGES.IMAGES
-REDRAW = "uv run python scripts/readme_images.py"
-
-
-def test_readme_examples_draw_pass_and_match_their_pictures(tmp_path):
-    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
-    examples = [b for b in blocks if "file_name" in b]
-    assert sorted(b["file_name"] for b in examples) == sorted(EXAMPLES)
-    for b in examples:
-        (r,) = run(server.mcp, (EXAMPLES[b["file_name"]], {**b, "out_dir": str(tmp_path)}))[2]
+def test_readme_examples_draw_pass_and_match_their_pictures(tmp_path, readme_images):
+    examples = readme_images.readme_examples()
+    assert sorted(b["file_name"] for _, b in examples) == sorted(EXAMPLES)
+    for tool, b in examples:
+        assert tool == EXAMPLES[b["file_name"]], b["file_name"]
+        (r,) = run(server.mcp, (tool, {**b, "out_dir": str(tmp_path)}))[2]
         assert not r.is_error and text(r).startswith("합격"), text(r)
-        saved = IMAGES / f"{b['file_name']}.cysuml.json"
-        expected = {"tool": EXAMPLES[b["file_name"]], **b, "scale": SCALE}
+        saved = readme_images.IMAGES / f"{b['file_name']}.cysuml.json"
+        expected = {"tool": tool, **b, "scale": SCALE}
         assert saved.is_file() and json.loads(saved.read_text(encoding="utf-8")) == expected, \
             f"README 예시 {b['file_name']}의 그림이 지금 예시로 그린 것이 아니다 — {REDRAW}로 다시 그린다"
 
 
-def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path):
+def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path, readme_images):
     korean = README.read_text(encoding="utf-8").split("\n## 한국어\n", 1)[1]
-    records = [json.loads((IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8")) for name in README_IMAGES.BEFORE_AFTER]
-    results = run(server.mcp, *[(record.pop("tool"), {**record, "out_dir": str(tmp_path)}) for record in records])[2]
-    for (name, passes), r in zip(README_IMAGES.BEFORE_AFTER.items(), results):
+    calls = [(tool, {**args, "out_dir": str(tmp_path)}) for tool, args in readme_images.before_after()]
+    for (name, passes), r in zip(readme_images.BEFORE_AFTER.items(), run(server.mcp, *calls)[2]):
         assert not r.is_error and text(r).startswith("합격") == passes, (name, text(r))
         if not passes:
+            assert text(r).startswith("불합격 — 4건"), (name, text(r))  # README가 "4건"·"four findings"라고 적었다
             crossing = [re.sub(r"^\d+\. ", "", line) for line in text(r).splitlines() if "선이 상자를 지난다" in line]
             assert crossing, (name, text(r))
             if name.endswith("-ko"):  # 한국어 절은 이 항목을 그대로 옮겨 보여 준다
                 assert f"> {crossing[0]}" in korean, f"README 한국어 절이 옮긴 검사 결과가 지금 결과와 다르다: {crossing[0]}"
 
 
-def test_readme_pictures_exist_and_cover_every_example():
+def test_readme_pictures_exist_and_cover_every_example(readme_images):
     names = re.findall(r"https://raw\.githubusercontent\.com/yschoi9733/cysUML/main/docs/images/([^)\s]+)",
                        README.read_text(encoding="utf-8"))
-    assert {f"{n}.png" for n in [*EXAMPLES, *README_IMAGES.BEFORE_AFTER]} <= set(names)
+    assert {f"{n}.png" for n in [*EXAMPLES, *readme_images.BEFORE_AFTER]} <= set(names)
     for name in names:
-        assert (IMAGES / name).is_file(), f"README가 가리키는 docs/images/{name}이 없다 — {REDRAW}로 그린다"
+        assert (readme_images.IMAGES / name).is_file(), f"README가 가리키는 docs/images/{name}이 없다 — {REDRAW}로 그린다"
 
 
 def test_command_serves_over_stdio(tmp_path):

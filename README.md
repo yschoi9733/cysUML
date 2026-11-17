@@ -14,11 +14,11 @@ the layout and draws again until the check passes.
 - PNG output. The fonts are bundled, so every machine draws the same picture, Korean text included.
 
 For example, here the assistant first put Customer, Order and Payment in one row. The line from Customer to Payment
-runs through the Order box and over the other lines, so you can't tell which label belongs to which line: `pays` looks
-like the name of the line from Order to Payment. The check fails with four findings and tells the assistant to move a
-box or bend the line:
+passes under the Order box, which hides it, and runs over the other lines. In the picture it looks like one line into
+Order and another out of it, so you can't tell which label belongs to which line: `pays` looks like the name of the
+line from Order to Payment. The check fails with four findings and tells the assistant to move a box or bend the line:
 
-![First try, which fails the check: the line from Customer to Payment runs through the Order box and over the other lines, so its pays label looks like it names the line from Order to Payment](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/first-try.png)
+![First try, which fails the check: the line from Customer to Payment is hidden under the Order box and runs over the other lines, so its pays label looks like it names the line from Order to Payment](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/first-try.png)
 
 The assistant moved Payment and CardPayment under Customer and drew again, and the check passed:
 
@@ -418,13 +418,14 @@ AI가 배치하고 도구가 그리는, 문서용 UML 그림 MCP 서버다.
 - 여러 UML 그림을 그린다(목록은 아래 [쓰기](#쓰기)). 교류도는 참여자·메시지 차례를 받아 cysUML이 배치하고, 똑같이 검사한다.
 - PNG로 낸다. 글꼴을 함께 넣어 어느 컴퓨터에서든 같은 그림이 나오고, 한글도 그린다.
 
-예를 들어 어시스턴트가 처음에 고객·주문·결제를 한 줄에 두면, 고객에서 결제로 가는 선이 주문 상자를 지나고 다른 선과 포개진다.
-그러면 어느 이름이 어느 선의 것인지 알 수 없다 — `낸다`가 주문에서 결제로 가는 선의 이름처럼 보인다. 검사는 4건으로
-불합격시키고 상자를 옮기거나 선을 꺾으라고 알려 준다. 걸린 곳 가운데 하나는 이렇게 온다.
+예를 들어 어시스턴트가 처음에 고객·주문·결제를 한 줄에 두면, 고객에서 결제로 가는 선이 주문 상자 밑으로 지나가 상자에 가려지고
+다른 선과 포개진다. 그림에서는 주문으로 들어가는 선과 나오는 선처럼 보여 어느 이름이 어느 선의 것인지 알 수 없다 — `낸다`가
+주문에서 결제로 가는 선의 이름처럼 보인다. 검사는 4건으로 불합격시키고 상자를 옮기거나 선을 꺾으라고 알려 준다. 걸린 곳 가운데
+하나는 이렇게 온다.
 
 > 선이 상자를 지난다: 선 고객->결제(relations[3]), 상자 주문(240, 0, 102×93). 그 상자를 옮기거나, 선에 꺾는 점(via)을 주어 그 상자를 비켜 가게 한다.
 
-![첫 배치는 검사에 불합격한다: 고객에서 결제로 가는 선이 주문 상자를 지나고 다른 선과 포개져, 그 선의 이름 낸다가 주문에서 결제로 가는 선의 이름처럼 보인다](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/first-try-ko.png)
+![첫 배치는 검사에 불합격한다: 고객에서 결제로 가는 선이 주문 상자 밑에 가려지고 다른 선과 포개져, 그 선의 이름 낸다가 주문에서 결제로 가는 선의 이름처럼 보인다](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/first-try-ko.png)
 
 선이 지난 상자 대신 선의 끝 상자를 옮겨도 비켜 간다. 어시스턴트가 결제와 카드결제를 고객 아래로 옮겨 다시 그리자 검사를 통과했다.
 
