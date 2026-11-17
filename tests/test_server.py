@@ -1206,16 +1206,16 @@ def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path,
             assert text(r).startswith("불합격 — 1건"), (name, text(r))  # README가 "이 한 건으로"·"on exactly this"라고 적었다
             crossing = [re.sub(r"^\d+\. ", "", line) for line in text(r).splitlines() if "선이 상자를 지난다" in line]
             assert crossing, (name, text(r))
-            # 가려지는 선의 꺾는 점이 관계 이름 자리를 정한다(스크립트 머리말) — 이름은 가장 긴 토막 가운데에 앉으므로, 끝 상자에서 첫
-            # 꺾는 점(가린 상자의 앞 변)까지가 가장 길어야 한다. 이 선은 가로선이라 x만 견준다
-            hidden = args["relations"][int(re.search(r"relations\[(\d+)\]", crossing[0]).group(1))]
-            boxes = {c["name"]: c for c in args["classes"]}
-            start, end = boxes[hidden["from"]], boxes[hidden["to"]]
-            xs = [start["left"] + start["width"], *(x for x, _ in hidden.get("via", [])), end["left"]]
-            pieces = [b - a for a, b in zip(xs, xs[1:])]
-            assert len(pieces) > 1 and pieces[0] > max(pieces[1:]), f"{name}: 이름이 앉을 끝 상자–가린 상자 토막이 가장 길지 않다: {pieces}"
-            cover = boxes[re.search(r"상자 (\S+)\(", crossing[0]).group(1)]
-            assert xs[1] <= cover["left"], f"{name}: 첫 꺾는 점이 가린 상자 {cover['name']}의 앞 변보다 뒤에 있어 이름이 그 밑에 앉는다"
+            # 가려지는 선의 꺾는 점이 관계 이름 자리를 정한다(스크립트 머리말). 그린 결과에서 이름이 출발 상자와 가린 상자 사이 보이는
+            # 토막의 가운데쯤(가운데 3분의 1)에 앉았는지 본다 — 이 선은 왼쪽에서 오른쪽으로 가는 가로선이다
+            index = int(re.search(r"relations\[(\d+)\]", crossing[0]).group(1))
+            drawing = classdiagram.render({k: args[k] for k in ("classes", "relations")}, args.get("scale", SCALE))
+            boxes = drawing.layout.by_key
+            lo = boxes[args["relations"][index]["from"]].rect[2]
+            hi = boxes[re.search(r"상자 (\S+)\(", crossing[0]).group(1)].rect[0]
+            (label,) = [x for x in drawing.layout.relations[index].labels if x.role == "name"]
+            third = (hi - lo) / 3
+            assert lo + third <= label.x <= hi - third, f"{name}: 관계 이름이 보이는 토막 가운데({lo}~{hi})에 앉지 않았다({label.x})"
             if name.endswith("-ko"):  # 한국어 절은 이 항목을 그대로 옮겨 보여 준다
                 assert f"> {crossing[0]}" in korean, f"README 한국어 절이 옮긴 검사 결과가 지금 결과와 다르다: {crossing[0]}"
 

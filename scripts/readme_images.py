@@ -63,8 +63,9 @@ def before_after() -> list[tuple[str, dict]]:
 
 def main() -> None:
     jobs = [*readme_examples(), *before_after()]
-    names = [args["file_name"] for _, args in jobs]
-    if len(set(names)) < len(names):  # 한 폴더에 그리므로 겹치면 뒤 그림이 앞 그림을 덮는다
+    # 한 폴더에 그리므로 겹치면 뒤 그림이 앞 그림을 덮는다. macOS 기본 파일 시스템은 대소문자를 가리지 않아 casefold로 견준다
+    names = [args["file_name"].casefold() for _, args in jobs]
+    if len(set(names)) < len(names):
         raise SystemExit(f"README 예시와 전후 그림의 file_name이 겹친다: {sorted({n for n in names if names.count(n) > 1})}")
 
     async def go(drawn: Path) -> list[str]:
@@ -73,7 +74,11 @@ def main() -> None:
         async with Client(server.mcp) as c:
             for tool, args in jobs:
                 name = args["file_name"]
-                result = await c.call_tool(tool, {**args, "out_dir": str(drawn)})
+                try:
+                    result = await c.call_tool(tool, {**args, "out_dir": str(drawn)})
+                except Exception as e:  # 도구가 오류 결과가 아니라 예외를 내도(인자 검증 등) 모아 두었다가 알린다
+                    problems.append(f"{name}: {e}")
+                    continue
                 if result.is_error:
                     problems.append(f"{name}: {result.content[0].text}")
                     continue
