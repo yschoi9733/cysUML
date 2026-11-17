@@ -38,13 +38,20 @@ jobs:
         # PyPI에 올린 버전은 되돌릴 수 없고 레지스트리 job은 그 뒤에 돈다 — 형식 오류는 PyPI에 올리기 전에 막는다
         run: |
           set -uo pipefail
-          if ! out="$(curl --silent --show-error --fail-with-body -X POST -H "Content-Type: application/json" \
-              --data-binary @server.json https://registry.modelcontextprotocol.io/v0/validate)" \
-              || ! jq -e '.valid == true' >/dev/null <<<"$out"; then
-            echo "$out"
-            echo "::error::server.json이 MCP 레지스트리 검사를 통과하지 못했다 — 고친 뒤 태그를 다시 단다"
-            exit 1
+          out="$RUNNER_TEMP/validate.json"
+          code="$(curl --silent --show-error --retry 3 --max-time 30 -o "$out" -w '%{http_code}' -X POST \
+            -H "Content-Type: application/json" --data-binary @server.json \
+            https://registry.modelcontextprotocol.io/v0/validate)" || code=000
+          cat "$out" 2>/dev/null && echo
+          if [ "$code" = 200 ] && jq -e '.valid == true' "$out" >/dev/null; then
+            exit 0
           fi
+          if [ "$code" = 200 ] || [ "$code" = 422 ]; then
+            echo "::error::server.json이 MCP 레지스트리 검사를 통과하지 못했다 — 고친 커밋을 머지한 뒤 그 커밋에 태그를 옮겨 단다"
+          else
+            echo "::error::MCP 레지스트리 검사 주소에서 답을 받지 못했다(HTTP $code) — 잠시 뒤 이 job을 다시 돌린다"
+          fi
+          exit 1
       - run: uv build
       - name: 빌드한 휠을 설치한 환경에서 테스트
         run: uv run --isolated --no-project --with dist/*.whl --with pytest pytest
