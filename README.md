@@ -399,8 +399,10 @@ claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml
 
 To try the latest `main` before it is released, use `uvx --from git+https://github.com/yschoi9733/cysUML cysuml`.
 
-The pictures in this README live in `docs/images/`. After changing an example above, draw them again with
-`uv run python scripts/readme_images.py`.
+The pictures in this README live in `docs/images/` and are drawn with `uv run python scripts/readme_images.py`. The
+example pictures under [Use](#use) are drawn from the JSON examples above, so run it after changing one. The
+before/after pictures at the top are drawn from their input files, `docs/images/first-try.cysuml.json` and the like:
+edit those, then run it.
 
 ## License
 
@@ -522,8 +524,11 @@ uvx cysuml
 
 `uv sync`로 준비하고 `uv run pytest`로 테스트한다. 작업 중인 코드를 Claude Code에서 써 보려면 다른 이름으로 등록한다:
 `claude mcp add cysuml-dev -- uv run --directory /path/to/cysUML cysuml`. 아직 배포하지 않은 `main`의 최신 코드를 써 보려면
-`uvx --from git+https://github.com/yschoi9733/cysUML cysuml`로 띄운다. 이 README의 그림은 `docs/images/`에 있고, 위 예시를
-고쳤으면 `uv run python scripts/readme_images.py`로 다시 그린다.
+`uvx --from git+https://github.com/yschoi9733/cysUML cysuml`로 띄운다.
+
+이 README의 그림은 `docs/images/`에 있고 `uv run python scripts/readme_images.py`로 그린다. 그림 도구마다 붙은 예시 그림은 영어
+안내 [Use](#use) 절의 JSON 예시로 그리므로, 그 예시를 고쳤으면 다시 돌린다. 맨 위 전후 그림은 `docs/images/first-try.cysuml.json`
+같은 입력 파일로 그리므로, 그 파일을 고친 뒤 돌린다.
 
 ### 라이선스
 

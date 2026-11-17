@@ -76,8 +76,10 @@ def main() -> None:
                     continue
                 verdict = result.content[0].text.splitlines()[0]
                 print(f"{name}: {verdict}")
-                if verdict.startswith("합격") != BEFORE_AFTER.get(name, True):
-                    problems.append(f"{name}: README 설명과 검사 결과가 다르다")
+                if name not in BEFORE_AFTER and not verdict.startswith("합격"):
+                    problems.append(f"{name}: README 예시가 검사에 불합격했다")
+                elif name in BEFORE_AFTER and verdict.startswith("합격") != BEFORE_AFTER[name]:
+                    problems.append(f"{name}: 전후 그림이 README 설명과 다르게 {'합격' if verdict.startswith('합격') else '불합격'}했다")
         return problems
 
     with tempfile.TemporaryDirectory() as tmp:
