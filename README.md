@@ -16,7 +16,8 @@ the layout and draws again until the check passes.
 For example, here the assistant first put Product right under OrderLine, on the line from Customer to Payment. The
 line then passes under the Product box, which hides it, and the picture says something the model doesn't: Product is
 not related to Customer or Payment, yet it looks as if `pays` joined Customer to Product, and as if Product had its own
-line to Payment. The check fails on exactly this and tells the assistant to move that box:
+line to Payment. The check fails on exactly this and tells the assistant to move that box or change the line's bend
+points:
 
 ![First try, which fails the check: the line from Customer to Payment is hidden under the Product box, so pays looks like a relation between Customer and Product, and Product seems to have its own line to Payment](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/first-try.png)
 
