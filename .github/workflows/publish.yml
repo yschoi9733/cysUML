@@ -43,7 +43,8 @@ jobs:
         run: uv run --isolated --python 3.10 --resolution lowest-direct --no-editable pytest
       - name: server.json이 MCP 레지스트리 형식에 맞는지 보기
         # PyPI에 올린 버전은 되돌릴 수 없고 레지스트리 job은 그 뒤에 돈다 — 형식 오류는 PyPI에 올리기 전에 막는다.
-        # 검사 주소(바뀌지 않게 고정된 v0.1 API)는 맞으면 200과 valid true, 형식이 틀리면 422(깨진 JSON은 400)와 JSON 오류 목록을 준다
+        # 검사 주소(바뀌지 않게 고정된 v0.1 API)는 맞으면 200과 valid true를 준다. 틀리면 내용 검사는 200과 valid false로,
+        # 본문 형식(길이 초과는 422, 깨진 JSON은 400 등)은 그 상태 코드와 JSON 오류 목록으로 알린다
         run: |
           set -uo pipefail
           out="$RUNNER_TEMP/validate.json"
@@ -65,15 +66,17 @@ jobs:
             echo "::error::MCP 레지스트리 검사 주소에서 알아볼 수 있는 검사 결과를 받지 못했다(HTTP $code) — 잠시 뒤 이 job을 다시 돌린다"
           fi
           exit 1
-      # 레지스트리 job이 쓸 mcp-publisher도 PyPI에 올리기 전에 받아 확인해 둔다 — 받기·서명 확인이 늘 실패하면 올린 버전을 레지스트리에 못 싣는다
+      # 레지스트리 job이 쓸 mcp-publisher도 PyPI에 올리기 전에 받아 확인해 둔다 — 받기·서명 확인이 늘 실패하면 올린 버전을 레지스트리에 못 싣는다.
+      # 위에서 검사한 server.json을 함께 넘겨, 레지스트리에 올리는 파일이 곧 검사한 파일이 되게 한다
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: mcp-publisher를 받아 서명 확인
         run: |
           set -euo pipefail
           archive="mcp-publisher_linux_amd64.tar.gz"  # 이 job이 아니라 레지스트리 job(ubuntu-latest, amd64)이 돌린다
           base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
-          mkdir -p "$RUNNER_TEMP/publisher"
-          cd "$RUNNER_TEMP/publisher"
+          mkdir -p "$RUNNER_TEMP/registry"
+          cp server.json "$RUNNER_TEMP/registry/"
+          cd "$RUNNER_TEMP/registry"
           curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
           curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
           cosign verify-blob \
@@ -85,8 +88,8 @@ jobs:
           rm -f "$archive" "$archive.sigstore.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mcp-publisher
-          path: ${{ runner.temp }}/publisher/mcp-publisher
+          name: registry
+          path: ${{ runner.temp }}/registry/
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -113,29 +116,27 @@ jobs:
   registry:
     needs: publish
     runs-on: ubuntu-latest
-    timeout-minutes: 25  # 다시 시도 다섯 번이 다 멈춰도(한 번에 로그인·올리기 1분씩, 조회 30초, 기다림 30초) 15분 안에 끝난다
+    # 다시 시도 다섯 번이 다 멈추면(한 번에 로그인·올리기 1분씩, 조회 30초, 기다림 30초) 15분쯤 걸리므로 넉넉히 둔다
+    timeout-minutes: 25
     permissions:
-      contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: mcp-publisher
-          path: ${{ runner.temp }}/publisher
+          name: registry
+          path: ${{ runner.temp }}/registry
       - name: MCP 레지스트리에 OIDC로 로그인해 올리기(PyPI에 막 올린 판이 늦게 보이면 다시 시도)
         run: |
           set -uo pipefail
-          publisher="$RUNNER_TEMP/publisher/mcp-publisher"
+          publisher="$RUNNER_TEMP/registry/mcp-publisher"
+          server_json="$RUNNER_TEMP/registry/server.json"
           chmod +x "$publisher"  # 아티팩트는 실행 권한을 싣지 않는다
-          name="$(jq -r .name server.json)"
-          version="$(jq -r .version server.json)"
+          name="$(jq -er .name "$server_json")" || exit 1
+          version="$(jq -er .version "$server_json")" || exit 1
           url="https://registry.modelcontextprotocol.io/v0.1/servers/$(jq -rn --arg n "$name" '$n|@uri')/versions/$version"
           for try in 1 2 3 4 5; do
             # 로그인 토큰은 5분이면 끝나므로 시도마다 새로 받는다. 요청 하나가 멈춰 job 시간을 다 쓰지 않게 1분에 끊는다
-            if timeout 60 "$publisher" login github-oidc && timeout 60 "$publisher" publish; then
+            if timeout 60 "$publisher" login github-oidc && timeout 60 "$publisher" publish "$server_json"; then
               exit 0
             fi
             # 앞선 시도가 들어갔는데 응답만 못 받았으면 다시 올릴 때 "이미 있는 버전" 오류가 난다

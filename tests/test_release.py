@@ -23,7 +23,11 @@ def test_server_json_versions_follow_pyproject():
 
 def test_server_json_names_the_pypi_package():
     assert [(p["registryType"], p["identifier"]) for p in SERVER["packages"]] == [("pypi", project_field("name"))]
-    assert len(SERVER["description"]) <= 100  # 레지스트리 한도 — 여기서 못 잡으면 태그를 단 뒤 build job의 레지스트리 검사에서야 걸린다
+
+
+def test_server_json_description_fits_the_registry_limit():
+    # server.json 스키마(2025-12-11)의 description 최대 길이 — 여기서 못 잡으면 태그를 단 뒤 build job의 레지스트리 검사에서야 걸린다
+    assert len(SERVER["description"]) <= 100
 
 
 def test_readme_carries_the_registry_name():
