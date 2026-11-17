@@ -34,6 +34,17 @@ jobs:
             echo "::error::태그 $GITHUB_REF_NAME 가 pyproject.toml 버전 $version 과 다르다 — 태그는 v$version 이어야 한다"
             exit 1
           fi
+      - name: server.json이 MCP 레지스트리 형식에 맞는지 보기
+        # PyPI에 올린 버전은 되돌릴 수 없고 레지스트리 job은 그 뒤에 돈다 — 형식 오류는 PyPI에 올리기 전에 막는다
+        run: |
+          set -uo pipefail
+          if ! out="$(curl --silent --show-error --fail-with-body -X POST -H "Content-Type: application/json" \
+              --data-binary @server.json https://registry.modelcontextprotocol.io/v0/validate)" \
+              || ! jq -e '.valid == true' >/dev/null <<<"$out"; then
+            echo "$out"
+            echo "::error::server.json이 MCP 레지스트리 검사를 통과하지 못했다 — 고친 뒤 태그를 다시 단다"
+            exit 1
+          fi
       - run: uv build
       - name: 빌드한 휠을 설치한 환경에서 테스트
         run: uv run --isolated --no-project --with dist/*.whl --with pytest pytest
@@ -90,16 +101,15 @@ jobs:
             "$archive"
           tar xzf "$archive" mcp-publisher
           rm -f "$archive" "$archive.sigstore.json"
-      - name: MCP 레지스트리에 OIDC로 로그인
-        run: ./mcp-publisher login github-oidc
-      - name: MCP 레지스트리에 올리기(PyPI에 막 올린 판이 늦게 보이면 다시 시도)
+      - name: MCP 레지스트리에 OIDC로 로그인해 올리기(PyPI에 막 올린 판이 늦게 보이면 다시 시도)
         run: |
           set -uo pipefail
           name="$(jq -r .name server.json)"
           version="$(jq -r .version server.json)"
           url="https://registry.modelcontextprotocol.io/v0.1/servers/$(jq -rn --arg n "$name" '$n|@uri')/versions/$version"
           for try in 1 2 3 4 5; do
-            if ./mcp-publisher publish; then
+            # 로그인 토큰은 5분이면 끝나므로 시도마다 새로 받는다
+            if ./mcp-publisher login github-oidc && ./mcp-publisher publish; then
               exit 0
             fi
             # 앞선 시도가 들어갔는데 응답만 못 받았으면 다시 올릴 때 "이미 있는 버전" 오류가 난다
@@ -111,5 +121,5 @@ jobs:
               sleep 30
             fi
           done
-          echo "::error::MCP 레지스트리에 $name $version 을 올리지 못했다 — PyPI에는 이미 올라갔으니 원인을 고친 뒤 이 job만 다시 돌린다"
+          echo "::error::MCP 레지스트리에 $name $version 을 올리지 못했다 — PyPI에는 이미 올라갔다. 일시적인 실패면 이 job만 다시 돌리고, 위 오류가 server.json·README 문제면 다시 돌려도 같으니 고쳐서 다음 버전으로 낸다"
           exit 1

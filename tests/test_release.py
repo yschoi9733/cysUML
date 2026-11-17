@@ -9,8 +9,8 @@ SERVER = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
 def project_field(key):
     # tomllib(Python 3.11부터)으로 읽지 않는다 — publish 워크플로가 3.10에서도 테스트를 돌린다
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    table = re.search(r"^\[project\]\n(.*?)(?=^\[|\Z)", text, re.M | re.S).group(1)
-    return re.search(rf'^{key} = "([^"]+)"$', table, re.M).group(1)
+    table = re.search(r"^\[project\][ \t]*\n(.*?)(?=^\[|\Z)", text, re.M | re.S).group(1)
+    return re.search(rf"""^{key}\s*=\s*["']([^"']+)["']""", table, re.M).group(1)
 
 
 def test_server_json_versions_follow_pyproject():
