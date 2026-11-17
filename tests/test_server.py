@@ -1183,14 +1183,16 @@ def readme_images():
 
 
 def test_readme_examples_draw_pass_and_match_their_pictures(tmp_path, readme_images):
-    examples = readme_images.readme_examples()
-    assert sorted(b["file_name"] for _, b in examples) == sorted(EXAMPLES)
-    for tool, b in examples:
+    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", README.read_text(encoding="utf-8"), re.S)]
+    everywhere = sorted(b["file_name"] for b in blocks if "file_name" in b)
+    examples = readme_images.readme_examples()  # 그림 스크립트는 영어 부분의 ### 절에서만 읽는다 — 그 밖에 둔 예시는 그리지 못한다
+    assert sorted(b["file_name"] for _, b in examples) == everywhere == sorted(EXAMPLES)
+    results = run(server.mcp, *[(tool, {**b, "out_dir": str(tmp_path)}) for tool, b in examples])[2]
+    for (tool, b), r in zip(examples, results):
         assert tool == EXAMPLES[b["file_name"]], b["file_name"]
-        (r,) = run(server.mcp, (tool, {**b, "out_dir": str(tmp_path)}))[2]
         assert not r.is_error and text(r).startswith("합격"), text(r)
         saved = readme_images.IMAGES / f"{b['file_name']}.cysuml.json"
-        expected = {"tool": tool, **b, "scale": SCALE}
+        expected = {"tool": tool, "scale": SCALE, **b}
         assert saved.is_file() and json.loads(saved.read_text(encoding="utf-8")) == expected, \
             f"README 예시 {b['file_name']}의 그림이 지금 예시로 그린 것이 아니다 — {REDRAW}로 다시 그린다"
 
