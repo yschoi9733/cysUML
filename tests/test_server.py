@@ -1215,9 +1215,10 @@ def test_readme_before_after_english_and_korean_pictures_share_one_layout(readme
     def layout(name):
         record = json.loads((readme_images.IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8"))
         index = {c["name"]: i for i, c in enumerate(record["classes"])}
-        boxes = [(c["left"], c["top"], c.get("width"), c.get("kind")) for c in record["classes"]]
-        lines = [(r["kind"], index[r["from"]], index[r["to"]], r.get("from_multiplicity"), r.get("to_multiplicity"))
-                 for r in record["relations"]]
+        boxes = [(c["left"], c["top"], c.get("width"), c.get("height"), c.get("kind"), len(c.get("attributes", [])),
+                  len(c.get("operations", []))) for c in record["classes"]]
+        lines = [(r["kind"], index[r["from"]], index[r["to"]], r.get("from_multiplicity"), r.get("to_multiplicity"),
+                  r.get("via"), r.get("navigable"), "name" in r) for r in record["relations"]]
         return boxes, lines
 
     pairs = [(name.removesuffix("-ko"), name) for name in readme_images.BEFORE_AFTER if name.endswith("-ko")]

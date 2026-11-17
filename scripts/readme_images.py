@@ -30,7 +30,10 @@ def readme_examples() -> list[tuple[str, dict]]:
     found = []
     for section in re.split(r"^##+ ", english, flags=re.M)[1:]:
         for block in re.findall(r"```json\n(.*?)```", section, re.S):
-            example = json.loads(block)
+            try:
+                example = json.loads(block)
+            except ValueError as e:
+                raise SystemExit(f"README '{section.splitlines()[0]}' 절의 JSON 예시를 읽지 못했다: {e}")
             if "file_name" not in example:
                 continue
             tool = re.search(r"The tool is `(draw_\w+)`", section)
