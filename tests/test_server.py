@@ -1206,16 +1206,19 @@ def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path,
             assert text(r).startswith("불합격 — 1건"), (name, text(r))  # README가 "이 한 건으로"·"on exactly this"라고 적었다
             crossing = [re.sub(r"^\d+\. ", "", line) for line in text(r).splitlines() if "선이 상자를 지난다" in line]
             assert crossing, (name, text(r))
-            # 가려지는 선의 꺾는 점이 관계 이름 자리를 정한다(스크립트 머리말). 그린 결과에서 이름이 출발 상자와 가린 상자 사이 보이는
-            # 토막의 가운데쯤(가운데 3분의 1)에 앉았는지 본다 — 이 선은 왼쪽에서 오른쪽으로 가는 가로선이다
+            # 가려지는 선의 꺾는 점이 관계 이름 자리를 정한다(스크립트 머리말). 그린 결과에서 이름이 앉은 토막이 가린 상자 밖에 있고,
+            # 이름이 그 토막의 가운데쯤(가운데 3분의 1)에 앉았는지 본다
             index = int(re.search(r"relations\[(\d+)\]", crossing[0]).group(1))
             drawing = classdiagram.render({k: args[k] for k in ("classes", "relations")}, args.get("scale", SCALE))
-            boxes = drawing.layout.by_key
-            lo = boxes[args["relations"][index]["from"]].rect[2]
-            hi = boxes[re.search(r"상자 (\S+)\(", crossing[0]).group(1)].rect[0]
-            (label,) = [x for x in drawing.layout.relations[index].labels if x.role == "name"]
-            third = (hi - lo) / 3
-            assert lo + third <= label.x <= hi - third, f"{name}: 관계 이름이 보이는 토막 가운데({lo}~{hi})에 앉지 않았다({label.x})"
+            x0, y0, x1, y1 = drawing.layout.by_key[re.search(r"상자 (\S+)\(", crossing[0]).group(1)].rect
+            placed = drawing.layout.relations[index]
+            (label,) = [x for x in placed.labels if x.role == "name"]
+            assert label.segment is not None, f"{name}: 관계 이름이 선 위에 얹히지 않았다"
+            (px, py), (qx, qy) = placed.points[label.segment], placed.points[label.segment + 1]
+            mx, my = (px + qx) / 2, (py + qy) / 2
+            assert not (x0 < mx < x1 and y0 < my < y1), f"{name}: 관계 이름이 가린 상자 밑 토막에 앉았다"
+            t = ((label.x - px) * (qx - px) + (label.y - py) * (qy - py)) / ((qx - px) ** 2 + (qy - py) ** 2)
+            assert 1 / 3 <= t <= 2 / 3, f"{name}: 관계 이름이 앉은 토막의 가운데에서 벗어났다(토막 위 자리 {t:.2f})"
             if name.endswith("-ko"):  # 한국어 절은 이 항목을 그대로 옮겨 보여 준다
                 assert f"> {crossing[0]}" in korean, f"README 한국어 절이 옮긴 검사 결과가 지금 결과와 다르다: {crossing[0]}"
 
