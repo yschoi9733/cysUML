@@ -1,5 +1,7 @@
 # cysUML
 
+<!-- mcp-name: io.github.yschoi9733/cysuml -->
+
 An MCP server for document-ready UML diagrams: the AI lays them out, cysUML draws and checks them.
 
 [한국어 안내](#한국어)
