@@ -1200,12 +1200,14 @@ def test_readme_examples_draw_pass_and_match_their_pictures(tmp_path, readme_ima
 def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path, readme_images):
     korean = README.read_text(encoding="utf-8").split("\n## 한국어\n", 1)[1]
     calls = [(tool, {**args, "out_dir": str(tmp_path)}) for tool, args in readme_images.before_after()]
-    for (name, passes), r in zip(readme_images.BEFORE_AFTER.items(), run(server.mcp, *calls)[2]):
+    for (name, passes), (_, args), r in zip(readme_images.BEFORE_AFTER.items(), calls, run(server.mcp, *calls)[2]):
         assert not r.is_error and text(r).startswith("합격") == passes, (name, text(r))
         if not passes:
             assert text(r).startswith("불합격 — 1건"), (name, text(r))  # README가 "이 한 건으로"·"on exactly this"라고 적었다
             crossing = [re.sub(r"^\d+\. ", "", line) for line in text(r).splitlines() if "선이 상자를 지난다" in line]
             assert crossing, (name, text(r))
+            hidden = args["relations"][int(re.search(r"relations\[(\d+)\]", crossing[0]).group(1))]
+            assert hidden.get("via"), f"{name}: 가려지는 선의 꺾는 점이 관계 이름 자리를 정한다 — 지우면 이름이 가린 상자에 붙는다(스크립트 머리말)"
             if name.endswith("-ko"):  # 한국어 절은 이 항목을 그대로 옮겨 보여 준다
                 assert f"> {crossing[0]}" in korean, f"README 한국어 절이 옮긴 검사 결과가 지금 결과와 다르다: {crossing[0]}"
 
