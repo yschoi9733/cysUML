@@ -4,9 +4,9 @@
   "classes": [
     {"name": "Customer", "left": 0, "top": 0, "attributes": ["-name: String", "-email: String"]},
     {"name": "Order", "left": 240, "top": 0, "attributes": ["-id: long", "-orderedAt: Date"], "operations": ["+total(): Money"]},
-    {"name": "Payment", "left": 500, "top": 0, "kind": "abstract", "width": 110, "attributes": ["-amount: Money"]},
-    {"name": "CardPayment", "left": 500, "top": -140, "width": 110, "attributes": ["-cardNo: String"]},
-    {"name": "OrderLine", "left": 240, "top": 200, "attributes": ["-quantity: int"], "operations": ["+subtotal(): Money"]},
+    {"name": "Payment", "left": 0, "top": 360, "kind": "abstract", "width": 110, "attributes": ["-amount: Money"]},
+    {"name": "CardPayment", "left": 0, "top": 520, "width": 110, "attributes": ["-cardNo: String"]},
+    {"name": "OrderLine", "left": 0, "top": 200, "attributes": ["-quantity: int"], "operations": ["+subtotal(): Money"]},
     {"name": "Product", "left": 500, "top": 200, "attributes": ["-name: String", "-price: Money"]}
   ],
   "relations": [

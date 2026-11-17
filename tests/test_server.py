@@ -1203,7 +1203,7 @@ def test_readme_before_after_pictures_fail_and_pass_as_the_readme_says(tmp_path,
     for (name, passes), r in zip(readme_images.BEFORE_AFTER.items(), run(server.mcp, *calls)[2]):
         assert not r.is_error and text(r).startswith("합격") == passes, (name, text(r))
         if not passes:
-            assert text(r).startswith("불합격 — 4건"), (name, text(r))  # README가 "4건"·"four findings"라고 적었다
+            assert text(r).startswith("불합격 — 1건"), (name, text(r))  # README가 "이 한 건으로"·"on exactly this"라고 적었다
             crossing = [re.sub(r"^\d+\. ", "", line) for line in text(r).splitlines() if "선이 상자를 지난다" in line]
             assert crossing, (name, text(r))
             if name.endswith("-ko"):  # 한국어 절은 이 항목을 그대로 옮겨 보여 준다
