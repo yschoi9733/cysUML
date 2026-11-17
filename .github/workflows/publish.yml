@@ -136,13 +136,16 @@ jobs:
           url="https://registry.modelcontextprotocol.io/v0.1/servers/$(jq -rn --arg n "$name" '$n|@uri')/versions/$version"
           for try in 1 2 3 4 5; do
             # 로그인 토큰은 5분이면 끝나므로 시도마다 새로 받는다. 요청 하나가 멈춰 job 시간을 다 쓰지 않게 1분에 끊는다
-            if timeout 60 "$publisher" login github-oidc && timeout 60 "$publisher" publish "$server_json"; then
-              exit 0
-            fi
-            # 앞선 시도가 들어갔는데 응답만 못 받았으면 다시 올릴 때 "이미 있는 버전" 오류가 난다
-            if curl --fail --silent --max-time 30 --output /dev/null "$url"; then
-              echo "::warning::레지스트리에 $name $version 이 이미 있어 성공으로 끝낸다 — 이번 시도가 올린 것인지는 모르니 레지스트리의 그 버전 내용을 확인한다"
-              exit 0
+            if timeout 60 "$publisher" login github-oidc; then
+              if timeout 60 "$publisher" publish "$server_json"; then
+                exit 0
+              fi
+              # 앞선 시도가 들어갔는데 응답만 못 받았으면 다시 올릴 때 "이미 있는 버전" 오류가 난다.
+              # 로그인한 시도에서만 본다 — 로그인이 망가졌는데 이미 있는 버전 때문에 성공으로 끝나면 그 고장이 가려진다
+              if curl --fail --silent --max-time 30 --output /dev/null "$url"; then
+                echo "::warning::레지스트리에 $name $version 이 이미 있어 성공으로 끝낸다 — 이번 시도가 올린 것인지는 모르니 레지스트리의 그 버전 내용을 확인한다"
+                exit 0
+              fi
             fi
             if [ "$try" -lt 5 ]; then
               sleep 30

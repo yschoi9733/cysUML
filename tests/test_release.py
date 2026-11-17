@@ -31,7 +31,7 @@ def test_server_json_description_fits_the_registry_limit():
 
 
 def test_readme_carries_the_registry_name():
-    # 레지스트리는 올리는 버전의 PyPI README에서 이 줄을 찾는다. 서버 이름 바로 뒤는 공백·줄바꿈·주석 닫기여야 한다
-    pattern = rf"mcp-name: {re.escape(SERVER['name'])}(?=\s|-->|<|$)"
+    # 레지스트리는 올리는 버전의 PyPI README에서 이 줄을 찾는다. 서버 이름 바로 뒤는 이름에 못 쓰는 글자나 주석 닫기여야 한다
+    pattern = rf"mcp-name: {re.escape(SERVER['name'])}(?:(?![A-Za-z0-9._/-])|(?=--!?>))"
     assert re.search(pattern, (ROOT / "README.md").read_text(encoding="utf-8")), \
         f"README에 mcp-name: {SERVER['name']} 줄이 있어야 MCP 레지스트리에 올릴 수 있다"
