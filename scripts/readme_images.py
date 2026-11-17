@@ -46,14 +46,17 @@ def before_after() -> list[tuple[str, dict]]:
     found = []
     for name in BEFORE_AFTER:
         record = json.loads((IMAGES / f"{name}.cysuml.json").read_text(encoding="utf-8"))
-        if record.get("file_name") != name:
-            raise SystemExit(f"docs/images/{name}.cysuml.json의 file_name이 {name}이 아니다")
+        if record.get("file_name") != name or "tool" not in record:
+            raise SystemExit(f"docs/images/{name}.cysuml.json에 tool이 없거나 file_name이 {name}이 아니다")
         found.append((record.pop("tool"), record))
     return found
 
 
 def main() -> None:
     jobs = [*readme_examples(), *before_after()]
+    names = [args["file_name"] for _, args in jobs]
+    if len(set(names)) < len(names):  # 한 폴더에 그리므로 겹치면 뒤 그림이 앞 그림을 덮는다
+        raise SystemExit(f"README 예시와 전후 그림의 file_name이 겹친다: {sorted({n for n in names if names.count(n) > 1})}")
 
     async def go(drawn: Path) -> list[str]:
         # 멈출 일은 모아 두었다가 클라이언트를 닫은 뒤 알린다 — 그 안에서 멈추면 anyio가 예외 묶음으로 감싸 메시지가 묻힌다
