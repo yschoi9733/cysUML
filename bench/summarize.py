@@ -76,9 +76,12 @@ for p in problems:
     print(f"| {p} | " + " | ".join(cells) + " |")
 print()
 print(f"전체 {len(rows)}건, 합계 ${sum(num(r.get('cost_usd')) or 0 for r in rows):.2f}")
-missing = [r for r in rows if num(r.get("cost_usd")) is None or num(r.get("duration_s")) is None]
-if missing:
-    print(f"- 비용이나 시간이 빈 실행 {len(missing)}건은 평균에서 뺐다(합계 비용에도 들지 않는다)")
+no_cost = sum(1 for r in rows if num(r.get("cost_usd")) is None)
+no_time = sum(1 for r in rows if num(r.get("duration_s")) is None)
+if no_cost:
+    print(f"- 비용이 빈 실행 {no_cost}건은 비용 평균과 합계에서 뺐다(칸에 몇 번으로 낸 평균인지 붙였다)")
+if no_time:
+    print(f"- 시간이 빈 실행 {no_time}건은 시간 평균에서 뺐다")
 for r in rows:
     if r.get("subtype") != "success":
         print(f"- 확인 필요: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}")

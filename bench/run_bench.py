@@ -13,8 +13,10 @@ import csv
 import datetime as dt
 import json
 import os
+import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -130,35 +132,57 @@ def verdict(line: str) -> str:
     return "other"
 
 
-def parse_stream(lines: list[str]) -> dict:
-    draw_ids: list[str] = []
-    verdicts: dict[str, str] = {}
-    result: dict = {}
+def read_events(lines) -> list[dict]:
+    """stream-json 출력의 줄들을 이벤트로 읽는다. JSON이 아닌 줄은 건너뛴다."""
+    events = []
     for raw in lines:
         try:
-            ev = json.loads(raw)
+            events.append(json.loads(raw))
         except json.JSONDecodeError:
             continue
-        msg = ev.get("message") or {}
-        if ev.get("type") == "assistant":
-            for b in msg.get("content") or []:
-                if b.get("type") == "tool_use" and str(b.get("name", "")).startswith(DRAW_PREFIX):
-                    draw_ids.append(b["id"])
-        elif ev.get("type") == "user":
-            for b in msg.get("content") or []:
-                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") in draw_ids:
-                    verdicts[b["tool_use_id"]] = verdict(first_line(b.get("content")))
-        elif ev.get("type") == "result":
-            result = ev
-    seq = [verdicts.get(i, "missing") for i in draw_ids]
+    return events
+
+
+def draw_calls(events: list[dict], tool: str | None = None) -> list[str]:
+    """그린 차례대로 tool_use id를 낸다. tool을 주면 그 문제의 도구 호출만(허락하지 않은 도구 호출은 그린 것이 아니다),
+    안 주면 cysUML 그리기 도구 호출을 모두 센다."""
+    ids = []
+    for ev in events:
+        if ev.get("type") != "assistant":
+            continue
+        for b in (ev.get("message") or {}).get("content") or []:
+            name = str(b.get("name", ""))
+            if b.get("type") == "tool_use" and (name == DRAW_PREFIX + tool.removeprefix("draw_") if tool
+                                                else name.startswith(DRAW_PREFIX)):
+                ids.append(b["id"])
+    return ids
+
+
+def draw_results(events: list[dict], ids: list[str]) -> dict[str, dict]:
+    """tool_use id마다 그 tool_result 블록을 낸다."""
+    wanted, found = set(ids), {}
+    for ev in events:
+        if ev.get("type") != "user":
+            continue
+        for b in (ev.get("message") or {}).get("content") or []:
+            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") in wanted:
+                found[b["tool_use_id"]] = b
+    return found
+
+
+def parse_stream(lines, tool: str | None = None) -> dict:
+    events = read_events(lines)
+    ids = draw_calls(events, tool)
+    results = draw_results(events, ids)
+    result = next((e for e in reversed(events) if e.get("type") == "result"), {})
+    seq = [verdict(first_line(results[i].get("content"))) if i in results else "missing" for i in ids]
     first_pass = next((n for n, v in enumerate(seq, 1) if v == "pass"), None)
-    if first_pass is not None and first_pass > MAX_DRAWS:  # 지시한 최대 횟수를 넘겨 합격한 것은 불합격으로 친다
-        first_pass = None
     usage = result.get("usage") or {}
     return {
         "draws": len(seq),
         "first_pass_draw": first_pass,
-        "passed": first_pass is not None,
+        # 지시한 최대 횟수를 넘겨 합격한 것은 불합격으로 친다(처음 합격한 차례는 그대로 적어 summarize.py가 알린다)
+        "passed": first_pass is not None and first_pass <= MAX_DRAWS,
         "verdicts": " ".join(seq),
         "input_errors": seq.count("input_error"),
         "cost_usd": result.get("total_cost_usd"),
@@ -173,13 +197,17 @@ def parse_stream(lines: list[str]) -> dict:
     }
 
 
-def _text(out) -> str:
-    return out.decode("utf-8", "replace") if isinstance(out, bytes) else (out or "")
+_RUNNING: set[subprocess.Popen] = set()  # 멈출 때 직접 끝낼 claude 프로세스
+_RUNNING_LOCK = threading.Lock()
+# claude에 넘기는 환경 변수. 셸에 있는 Claude Code 설정(effort·생각 토큰·캐시·제공자 전환 등)이 측정에 섞이지 않게 이것만 넘긴다
+KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG"}
 
 
 def run_one(job: dict, key: str) -> dict:
     run_dir: Path = job["dir"]
-    run_dir.mkdir(parents=True, exist_ok=True)
+    if run_dir.exists():  # 멈췄던 실행의 옛 파일(stderr.txt·그림)이 새 기록 옆에 남지 않게 비우고 시작한다
+        shutil.rmtree(run_dir)
+    run_dir.mkdir(parents=True)
     tool, spec = load_problem(job["problem"])
     prompt = prompt_for(job["problem"], tool, spec)
     (run_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
@@ -196,22 +224,29 @@ def run_one(job: dict, key: str) -> dict:
         "--no-session-persistence",
         prompt,
     ]
-    # 키 말고 다른 인증·제공자(Bedrock·Vertex 등)로 새지 않게 그런 변수는 넘기지 않는다
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith(("ANTHROPIC_", "CLAUDE_CODE_OAUTH", "CLAUDE_CODE_USE_"))}
+    env = {k: v for k, v in os.environ.items() if k in KEEP_ENV or k.startswith("LC_")}
     env["ANTHROPIC_API_KEY"] = key
     started = time.time()
+    proc = subprocess.Popen(cmd, cwd=run_dir, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding="utf-8", errors="replace")
+    with _RUNNING_LOCK:
+        _RUNNING.add(proc)
     try:
-        proc = subprocess.run(cmd, cwd=run_dir, env=env, capture_output=True, text=True, timeout=job["timeout"])
-        stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
-    except subprocess.TimeoutExpired as e:  # 시간 초과여도 그때까지의 기록은 남긴다(비용은 끝의 결과가 없어 비운다)
-        stdout, stderr, code = _text(e.stdout), _text(e.stderr), None
+        stdout, stderr = proc.communicate(timeout=job["timeout"])
+        code = proc.returncode
+    except subprocess.TimeoutExpired:  # 시간 초과여도 그때까지의 기록은 남긴다(비용은 끝의 결과가 없어 비운다)
+        proc.kill()
+        stdout, stderr = proc.communicate()
+        code = None
+    finally:
+        with _RUNNING_LOCK:
+            _RUNNING.discard(proc)
     (run_dir / "stream.jsonl").write_text(stdout, encoding="utf-8")
     if stderr.strip():
         (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
     row = {"model": job["model"], "effort": job["effort"], "problem": job["problem"], "run": job["run"],
            "exit": code, "wall_s": round(time.time() - started, 1)}
-    row.update(parse_stream(stdout.splitlines()))
+    row.update(parse_stream(stdout.splitlines(), tool))
     if code is None:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
         row["subtype"] = "timeout"
         row["duration_s"] = row["wall_s"]
@@ -266,9 +301,12 @@ def main() -> None:
                 print(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed",
                                                            "first_pass_draw", "draws", "cost_usd", "duration_s",
                                                            "subtype")}, ensure_ascii=False), flush=True)
-        except KeyboardInterrupt:  # 남은 실행은 새로 띄우지 않는다(돌던 claude는 같은 Ctrl-C로 함께 끝난다)
+        except KeyboardInterrupt:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다(SIGINT가 파이썬에만 왔을 수 있다)
             pool.shutdown(wait=False, cancel_futures=True)
-            sys.exit(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다")
+            with _RUNNING_LOCK:
+                for p in _RUNNING:
+                    p.terminate()
+            sys.exit(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)")
     pool.shutdown()
     total = sum(r.get("cost_usd") or 0 for r in rows)
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
