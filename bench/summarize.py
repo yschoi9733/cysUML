@@ -87,7 +87,12 @@ for p in problems:
         cells.append(", ".join(f"✅{first_pass(r)}" if first_pass(r) else f"❌({r.get('draws') or 0})" for r in rs))
     print(f"| {p} | " + " | ".join(cells) + " |")
 print()
-print(f"전체 {len(rows)}건, 합계 ${sum(num(r.get('cost_usd')) or 0 for r in rows):.2f}")
+def cost(rs) -> float:
+    return sum(num(r.get("cost_usd")) or 0 for r in rs)
+
+
+print(f"전체 {len(rows)}건, 합계 ${cost(rows):.2f}"
+      + (f"(표에서 뺀 {len(skipped)}건까지 쓴 돈은 ${cost(rows + skipped):.2f})" if skipped else ""))
 no_cost = sum(1 for r in rows if num(r.get("cost_usd")) is None)
 no_time = sum(1 for r in rows if num(r.get("duration_s")) is None)
 if no_cost:
@@ -100,7 +105,8 @@ for r in rows:
     if "other" in (r.get("verdicts") or "").split():  # cysUML 검사 결과 문구가 바뀌면 여기서 드러난다
         print(f"- 확인 필요: 검사 결과 첫 줄을 읽지 못한 그림이 있다: {r['model']} {r['effort']} {r['problem']} "
               f"run{r.get('run')} → {r.get('verdicts')}")
-    if r.get("subtype") != "success":
-        print(f"- 확인 필요: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}")
+    if r.get("subtype") != "success" or str(r.get("is_error")) == "True":  # 오류로 끝났는데 subtype이 success인 것도
+        error = f" ({r['error']})" if r.get("error") else ""
+        print(f"- 확인 필요: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}{error}")
     if num(r.get("first_pass_draw")) is not None and first_pass(r) is None:
         print(f"- {MAX_DRAWS}번을 넘겨 합격해 불합격으로 셌다: {r['model']} {r['effort']} {r['problem']} run{r.get('run')}")

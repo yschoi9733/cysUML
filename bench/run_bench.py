@@ -35,7 +35,7 @@ LAYOUT_KEYS = {"left", "top", "via", "width", "height", "name_side"}
 MAX_DRAWS = 10
 DRAW_PREFIX = "mcp__cysuml__draw_"
 FIELDS = ["model", "effort", "problem", "run", "tool", "passed", "first_pass_draw", "draws", "verdicts", "changed",
-          "input_errors", "mcp", "error",
+          "input_errors", "mcp", "api_status", "error",
           "cost_usd", "duration_s", "wall_s", "turns", "subtype", "is_error", "exit",
           "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens"]
 
@@ -285,10 +285,6 @@ def draw_uses(events: list[dict], tool: str | None = None) -> list[tuple[str, di
     return uses
 
 
-def draw_calls(events: list[dict], tool: str | None = None) -> list[str]:
-    return [i for i, _ in draw_uses(events, tool)]
-
-
 def mcp_status(events: list[dict]) -> str | None:
     """시작 이벤트에 적힌 cysUML MCP 서버 상태(connected 등). 서버가 안 붙으면 그린 차례가 0인 평범한 불합격처럼 보인다."""
     init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), {})
@@ -320,9 +316,20 @@ def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
 
 
 # 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함,
-# API 오류(인증·429·529 등), 하네스 오류
-NOT_MEASURED = ("mcp_failed", "no_init", "api_error", "harness_error")
-API_ERROR = re.compile(r"API Error: (?:401|403|429|5\d\d)|Connection error|Request timed out|overloaded", re.I)
+# 서버 쪽 API 오류, 끝의 결과 없이 오류 코드로 끝남(크래시 등), 하네스 오류
+NOT_MEASURED = ("mcp_failed", "no_init", "api_error", "no_result", "harness_error")
+# api_error_status가 없을 때만 보는 오류 글
+API_ERROR = re.compile(r"API Error: (?:401|403|404|429|5\d\d)|Connection error|Request timed out|overloaded", re.I)
+
+
+def server_side(row: dict) -> bool:
+    """서버 쪽 API 오류(인증·없는 모델·429·5xx·연결)로 끝났는지. 400(글이 너무 길어짐 등)은 모델 탓이라 넣지 않는다."""
+    if not row["is_error"]:
+        return False
+    status = row["api_status"]
+    if status is not None:
+        return int(status) in (401, 403, 404, 429) or int(status) >= 500
+    return bool(API_ERROR.search(row["error"] or ""))
 
 
 class Stopped(Exception):
@@ -340,10 +347,13 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
         row["subtype"] = (f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") + (" (timeout)" if timed_out else "")
     elif timed_out:
         row["subtype"] = "timeout"
-    elif row["is_error"] and API_ERROR.search(row["error"] or "") and not row["passed"] and row["draws"] < MAX_DRAWS:
+    elif not row["passed"] and row["draws"] < MAX_DRAWS and server_side(row):
         # 서버 쪽 오류로 10번을 다 그리기 전에 끊긴 실행만 결과를 알 수 없어 뺀다. 합격했거나 10번을 다 그린 실행, 모델 탓인
-        # 오류(글이 너무 길어짐 등)로 끝난 실행은 잰 그대로 둔다
+        # 오류로 끝난 실행은 잰 그대로 둔다
         row["subtype"] = "api_error"
+    elif (row["subtype"] is None and meta.get("exit") not in (None, "", 0, "0") and not row["passed"]
+          and row["draws"] < MAX_DRAWS):  # 끝의 결과 없이 오류 코드로 끝났다(크래시, stderr로만 낸 오류)
+        row["subtype"] = "no_result"
     return row
 
 
@@ -394,6 +404,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "duration_s": round(result["duration_ms"] / 1000, 1) if result.get("duration_ms") is not None else None,
         "subtype": result.get("subtype"),
         "is_error": result.get("is_error"),
+        "api_status": result.get("api_error_status"),
         "error": (str(result.get("result") or result.get("errors") or "")[:200] or None) if result.get("is_error") else None,
         "input_tokens": usage.get("input_tokens"),
         "cache_read_tokens": usage.get("cache_read_input_tokens"),
@@ -578,7 +589,7 @@ def main() -> None:
             with _RUNNING_LOCK:
                 _STOP.set()
                 procs = list(_RUNNING)
-                _SIGNALED.update(p.pid for p in procs)
+                _SIGNALED.update(p.pid for p in procs if p.returncode is None)  # 이미 스스로 끝나 거둔 실행은 빼고
             for p in procs:
                 stop_group(p, signal.SIGTERM)
             pool.shutdown(wait=False, cancel_futures=True)

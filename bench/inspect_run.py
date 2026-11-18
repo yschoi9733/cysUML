@@ -6,7 +6,7 @@ cysUML 그리기 도구 호출을 모두 센다).
 import sys
 from pathlib import Path
 
-from run_bench import draw_calls, draw_results, read_events, result_text, run_tool
+from run_bench import draw_results, draw_uses, read_events, result_text, run_tool
 
 stream = Path(sys.argv[1])
 events = read_events(stream.read_text(encoding="utf-8").splitlines())
@@ -18,7 +18,7 @@ for e in events:
     if e.get("type") == "system" and e.get("subtype") == "init":
         print("init:", {k: e.get(k) for k in ("apiKeySource", "model", "permissionMode")},
               "mcp:", e.get("mcp_servers"), "tools:", e.get("tools"))
-ids = draw_calls(events, tool)
+ids = [i for i, _ in draw_uses(events, tool)]
 results = draw_results(events, ids)
 for n, i in enumerate(ids, 1):
     text = result_text(results[i].get("content")) if i in results else "(결과 없음)"
