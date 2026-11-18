@@ -8,6 +8,7 @@
 쓰는 법: uv run python bench/rescore.py ~/Documents/cysUML-bench-runs/<태그> [...]
 """
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -20,12 +21,14 @@ class Kept(Exception):
 
 def rescore_row(tag_dir: Path, r: dict) -> dict:
     sub = r.get("subtype") or ""
-    if sub.startswith("harness_error"):
-        raise Kept("하네스 오류 줄이라 종료 코드·시간이 남지 않았다")
     run_dir = run_dir_for(tag_dir, r["model"], r["effort"], r["problem"], r["run"])
-    stream, prompt = run_dir / "stream.jsonl", run_dir / "prompt.txt"
+    stream, prompt, run_json = run_dir / "stream.jsonl", run_dir / "prompt.txt", run_dir / "run.json"
     if not stream.exists():
         raise Kept("기록(stream.jsonl)이 없다")
+    # run_one이 해석 전에 남긴 종료 코드·시간·시간 초과 여부(이것을 남기기 전의 옛 기록은 CSV 줄을 쓴다)
+    meta = r | json.loads(run_json.read_text(encoding="utf-8")) if run_json.exists() else r
+    if sub.startswith("harness_error") and not run_json.exists():
+        raise Kept("하네스 오류 줄인데 종료 코드·시간(run.json)이 남지 않았다")
     text = prompt.read_text(encoding="utf-8") if prompt.exists() else ""
     tool = run_tool(run_dir, r.get("tool"))
     spec = spec_from_prompt(text) if text else None
@@ -33,10 +36,11 @@ def rescore_row(tag_dir: Path, r: dict) -> dict:
         print(f"  {r['model']} {r['effort']} {r['problem']} run{r['run']}: 준 문제를 못 찾아 지금 문제 파일과 견준다")
         now_tool, now_spec = load_problem(r["problem"])
         tool, spec = tool or now_tool, spec or now_spec
-    # 시간 초과로 적힌 실행(build_row가 'timeout'이나 '… (timeout)'으로 적는다), 또는 판정(끝의 결과)도 종료 코드도 없는
-    # 옛 기록은 시간 초과로 끊긴 실행이다
-    timed_out = sub == "timeout" or sub.endswith("(timeout)") or (not sub and not r.get("exit"))
-    return build_row(r, stream.read_text(encoding="utf-8").splitlines(), tool, spec, timed_out)
+    if str(meta.get("timed_out")) in ("True", "False"):
+        timed_out = str(meta["timed_out"]) == "True"
+    else:  # timed_out을 남기기 전의 옛 기록: 그때 적은 판정 문구나, 판정(끝의 결과)도 종료 코드도 없는 것으로 가린다
+        timed_out = sub == "timeout" or sub.endswith("(timeout)") or (not sub and not r.get("exit"))
+    return build_row(meta, stream.read_text(encoding="utf-8").splitlines(), tool, spec, timed_out)
 
 
 for tag_dir in map(Path, sys.argv[1:]):

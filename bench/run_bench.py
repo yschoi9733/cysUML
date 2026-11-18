@@ -27,6 +27,7 @@ from pathlib import Path
 
 from cysuml import boxdiagram as B
 from cysuml.parsing import InputError
+from cysuml.report import Report
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = ROOT / "docs" / "images"
@@ -36,7 +37,7 @@ MAX_DRAWS = 10
 DRAW_PREFIX = "mcp__cysuml__draw_"
 FIELDS = ["model", "effort", "problem", "run", "tool", "passed", "first_pass_draw", "draws", "verdicts", "changed",
           "input_errors", "mcp", "api_status", "error",
-          "cost_usd", "duration_s", "wall_s", "turns", "subtype", "is_error", "exit",
+          "cost_usd", "duration_s", "wall_s", "turns", "subtype", "is_error", "exit", "timed_out",
           "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens"]
 
 # 같은 그림의 한국어판·고친 판은 하나로 친다(fixed가 first-try의 합격판). 교류도(checkout)는 도구가 배치하니 뺀다.
@@ -129,7 +130,7 @@ def first_line(content) -> str:
 
 
 def verdict(line: str) -> str:
-    if line.startswith("합격"):
+    if line.startswith(Report.PASSED):  # 그림마다 다른 합격 문구가 모두 이것으로 시작한다
         return "pass"
     if line.startswith("불합격"):
         return "fail"
@@ -326,9 +327,12 @@ def server_side(row: dict) -> bool:
     """서버 쪽 API 오류(인증·없는 모델·429·5xx·연결)로 끝났는지. 400(글이 너무 길어짐 등)은 모델 탓이라 넣지 않는다."""
     if not row["is_error"]:
         return False
-    status = row["api_status"]
+    try:
+        status = int(row["api_status"])
+    except (TypeError, ValueError):
+        status = None
     if status is not None:
-        return int(status) in (401, 403, 404, 429) or int(status) >= 500
+        return status in (401, 403, 404, 429) or status >= 500
     return bool(API_ERROR.search(row["error"] or ""))
 
 
@@ -341,6 +345,7 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
     row = {k: meta.get(k) for k in ("model", "effort", "problem", "run")} | {"tool": tool, "exit": meta.get("exit"),
                                                                           "wall_s": meta.get("wall_s")}
     row.update(parse_stream(lines, tool, spec))
+    row["timed_out"] = timed_out
     if timed_out:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
         row["duration_s"] = row["wall_s"]
     if not row["draws"] and row["mcp"] != "connected":  # 그림 도구 없이 끝난 실행은 모델의 불합격이 아니다
@@ -403,6 +408,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "turns": result.get("num_turns"),
         "duration_s": round(result["duration_ms"] / 1000, 1) if result.get("duration_ms") is not None else None,
         "subtype": result.get("subtype"),
+        "ended": bool(result),  # 끝의 결과 이벤트를 냈다
         "is_error": result.get("is_error"),
         "api_status": result.get("api_error_status"),
         "error": (str(result.get("result") or result.get("errors") or "")[:200] or None) if result.get("is_error") else None,
@@ -429,7 +435,7 @@ def stop_group(proc: subprocess.Popen, sig: int) -> None:
         return
     try:
         os.killpg(proc.pid, sig)
-    except (ProcessLookupError, PermissionError):  # macOS는 다 끝났지만 아직 거두지 않은 그룹에 EPERM을 낸다
+    except (ProcessLookupError, PermissionError):  # EPERM: 끝났지만 아직 거두지 않은 그룹(macOS)
         pass
 
 
@@ -441,8 +447,6 @@ def run_one(job: dict, key: str) -> dict:
     if _STOP.is_set():  # 멈춘 뒤에는 폴더도 건드리지 않는다
         raise Stopped("멈춘 뒤라 띄우지 않았다")
     run_dir: Path = job["dir"]
-    if run_dir.exists():  # 멈췄던 실행의 옛 파일(stderr.txt·그림)이 새 기록 옆에 남지 않게 비우고 시작한다
-        shutil.rmtree(run_dir)
     run_dir.mkdir(parents=True)
     tool, spec = load_problem(job["problem"])
     prompt = prompt_for(job["problem"], tool, spec)
@@ -489,11 +493,12 @@ def run_one(job: dict, key: str) -> dict:
     (run_dir / "stream.jsonl").write_text(stdout, encoding="utf-8")
     if stderr.strip():
         (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
-    row = build_row(job | {"exit": code, "wall_s": round(time.time() - started, 1)}, stdout.splitlines(), tool, spec,
-                    timed_out=code is None)
-    # 멈추며 시그널을 보낸 실행이 결과(합격이나 10번을 다 그림)를 내기 전이면 끊긴 것이다. 시그널을 받은 claude는 143이나
-    # 0·1로 끝날 수 있어 종료 코드로는 가르지 않는다
-    stopped = proc.pid in _SIGNALED and not row["passed"] and row["draws"] < MAX_DRAWS
+    meta = {"exit": code, "wall_s": round(time.time() - started, 1), "timed_out": code is None}
+    (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")  # 해석이 실패해도 rescore.py가 다시 읽게
+    row = build_row(job | meta, stdout.splitlines(), tool, spec, meta["timed_out"])
+    # 멈추며 시그널을 보낸 실행이 끝의 결과도, 합격이나 10번 그림도 내기 전이면 끊긴 것이다(종료 코드는 143·0·1 모두 나온다)
+    stopped = (proc.pid in _SIGNALED and not row["ended"] and not row["timed_out"] and not row["passed"]
+               and row["draws"] < MAX_DRAWS)
     if stopped:
         row["subtype"] = "stopped"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -528,6 +533,8 @@ def main() -> None:
         except InputError as e:
             sys.exit(f"문제 {p}를 cysUML이 읽지 못한다: {e}")
 
+    if shutil.which("claude") is None:
+        sys.exit("claude가 PATH에 없다 — Claude Code를 설치한다")
     if not (ROOT / ".venv" / "bin" / "cysuml").exists():
         sys.exit(f"{ROOT / '.venv/bin/cysuml'}이 없다 — 레포에서 uv sync를 먼저 돌린다")
     base = args.out / args.tag
