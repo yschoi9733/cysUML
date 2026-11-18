@@ -144,12 +144,25 @@ def tool_spec(tool: str):
     return importlib.import_module("cysuml." + tool.removeprefix("draw_").replace("_", "")).SPEC
 
 
-def _name_key(lines: tuple[str, ...], known: frozenset = frozenset()) -> str:
-    """이름 줄을 견줄 꼴로. 줄 사이는 띄어쓰기 하나로 보지만, 띄우지 않고 이은 이름이 문제(known)에 있으면 그것으로 본다 —
-    긴 한 단어를 줄로 나눈 것이다. 'Order Service'와 'OrderService'처럼 한 줄 안의 띄어쓰기가 다른 것은 다른 이름이다."""
-    spaced = " ".join(" ".join(lines).split())
-    joined = " ".join("".join(lines).split())
-    return joined if joined in known and spaced not in known else spaced
+def _name_forms(lines: tuple[str, ...]) -> tuple[str, str]:
+    """이름 줄을 이은 두 꼴: 줄 사이를 띄어쓰기 하나로(spaced), 띄우지 않고(joined). 이어진 공백은 하나로 줄인다."""
+    return " ".join(" ".join(lines).split()), " ".join("".join(lines).split())
+
+
+def _known_names(d: B.Diagram) -> dict[str, str]:
+    """문제의 이름마다 견줄 열쇠. 여러 줄 이름은 띄우지 않고 이은 꼴로도 찾는다(긴 한 단어를 줄로 나눈 것일 수 있다)."""
+    names = [x.name for x in (*d.boxes, *d.relations) if x.name]
+    known = {_name_forms(n)[0]: _name_forms(n)[0] for n in names}
+    for n in names:
+        known.setdefault(_name_forms(n)[1], _name_forms(n)[0])
+    return known
+
+
+def _name_key(lines: tuple[str, ...], known: dict[str, str]) -> str:
+    """이름 줄을 견줄 꼴로. 줄 사이를 띄어 잇거나 붙여 이은 꼴이 문제 이름(known)과 같으면 그 이름으로 본다 — 줄을 어디서
+    나눴든 같은 이름이다. 'Order Service'와 'OrderService'처럼 한 줄 안의 띄어쓰기가 다른 것은 다른 이름이다."""
+    spaced, joined = _name_forms(lines)
+    return known.get(spaced) or known.get(joined) or spaced
 
 
 def _digest(x) -> str:
@@ -159,21 +172,34 @@ def _digest(x) -> str:
 def _diagram(data: dict, tool: str) -> B.Diagram:
     """cysUML이 그 입력을 읽은 모델. 요소 열쇠(id·이름)와 kind·navigable 기본값을 cysUML이 그대로 풀게 한다. 자리가 없는 문제
     입력도 읽히도록 빠진 left·top과 자기 자신으로 가는 관계의 꺾는 점을 채운다(자리는 견주지 않는다). 도구 입력에는 그림 밖의
-    인자(file_name 등)도 있어 요소 목록과 관계만 넘긴다."""
+    인자(file_name 등)도 있어 요소 목록과 관계만 넘긴다. 목록을 JSON 글로 보낸 것은 풀어 읽고, 꼴이 틀린 입력은 cysUML이
+    InputError로 거절하게 그대로 넘긴다."""
     s = tool_spec(tool)
-    items = [{"left": 0, "top": 0, **e} for e in data.get(s.list_field) or []]
-    rels = [{"via": [[0, 0], [1, 1]], **r} if r.get("from") == r.get("to") else r for r in data.get("relations") or []]
+
+    def listed(v):
+        if isinstance(v, str):
+            try:
+                v = json.loads(v)
+            except json.JSONDecodeError:
+                return v
+        return v if v is not None else []
+
+    items, rels = listed(data.get(s.list_field)), listed(data.get("relations"))
+    if isinstance(items, list):
+        items = [{"left": 0, "top": 0, **e} if isinstance(e, dict) else e for e in items]
+    if isinstance(rels, list):
+        rels = [{"via": [[0, 0], [1, 1]], **r} if isinstance(r, dict) and r.get("from") == r.get("to") else r
+                for r in rels]
     return B.parse(s, {s.list_field: items, "relations": rels})
 
 
-def _shape(data: dict, tool: str, known: frozenset = frozenset()) -> tuple[list, list]:
-    """그림 입력을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 자리(left·top·크기·name_side·via)와 열쇠(id)는 보지 않는다.
+def _shape(d: B.Diagram, tool: str, known: dict[str, str]) -> tuple[list, list]:
+    """cysUML이 읽은 그림을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 자리(left·top·크기·name_side·via)와 열쇠(id)는 보지 않는다.
     이름이 하나뿐인 요소는 이름으로 가리키고, 이름 없는 점·마름모와 이름이 겹치는 요소는 이웃(들고 나는 관계, 담긴 곳, 담은
     요소)으로 더 갈라지지 않을 때까지 다듬은 꼬리표로 가리킨다 — id를 어떻게 바꿔 써도 같은 그림이면 같은 꼴, 흐름을 바꿔
     이으면 다른 꼴이 된다. 양 끝 모양이 고정되지 않은 관계(연관)는 양 끝을 바꾸고 다중도·navigable도 맞바꿔 적어도 같은 그림이라
     두 방향 중 한쪽으로 맞춘다."""
     s = tool_spec(tool)
-    d = _diagram(data, tool)
     boxes = d.boxes
     index = {e.key: i for i, e in enumerate(boxes)}
     names = [_name_key(e.name, known) if e.name else None for e in boxes]
@@ -217,13 +243,24 @@ def _shape(data: dict, tool: str, known: frozenset = frozenset()) -> tuple[list,
 def faithful(drawn: dict, spec: dict, tool: str) -> bool:
     """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸·id는 보지 않는다). cysUML이 읽지 못하는
     입력은 문제와 같다고 볼 수 없다."""
-    given = _diagram(spec, tool)
-    known = frozenset(_name_key(x.name) for x in (*given.boxes, *given.relations) if x.name)
+    known, want = problem_shape(spec, tool)
     try:
-        got = _shape(drawn, tool, known)
+        return _shape(_diagram(drawn, tool), tool, known) == want
     except InputError:
         return False
-    return got == _shape(spec, tool)
+
+
+_PROBLEMS_READ: dict[str, tuple[dict, tuple]] = {}
+
+
+def problem_shape(spec: dict, tool: str) -> tuple[dict[str, str], tuple[list, list]]:
+    """문제의 이름 열쇠와 견줄 꼴. 한 실행 안에서 문제는 그대로라 한 번만 만든다. cysUML이 못 읽는 문제는 InputError."""
+    k = _digest([tool, spec])
+    if k not in _PROBLEMS_READ:
+        d = _diagram(spec, tool)
+        known = _known_names(d)
+        _PROBLEMS_READ[k] = known, _shape(d, tool, known)
+    return _PROBLEMS_READ[k]
 
 
 def read_events(lines) -> list[dict]:
@@ -285,14 +322,20 @@ class Stopped(Exception):
     """Ctrl-C로 멈출 때 띄우지 않았거나 끝낸 실행. CSV에 쓰지 않는다."""
 
 
-def finish_row(row: dict, timed_out: bool) -> dict:
+def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict:
+    """실행 한 줄(run_one과 rescore.py가 같이 쓴다). meta에서 model·effort·problem·run·exit·wall_s를 읽는다."""
+    row = {k: meta.get(k) for k in ("model", "effort", "problem", "run")} | {"tool": tool, "exit": meta.get("exit"),
+                                                                          "wall_s": meta.get("wall_s")}
+    row.update(parse_stream(lines, tool, spec))
     if timed_out:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
-        row["subtype"] = "timeout" if row.get("mcp") else "no_init: timeout"
-        row["duration_s"] = row.get("wall_s")
-    elif row.get("is_error") and row.get("subtype") == "success":  # claude -p는 API 오류를 이렇게 낸다(상한 초과는 다른 subtype)
+        row["duration_s"] = row["wall_s"]
+    if not row["draws"] and row["mcp"] != "connected":  # 그림 도구 없이 끝난 실행은 모델의 불합격이 아니다
+        row["subtype"] = (f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") + (" (timeout)" if timed_out else "")
+    elif timed_out:
+        row["subtype"] = "timeout"
+    elif row["is_error"] and row["subtype"] == "success" and not row["passed"]:
+        # claude -p는 API 오류(인증·429·529)를 이렇게 낸다(상한 초과는 다른 subtype). 합격을 이미 기록했으면 그대로 둔다
         row["subtype"] = "api_error"
-    elif not row.get("draws") and row.get("mcp") != "connected":  # 그림 도구 없이 끝난 실행은 모델의 불합격이 아니다
-        row["subtype"] = f"mcp_failed: {row['mcp']}" if row.get("mcp") else "no_init"
     return row
 
 
@@ -351,6 +394,9 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
 _RUNNING: set[subprocess.Popen] = set()  # 멈출 때 직접 끝낼 claude 프로세스
 _RUNNING_LOCK = threading.Lock()
 _STOP = threading.Event()  # 멈춘 뒤에는 새 claude를 띄우지 않는다(_RUNNING_LOCK 안에서 보고 세운다)
+_SIGNALED: set[int] = set()  # 멈추며 끝낸 claude 프로세스의 pid(_RUNNING_LOCK 안에서 넣는다)
+# 시그널로 끝난 종료 코드. claude는 SIGTERM을 받으면 스스로 143으로 끝난다
+STOP_CODES = {-signal.SIGTERM, -signal.SIGKILL, 128 + signal.SIGTERM, 128 + signal.SIGKILL}
 # claude에 넘기는 환경 변수. 셸에 있는 Claude Code 설정(effort·생각 토큰·캐시·제공자 전환 등)이 측정에 섞이지 않게
 # 이것만 넘긴다(프록시·인증서 변수는 API에 닿는 데 필요할 수 있어 넘긴다)
 KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG",
@@ -420,13 +466,10 @@ def run_one(job: dict, key: str) -> dict:
     (run_dir / "stream.jsonl").write_text(stdout, encoding="utf-8")
     if stderr.strip():
         (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
-    row = {"model": job["model"], "effort": job["effort"], "problem": job["problem"], "run": job["run"], "tool": tool,
-           "exit": code, "wall_s": round(time.time() - started, 1)}
-    row.update(parse_stream(stdout.splitlines(), tool, spec))
-    ended_itself = row["subtype"] is not None  # 끝의 결과가 있다(상한 초과 등으로 스스로 끝남)
-    finish_row(row, timed_out=code is None)
-    # 멈출 때 끝낸 실행: 끝의 결과 없이 0이 아닌 코드로 끝났다(claude는 SIGTERM을 받으면 143, SIGKILL이면 -9)
-    stopped = _STOP.is_set() and code is not None and code != 0 and not ended_itself
+    row = build_row(job | {"exit": code, "wall_s": round(time.time() - started, 1)}, stdout.splitlines(), tool, spec,
+                    timed_out=code is None)
+    # 멈추며 시그널을 보낸 실행이 그 시그널로 끝났다(그 사이 스스로 끝났거나 죽은 실행은 그대로 남긴다)
+    stopped = proc.pid in _SIGNALED and code in STOP_CODES
     if stopped:
         row["subtype"] = "stopped"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -457,7 +500,7 @@ def main() -> None:
     for p in args.problems:  # 합격한 그림을 문제와 견줄 수 없으면 돈을 쓴 실행이 하네스 오류로 끝나니 미리 읽어 본다
         tool, spec = load_problem(p)
         try:
-            _shape(spec, tool)
+            problem_shape(spec, tool)
         except InputError as e:
             sys.exit(f"문제 {p}를 cysUML이 읽지 못한다: {e}")
 
@@ -522,6 +565,7 @@ def main() -> None:
             with _RUNNING_LOCK:
                 _STOP.set()
                 procs = list(_RUNNING)
+                _SIGNALED.update(p.pid for p in procs)
             for p in procs:
                 stop_group(p, signal.SIGTERM)
             pool.shutdown(wait=False, cancel_futures=True)

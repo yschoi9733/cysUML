@@ -102,5 +102,5 @@ for r in rows:
               f"run{r.get('run')} → {r.get('verdicts')}")
     if r.get("subtype") != "success":
         print(f"- 확인 필요: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}")
-    elif num(r.get("first_pass_draw")) is not None and first_pass(r) is None:
+    if num(r.get("first_pass_draw")) is not None and first_pass(r) is None:
         print(f"- {MAX_DRAWS}번을 넘겨 합격해 불합격으로 셌다: {r['model']} {r['effort']} {r['problem']} run{r.get('run')}")

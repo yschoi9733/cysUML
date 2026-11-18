@@ -11,7 +11,7 @@ import csv
 import sys
 from pathlib import Path
 
-from run_bench import FIELDS, finish_row, load_problem, parse_stream, run_dir_for, spec_from_prompt, tool_from_prompt
+from run_bench import FIELDS, build_row, load_problem, run_dir_for, spec_from_prompt, tool_from_prompt
 
 
 def given_problem(run_dir: Path, r: dict) -> tuple[str | None, dict | None]:
@@ -41,17 +41,15 @@ for tag_dir in map(Path, sys.argv[1:]):
                   f"기록이나 문제가 없어 원래 줄을 둔다")
             new_rows.append(r)
             continue
-        row = {k: r.get(k) for k in ("model", "effort", "problem", "run", "exit", "wall_s")} | {"tool": tool}
+        # 원래 판정에 timeout이 있거나, 판정(끝의 결과)도 종료 코드도 없으면 시간 초과로 끊긴 실행이다(뒤는 옛 기록)
+        timed_out = "timeout" in (r.get("subtype") or "") or (not r.get("subtype") and not r.get("exit"))
         try:
-            row.update(parse_stream(stream.read_text(encoding="utf-8").splitlines(), tool, spec))
+            row = build_row(r, stream.read_text(encoding="utf-8").splitlines(), tool, spec, timed_out)
         except Exception as e:  # 한 실행을 다시 읽지 못해도 나머지는 계속한다(문제를 cysUML이 못 읽게 된 경우 등)
             print(f"{tag_dir.name}: {r['model']} {r['effort']} {r['problem']} run{r['run']} 다시 읽지 못해 원래 줄을 둔다: "
                   f"{type(e).__name__}: {e}")
             new_rows.append(r)
             continue
-        # 원래 판정이 비었고 끝의 결과도 종료 코드도 없으면 시간 초과로 끊긴 실행이다(timeout을 적기 전의 옛 기록)
-        old_timeout = not r.get("subtype") and row["subtype"] is None and not r.get("exit")
-        finish_row(row, timed_out=r.get("subtype") == "timeout" or old_timeout)
         new_rows.append(row)
         if str(row["passed"]) != r.get("passed") or str(row["first_pass_draw"] or "") != (r.get("first_pass_draw") or ""):
             print(f"{tag_dir.name}: {r['model']} {r['effort']} {r['problem']} run{r['run']} "
