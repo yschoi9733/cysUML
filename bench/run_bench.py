@@ -11,6 +11,8 @@ import argparse
 import concurrent.futures as cf
 import csv
 import datetime as dt
+import importlib
+import itertools
 import json
 import os
 import shutil
@@ -28,7 +30,7 @@ LAYOUT_KEYS = {"left", "top", "via", "width", "height", "name_side"}
 MAX_DRAWS = 10
 DRAW_PREFIX = "mcp__cysuml__draw_"  # 그린 차례로 세는 도구 호출(inspect_run.py도 이것을 쓴다)
 FIELDS = ["model", "effort", "problem", "run", "tool", "passed", "first_pass_draw", "draws", "verdicts", "changed",
-          "input_errors",
+          "input_errors", "mcp",
           "cost_usd", "duration_s", "wall_s", "turns", "subtype", "is_error", "exit",
           "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens"]
 
@@ -90,8 +92,11 @@ def prompt_for(pid: str, tool: str, spec: dict) -> str:
         "(left/top, and bend points or sizes if they help).\n"
         "After each draw, read the check result. If it does not pass, fix the layout and draw again with the same "
         f"file_name. Stop as soon as a draw passes the check (its result starts with 합격), or after {MAX_DRAWS} draws.\n\n"
-        "Elements and relations (JSON):\n" + json.dumps(spec, ensure_ascii=False, indent=1)
+        + PROMPT_SPEC_MARK + json.dumps(spec, ensure_ascii=False, indent=1)
     )
+
+
+PROMPT_SPEC_MARK = "Elements and relations (JSON):\n"  # 이 뒤가 문제 JSON이다(spec_from_prompt가 이것으로 꺼낸다)
 
 
 def api_key() -> str:
@@ -134,11 +139,22 @@ def verdict(line: str) -> str:
     return "other"
 
 
-ELEMENT_KIND = {"draw_class_diagram": "class"}  # 이 도구는 요소 kind를 빼면 이 값이다
-RELATION_KIND = {"draw_state_diagram": "transition", "draw_activity_diagram": "flow"}  # 관계 kind를 빼면 이 값이다
-# 연관·집합·합성의 navigable 기본값(cysUML Spec.navigable). 기본값과 같은 navigable은 없는 것으로 본다 — 다른 값은
-# 화살촉을 더하거나 없애 그림을 바꾼 것이다
-NAVIGABLE_DEFAULT = {"draw_deployment_diagram": "none"}
+TOOL_MODULE = {
+    "draw_class_diagram": "classdiagram",
+    "draw_package_diagram": "packagediagram",
+    "draw_component_diagram": "componentdiagram",
+    "draw_deployment_diagram": "deploymentdiagram",
+    "draw_use_case_diagram": "usecasediagram",
+    "draw_state_diagram": "statediagram",
+    "draw_activity_diagram": "activitydiagram",
+}
+EMPTY = (None, "", [], {})  # 이 값인 칸은 빠진 칸과 같게 본다
+MAX_RENAMED = 6  # id만 바꿔 쓴 이름 없는 요소를 맞바꿔 보는 개수 상한(6!=720가지)
+
+
+def tool_spec(tool: str):
+    """cysUML이 그 도구에 쓰는 Spec. 기본값(요소 목록 칸·kind·navigable)을 손으로 옮겨 적지 않으려고 그대로 읽는다."""
+    return importlib.import_module(f"cysuml.{TOOL_MODULE[tool]}").SPEC
 
 
 def _text_key(v):
@@ -148,13 +164,17 @@ def _text_key(v):
     return "".join(v.split()) if isinstance(v, str) else v
 
 
-def _shape(spec: dict, tool: str) -> tuple[list, list]:
-    """그림 입력에서 자리 칸과 id를 빼고, 남은 모든 칸을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 요소는 이름으로 가리키고
-    (이름 없는 시작·끝 점·마름모는 종류로), from·to·in의 id·이름 별칭은 그 이름으로 푼다."""
-    items = spec.get("classes") or spec.get("elements") or []
+def _shape(spec: dict, tool: str, rename: dict | None = None) -> tuple[list, list]:
+    """그림 입력에서 자리 칸·id·빈 칸·기본값 칸을 빼고, 남은 모든 칸을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 요소는
+    이름으로 가리키고(이름 없는 시작·끝 점·마름모는 id로 — rename이 있으면 그 id를 바꿔 읽는다), from·to·in의 id·이름 별칭은
+    그것으로 푼다."""
+    s = tool_spec(tool)
+    default_relation = next(iter(s.relations)) if len(s.relations) == 1 else None
+    rename = rename or {}
+    items = spec.get(s.list_field) or []
     alias = {}
     for e in items:
-        canon = _text_key(e["name"]) if e.get("name") else f"<{e.get('kind')}>"
+        canon = _text_key(e["name"]) if e.get("name") else "#" + str(rename.get(e.get("id"), e.get("id")))
         for k in (e.get("id"), e.get("name"), canon):
             if isinstance(k, str):
                 alias[k] = canon
@@ -162,20 +182,40 @@ def _shape(spec: dict, tool: str) -> tuple[list, list]:
     def key(d: dict, default_kind: str | None) -> str:
         out = {}
         for k, v in d.items():
-            if k in LAYOUT_KEYS or k == "id" or (k == "navigable" and v == NAVIGABLE_DEFAULT.get(tool, "to")):
+            if (k in LAYOUT_KEYS or k == "id" or v in EMPTY or (k == "kind" and v == default_kind)
+                    or (k == "navigable" and v == s.navigable)):
                 continue
             out[k] = _text_key(v) if k == "name" else alias.get(v, v) if k in ("in", "from", "to") and isinstance(v, str) else v
-        if default_kind:
-            out.setdefault("kind", default_kind)
         return json.dumps(out, sort_keys=True, ensure_ascii=False)
 
-    return (sorted(key(e, ELEMENT_KIND.get(tool)) for e in items),
-            sorted(key(r, RELATION_KIND.get(tool)) for r in spec.get("relations") or []))
+    return (sorted(key(e, s.default_kind) for e in items),
+            sorted(key(r, default_relation) for r in spec.get("relations") or []))
 
 
 def faithful(drawn: dict, spec: dict, tool: str) -> bool:
-    """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸은 보지 않는다)."""
-    return _shape(drawn, tool) == _shape(spec, tool)
+    """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸은 보지 않는다). 이름 없는 요소의 id만
+    바꿔 쓴 것은 같은 종류끼리 id를 맞바꿔 보고 같아지면 같은 그림으로 친다 — 종류로만 견주면 두 마름모의 흐름을 서로 바꿔
+    이어도 같아 보인다."""
+    want = _shape(spec, tool)
+    if _shape(drawn, tool) == want:
+        return True
+    s = tool_spec(tool)
+
+    def nameless(sp: dict) -> dict:
+        return {e["id"]: e.get("kind") for e in sp.get(s.list_field) or [] if not e.get("name") and e.get("id")}
+
+    got, given = nameless(drawn), nameless(spec)
+    extra = {i: k for i, k in got.items() if i not in given}
+    missing = {i: k for i, k in given.items() if i not in got}
+    if not extra or len(extra) > MAX_RENAMED or sorted(extra.values()) != sorted(missing.values()):
+        return False
+    groups = [([i for i, k in extra.items() if k == kind], [i for i, k in missing.items() if k == kind])
+              for kind in sorted(set(extra.values()))]
+    for choice in itertools.product(*(itertools.permutations(to) for _, to in groups)):
+        rename = {old: new for (frm, _), to in zip(groups, choice) for old, new in zip(frm, to)}
+        if _shape(drawn, tool, rename) == want:
+            return True
+    return False
 
 
 def read_events(lines) -> list[dict]:
@@ -189,10 +229,10 @@ def read_events(lines) -> list[dict]:
     return events
 
 
-def draw_calls(events: list[dict], tool: str | None = None) -> list[str]:
-    """그린 차례대로 tool_use id를 낸다. tool을 주면 그 문제의 도구 호출만(허락하지 않은 도구 호출은 그린 것이 아니다),
-    안 주면 cysUML 그리기 도구 호출을 모두 센다."""
-    ids = []
+def draw_uses(events: list[dict], tool: str | None = None) -> list[tuple[str, dict]]:
+    """그린 차례대로 (tool_use id, 보낸 그림 입력)을 낸다. tool을 주면 그 문제의 도구 호출만(허락하지 않은 도구 호출은
+    그린 것이 아니다), 안 주면 cysUML 그리기 도구 호출을 모두 센다."""
+    uses = []
     for ev in events:
         if ev.get("type") != "assistant":
             continue
@@ -200,8 +240,24 @@ def draw_calls(events: list[dict], tool: str | None = None) -> list[str]:
             name = str(b.get("name", ""))
             if b.get("type") == "tool_use" and (name == DRAW_PREFIX + tool.removeprefix("draw_") if tool
                                                 else name.startswith(DRAW_PREFIX)):
-                ids.append(b["id"])
-    return ids
+                uses.append((b["id"], b.get("input") or {}))
+    return uses
+
+
+def draw_calls(events: list[dict], tool: str | None = None) -> list[str]:
+    return [i for i, _ in draw_uses(events, tool)]
+
+
+def mcp_status(events: list[dict]) -> str | None:
+    """시작 이벤트에 적힌 cysUML MCP 서버 상태(connected 등). 서버가 안 붙으면 그린 차례가 0인 평범한 불합격처럼 보인다."""
+    init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), {})
+    return next((m.get("status") for m in init.get("mcp_servers") or [] if m.get("name") == "cysuml"), None)
+
+
+def spec_from_prompt(prompt: str) -> dict | None:
+    """prompt.txt에서 그 실행에 실제로 준 문제(요소·관계 JSON)를 꺼낸다. rescore.py가 지금 문제 대신 이것과 견준다."""
+    _, sep, tail = prompt.partition(PROMPT_SPEC_MARK)
+    return json.loads(tail) if sep else None
 
 
 def draw_results(events: list[dict], ids: list[str]) -> dict[str, dict]:
@@ -216,18 +272,6 @@ def draw_results(events: list[dict], ids: list[str]) -> dict[str, dict]:
     return found
 
 
-def draw_inputs(events: list[dict], ids: list[str]) -> dict[str, dict]:
-    """tool_use id마다 모델이 보낸 그림 입력을 낸다."""
-    wanted, found = set(ids), {}
-    for ev in events:
-        if ev.get("type") != "assistant":
-            continue
-        for b in (ev.get("message") or {}).get("content") or []:
-            if b.get("type") == "tool_use" and b.get("id") in wanted:
-                found[b["id"]] = b.get("input") or {}
-    return found
-
-
 def counts_as_pass(first_pass: int | None) -> bool:
     """지시한 최대 횟수를 넘겨 합격한 것은 불합격으로 친다(summarize.py도 이것으로 가른다)."""
     return first_pass is not None and first_pass <= MAX_DRAWS
@@ -237,9 +281,9 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
     """spec(문제)을 주면, 검사에 합격했어도 문제를 바꿔 그린 차례(요소·관계를 빼거나 더하거나 바꿈)는 changed로 적고
     합격으로 치지 않는다."""
     events = read_events(lines)
-    ids = draw_calls(events, tool)
+    uses = draw_uses(events, tool)
+    ids, inputs = [i for i, _ in uses], dict(uses)
     results = draw_results(events, ids)
-    inputs = draw_inputs(events, ids) if spec is not None else {}
     result = next((e for e in reversed(events) if e.get("type") == "result"), {})
     seq = []
     for i in ids:
@@ -256,6 +300,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "verdicts": " ".join(seq),
         "input_errors": seq.count("input_error"),
         "changed": seq.count("changed"),
+        "mcp": mcp_status(events),
         "cost_usd": result.get("total_cost_usd"),
         "turns": result.get("num_turns"),
         "duration_s": round(result["duration_ms"] / 1000, 1) if result.get("duration_ms") is not None else None,
@@ -327,7 +372,10 @@ def run_one(job: dict, key: str) -> dict:
         code = proc.returncode
     except subprocess.TimeoutExpired:  # 시간 초과여도 그때까지의 기록은 남긴다(비용은 끝의 결과가 없어 비운다)
         stop_group(proc, signal.SIGKILL)
-        stdout, stderr = proc.communicate(timeout=60)
+        try:
+            stdout, stderr = proc.communicate(timeout=60)
+        except subprocess.TimeoutExpired:  # 그룹 밖으로 나간 자손이 출력을 쥐고 있으면 끝내도 닫히지 않는다
+            stdout, stderr = "", "끝낸 뒤에도 출력이 닫히지 않아 기록을 읽지 못했다"
         code = None
     finally:
         with _RUNNING_LOCK:
@@ -341,6 +389,8 @@ def run_one(job: dict, key: str) -> dict:
     if code is None:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
         row["subtype"] = "timeout"
         row["duration_s"] = row["wall_s"]
+    elif row["mcp"] != "connected":  # 그림 도구가 없던 실행은 모델의 불합격이 아니다
+        row["subtype"] = f"mcp_failed: {row['mcp']}"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
     return row
 
@@ -365,6 +415,8 @@ def main() -> None:
     if unknown:
         sys.exit(f"모르는 문제: {unknown} (있는 것: {list(PROBLEMS) + list(WRITTEN)})")
 
+    if not (ROOT / ".venv" / "bin" / "cysuml").exists():
+        sys.exit(f"{ROOT / '.venv/bin/cysuml'}이 없다 — 레포에서 uv sync를 먼저 돌린다")
     base = args.out / args.tag
     if (base / "results.csv").exists():
         sys.exit(f"이미 결과가 있는 태그다: {base} — --tag로 다른 이름을 준다")
@@ -379,7 +431,7 @@ def main() -> None:
     with (base / "results.csv").open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
         w.writeheader()
-        futures = {pool.submit(run_one, j, key): j for j in jobs}
+        futures: dict = {}
         written = set()
 
         def record(fut) -> dict:
@@ -395,23 +447,32 @@ def main() -> None:
             written.add(fut)
             return row
 
-        try:
+        try:  # 띄우기부터 정리까지 어디서 Ctrl-C가 와도 아래에서 멈춘다
+            for j in jobs:
+                futures[pool.submit(run_one, j, key)] = j
             for fut in cf.as_completed(futures):
                 row = record(fut)
                 print(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed",
                                                            "first_pass_draw", "draws", "cost_usd", "duration_s",
                                                            "subtype")}, ensure_ascii=False), flush=True)
+            pool.shutdown()
         except KeyboardInterrupt:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다(SIGINT가 파이썬에만 왔을 수 있다)
             finished = [fut for fut in futures if fut.done() and not fut.cancelled() and fut not in written]
             with _RUNNING_LOCK:
                 _STOP.set()
-                for p in _RUNNING:
-                    stop_group(p, signal.SIGTERM)
+                procs = list(_RUNNING)
+            for p in procs:
+                stop_group(p, signal.SIGTERM)
             pool.shutdown(wait=False, cancel_futures=True)
+            deadline = time.time() + 10  # SIGTERM을 무시하는 그룹은 10초 뒤 SIGKILL로 끝낸다
+            while time.time() < deadline and any(p.poll() is None for p in procs):
+                time.sleep(0.2)
+            for p in procs:
+                if p.poll() is None:
+                    stop_group(p, signal.SIGKILL)
             for fut in finished:  # 멈추기 전에 이미 끝났는데 아직 쓰지 못한 실행만 남긴다(끊긴 실행은 쓰지 않는다)
                 record(fut)
             sys.exit(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)")
-    pool.shutdown()
     total = sum(r.get("cost_usd") or 0 for r in rows)
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
     note = f", 비용을 모르는 실행 {unknown_cost}건은 합계에 들지 않았다" if unknown_cost else ""
