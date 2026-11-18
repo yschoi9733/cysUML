@@ -1,0 +1,258 @@
+{
+ "shop": {
+  "tool": "draw_class_diagram",
+  "classes": [
+   {"name": "User", "kind": "abstract", "attributes": ["-id: long", "-email: String"]},
+   {"name": "Customer", "attributes": ["-points: int"]},
+   {"name": "Admin", "attributes": ["-role: String"]},
+   {"name": "Address", "attributes": ["-city: String", "-zip: String"]},
+   {"name": "Cart"},
+   {"name": "CartItem", "attributes": ["-quantity: int"]},
+   {"name": "Order", "attributes": ["-placedAt: DateTime"], "operations": ["+total(): Money"]},
+   {"name": "OrderLine", "attributes": ["-quantity: int"]},
+   {"name": "Product", "attributes": ["-name: String", "-price: Money"]},
+   {"name": "Category", "attributes": ["-name: String"]},
+   {"name": "OrderStatus", "kind": "enum", "literals": ["PLACED", "PAID", "SHIPPED", "CANCELLED"]},
+   {"name": "PaymentMethod", "kind": "interface", "operations": ["+pay(amount: Money): Receipt"]},
+   {"name": "CardPayment"},
+   {"name": "BankTransfer"}
+  ],
+  "relations": [
+   {"kind": "generalization", "from": "Customer", "to": "User"},
+   {"kind": "generalization", "from": "Admin", "to": "User"},
+   {"kind": "realization", "from": "CardPayment", "to": "PaymentMethod"},
+   {"kind": "realization", "from": "BankTransfer", "to": "PaymentMethod"},
+   {"kind": "association", "from": "Customer", "to": "Order", "name": "places", "from_multiplicity": "1", "to_multiplicity": "*"},
+   {"kind": "composition", "from": "Order", "to": "OrderLine", "to_multiplicity": "1..*"},
+   {"kind": "association", "from": "OrderLine", "to": "Product", "to_multiplicity": "1"},
+   {"kind": "association", "from": "Product", "to": "Category", "from_multiplicity": "*", "to_multiplicity": "1"},
+   {"kind": "composition", "from": "Customer", "to": "Cart", "to_multiplicity": "1"},
+   {"kind": "composition", "from": "Cart", "to": "CartItem", "to_multiplicity": "*"},
+   {"kind": "association", "from": "CartItem", "to": "Product", "to_multiplicity": "1"},
+   {"kind": "aggregation", "from": "Customer", "to": "Address", "to_multiplicity": "0..*"},
+   {"kind": "dependency", "from": "Order", "to": "OrderStatus"},
+   {"kind": "association", "from": "Order", "to": "PaymentMethod", "name": "paid by", "to_multiplicity": "1"}
+  ]
+ },
+ "shapes": {
+  "tool": "draw_class_diagram",
+  "classes": [
+   {"name": "Drawable", "kind": "interface", "operations": ["+draw(): void"]},
+   {"name": "Selectable", "kind": "interface", "operations": ["+select(): void"]},
+   {"name": "Resizable", "kind": "interface", "operations": ["+resize(factor: double): void"]},
+   {"name": "Shape", "kind": "abstract", "operations": ["+area(): double"]},
+   {"name": "Circle", "attributes": ["-radius: double"]},
+   {"name": "Rectangle", "attributes": ["-width: double", "-height: double"]},
+   {"name": "Square"},
+   {"name": "Triangle"},
+   {"name": "Group"},
+   {"name": "Canvas"},
+   {"name": "Layer", "attributes": ["-z: int"]}
+  ],
+  "relations": [
+   {"kind": "generalization", "from": "Selectable", "to": "Drawable"},
+   {"kind": "realization", "from": "Shape", "to": "Drawable"},
+   {"kind": "generalization", "from": "Circle", "to": "Shape"},
+   {"kind": "generalization", "from": "Rectangle", "to": "Shape"},
+   {"kind": "generalization", "from": "Triangle", "to": "Shape"},
+   {"kind": "generalization", "from": "Group", "to": "Shape"},
+   {"kind": "generalization", "from": "Square", "to": "Rectangle"},
+   {"kind": "realization", "from": "Circle", "to": "Resizable"},
+   {"kind": "realization", "from": "Rectangle", "to": "Resizable"},
+   {"kind": "aggregation", "from": "Group", "to": "Shape", "name": "children", "to_multiplicity": "*"},
+   {"kind": "composition", "from": "Canvas", "to": "Layer", "to_multiplicity": "1..*"},
+   {"kind": "aggregation", "from": "Layer", "to": "Shape", "to_multiplicity": "*"}
+  ]
+ },
+ "layers": {
+  "tool": "draw_package_diagram",
+  "elements": [
+   {"kind": "package", "name": "app"},
+   {"kind": "package", "name": "web", "in": "app"},
+   {"kind": "class", "name": "OrderController", "in": "web"},
+   {"kind": "class", "name": "AdminController", "in": "web"},
+   {"kind": "package", "name": "service", "in": "app"},
+   {"kind": "interface", "name": "OrderService", "in": "service"},
+   {"kind": "class", "name": "OrderServiceImpl", "in": "service"},
+   {"kind": "package", "name": "domain", "in": "app"},
+   {"kind": "class", "name": "Order", "in": "domain"},
+   {"kind": "class", "name": "Customer", "in": "domain"},
+   {"kind": "interface", "name": "OrderRepository", "in": "domain"},
+   {"kind": "package", "name": "infra"},
+   {"kind": "package", "name": "persistence", "in": "infra"},
+   {"kind": "class", "name": "JpaOrderRepository", "in": "persistence"}
+  ],
+  "relations": [
+   {"kind": "dependency", "from": "web", "to": "service", "stereotype": "use"},
+   {"kind": "dependency", "from": "service", "to": "domain", "stereotype": "use"},
+   {"kind": "dependency", "from": "persistence", "to": "domain", "stereotype": "use"},
+   {"kind": "realization", "from": "OrderServiceImpl", "to": "OrderService"},
+   {"kind": "realization", "from": "JpaOrderRepository", "to": "OrderRepository"},
+   {"kind": "dependency", "from": "OrderController", "to": "OrderService"},
+   {"kind": "dependency", "from": "AdminController", "to": "OrderService"},
+   {"kind": "dependency", "from": "OrderServiceImpl", "to": "OrderRepository"},
+   {"kind": "association", "from": "Order", "to": "Customer", "name": "placed by", "to_multiplicity": "1"}
+  ]
+ },
+ "cloud": {
+  "tool": "draw_deployment_diagram",
+  "elements": [
+   {"kind": "node", "name": "Phone", "stereotype": "device"},
+   {"kind": "artifact", "name": "shop.apk", "in": "Phone"},
+   {"kind": "node", "name": "Load Balancer", "stereotype": "device"},
+   {"kind": "node", "name": "App Server 1", "stereotype": "device"},
+   {"kind": "node", "name": "JVM 1", "stereotype": "executionEnvironment", "in": "App Server 1"},
+   {"kind": "node", "name": "App Server 2", "stereotype": "device"},
+   {"kind": "node", "name": "JVM 2", "stereotype": "executionEnvironment", "in": "App Server 2"},
+   {"kind": "node", "name": "DB Server", "stereotype": "device"},
+   {"kind": "node", "name": "PostgreSQL", "stereotype": "executionEnvironment", "in": "DB Server"},
+   {"kind": "artifact", "name": "schema.sql", "in": "PostgreSQL"},
+   {"kind": "node", "name": "Cache", "stereotype": "device"},
+   {"kind": "component", "name": "Redis", "in": "Cache"},
+   {"kind": "artifact", "name": "shop-api.jar"},
+   {"kind": "component", "name": "OrderService"}
+  ],
+  "relations": [
+   {"kind": "association", "from": "Phone", "to": "Load Balancer", "name": "HTTPS"},
+   {"kind": "association", "from": "Load Balancer", "to": "App Server 1", "name": "HTTP"},
+   {"kind": "association", "from": "Load Balancer", "to": "App Server 2", "name": "HTTP"},
+   {"kind": "association", "from": "App Server 1", "to": "DB Server", "name": "JDBC"},
+   {"kind": "association", "from": "App Server 2", "to": "DB Server", "name": "JDBC"},
+   {"kind": "association", "from": "App Server 1", "to": "Cache", "name": "RESP"},
+   {"kind": "association", "from": "App Server 2", "to": "Cache", "name": "RESP"},
+   {"kind": "dependency", "from": "shop-api.jar", "to": "JVM 1", "stereotype": "deploy"},
+   {"kind": "dependency", "from": "shop-api.jar", "to": "JVM 2", "stereotype": "deploy"},
+   {"kind": "dependency", "from": "shop-api.jar", "to": "OrderService", "stereotype": "manifest"}
+  ]
+ },
+ "order-life": {
+  "tool": "draw_state_diagram",
+  "elements": [
+   {"kind": "initial", "id": "start"},
+   {"kind": "state", "name": "Created"},
+   {"kind": "choice", "id": "paid?"},
+   {"kind": "state", "name": "Cancelled"},
+   {"kind": "state", "name": "Fulfillment"},
+   {"kind": "initial", "id": "f-start", "in": "Fulfillment"},
+   {"kind": "state", "name": "Packing", "in": "Fulfillment", "actions": ["entry / reserve stock"]},
+   {"kind": "state", "name": "Shipping", "in": "Fulfillment", "actions": ["do / track parcel"]},
+   {"kind": "state", "name": "Delivered", "in": "Fulfillment"},
+   {"kind": "state", "name": "Returned"},
+   {"kind": "final", "id": "end"}
+  ],
+  "relations": [
+   {"from": "start", "to": "Created"},
+   {"from": "Created", "to": "paid?", "name": "pay"},
+   {"from": "paid?", "to": "Fulfillment", "name": "[approved]"},
+   {"from": "paid?", "to": "Cancelled", "name": "[declined]"},
+   {"from": "Created", "to": "Cancelled", "name": "cancel"},
+   {"from": "f-start", "to": "Packing"},
+   {"from": "Packing", "to": "Shipping", "name": "ship"},
+   {"from": "Shipping", "to": "Delivered", "name": "deliver"},
+   {"from": "Delivered", "to": "Returned", "name": "return"},
+   {"from": "Delivered", "to": "end"},
+   {"from": "Returned", "to": "end"},
+   {"from": "Cancelled", "to": "end"}
+  ]
+ },
+ "payment-retry": {
+  "tool": "draw_activity_diagram",
+  "elements": [
+   {"kind": "initial", "id": "start"},
+   {"kind": "action", "name": "Enter card"},
+   {"kind": "action", "name": "Validate card"},
+   {"kind": "decision", "id": "valid?"},
+   {"kind": "action", "name": "Charge card"},
+   {"kind": "decision", "id": "charged?"},
+   {"kind": "decision", "id": "retries left?"},
+   {"kind": "action", "name": "Wait 5 seconds"},
+   {"kind": "action", "name": "Send receipt"},
+   {"kind": "action", "name": "Show error"},
+   {"kind": "merge", "id": "done"},
+   {"kind": "final", "id": "end"}
+  ],
+  "relations": [
+   {"from": "start", "to": "Enter card"},
+   {"from": "Enter card", "to": "Validate card"},
+   {"from": "Validate card", "to": "valid?"},
+   {"from": "valid?", "to": "Enter card", "name": "[invalid]"},
+   {"from": "valid?", "to": "Charge card", "name": "[valid]"},
+   {"from": "Charge card", "to": "charged?"},
+   {"from": "charged?", "to": "Send receipt", "name": "[ok]"},
+   {"from": "charged?", "to": "retries left?", "name": "[failed]"},
+   {"from": "retries left?", "to": "Wait 5 seconds", "name": "[yes]"},
+   {"from": "Wait 5 seconds", "to": "Charge card"},
+   {"from": "retries left?", "to": "Show error", "name": "[no]"},
+   {"from": "Send receipt", "to": "done"},
+   {"from": "Show error", "to": "done"},
+   {"from": "done", "to": "end"}
+  ]
+ },
+ "library": {
+  "tool": "draw_use_case_diagram",
+  "elements": [
+   {"kind": "actor", "name": "Guest"},
+   {"kind": "actor", "name": "Member"},
+   {"kind": "actor", "name": "Librarian"},
+   {"kind": "actor", "name": "Admin"},
+   {"kind": "system", "name": "Library System"},
+   {"kind": "use_case", "name": "Search catalog", "in": "Library System"},
+   {"kind": "use_case", "name": "Log in", "in": "Library System"},
+   {"kind": "use_case", "name": "Borrow book", "in": "Library System"},
+   {"kind": "use_case", "name": "Return book", "in": "Library System"},
+   {"kind": "use_case", "name": "Reserve book", "in": "Library System"},
+   {"kind": "use_case", "name": "Renew loan", "in": "Library System"},
+   {"kind": "use_case", "name": "Pay fine", "in": "Library System"},
+   {"kind": "use_case", "name": "Manage catalog", "in": "Library System"},
+   {"kind": "use_case", "name": "Manage members", "in": "Library System"}
+  ],
+  "relations": [
+   {"kind": "generalization", "from": "Member", "to": "Guest"},
+   {"kind": "generalization", "from": "Admin", "to": "Librarian"},
+   {"kind": "association", "from": "Guest", "to": "Search catalog"},
+   {"kind": "association", "from": "Member", "to": "Borrow book"},
+   {"kind": "association", "from": "Member", "to": "Return book"},
+   {"kind": "association", "from": "Member", "to": "Reserve book"},
+   {"kind": "association", "from": "Member", "to": "Renew loan"},
+   {"kind": "association", "from": "Librarian", "to": "Return book"},
+   {"kind": "association", "from": "Librarian", "to": "Manage catalog"},
+   {"kind": "association", "from": "Admin", "to": "Manage members"},
+   {"kind": "dependency", "from": "Borrow book", "to": "Log in", "stereotype": "include"},
+   {"kind": "dependency", "from": "Reserve book", "to": "Log in", "stereotype": "include"},
+   {"kind": "dependency", "from": "Renew loan", "to": "Log in", "stereotype": "include"},
+   {"kind": "dependency", "from": "Pay fine", "to": "Return book", "stereotype": "extend"}
+  ]
+ },
+ "services": {
+  "tool": "draw_component_diagram",
+  "elements": [
+   {"kind": "component", "name": "Web App"},
+   {"kind": "component", "name": "Mobile App"},
+   {"kind": "component", "name": "API Gateway"},
+   {"kind": "lollipop", "name": "PublicApi"},
+   {"kind": "package", "name": "backend"},
+   {"kind": "component", "name": "Order Service", "in": "backend"},
+   {"kind": "lollipop", "name": "OrderApi", "in": "backend"},
+   {"kind": "component", "name": "Payment Service", "in": "backend"},
+   {"kind": "lollipop", "name": "PaymentApi", "in": "backend"},
+   {"kind": "component", "name": "Inventory Service", "in": "backend"},
+   {"kind": "lollipop", "name": "StockApi", "in": "backend"},
+   {"kind": "component", "name": "Notification Service", "in": "backend"},
+   {"kind": "lollipop", "name": "NotifyApi", "in": "backend"}
+  ],
+  "relations": [
+   {"kind": "association", "from": "API Gateway", "to": "PublicApi"},
+   {"kind": "association", "from": "Order Service", "to": "OrderApi"},
+   {"kind": "association", "from": "Payment Service", "to": "PaymentApi"},
+   {"kind": "association", "from": "Inventory Service", "to": "StockApi"},
+   {"kind": "association", "from": "Notification Service", "to": "NotifyApi"},
+   {"kind": "requires", "from": "Web App", "to": "PublicApi"},
+   {"kind": "dependency", "from": "Mobile App", "to": "PublicApi"},
+   {"kind": "requires", "from": "API Gateway", "to": "OrderApi"},
+   {"kind": "requires", "from": "Order Service", "to": "PaymentApi"},
+   {"kind": "requires", "from": "Order Service", "to": "StockApi"},
+   {"kind": "requires", "from": "Order Service", "to": "NotifyApi"},
+   {"kind": "dependency", "from": "Payment Service", "to": "NotifyApi"}
+  ]
+ }
+}
