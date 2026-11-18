@@ -23,6 +23,10 @@ EXAMPLES = ROOT / "docs" / "images"
 DEFAULT_OUT = Path.home() / "Documents" / "cysUML-bench-runs"
 LAYOUT_KEYS = {"left", "top", "via", "width", "height", "name_side"}
 MAX_DRAWS = 10
+DRAW_PREFIX = "mcp__cysuml__draw_"  # 그린 차례로 세는 도구 호출(inspect_run.py도 이것을 쓴다)
+FIELDS = ["model", "effort", "problem", "run", "passed", "first_pass_draw", "draws", "verdicts", "input_errors",
+          "cost_usd", "duration_s", "wall_s", "turns", "subtype", "is_error", "exit",
+          "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens"]
 
 # 같은 그림의 한국어판·고친 판은 하나로 친다(fixed가 first-try의 합격판). 교류도(checkout)는 도구가 배치하니 뺀다.
 PROBLEMS = {
@@ -93,18 +97,25 @@ def api_key() -> str:
     service = os.environ.get("BENCH_KEYCHAIN_SERVICE")
     if not service:
         sys.exit("API 키가 없다 — ANTHROPIC_API_KEY나 BENCH_KEYCHAIN_SERVICE(맥 키체인 서비스 이름)를 준다")
-    return subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
-                          check=True, capture_output=True, text=True).stdout.strip()
+    try:
+        return subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
+                              check=True, capture_output=True, text=True).stdout.strip()
+    except FileNotFoundError:
+        sys.exit("security 명령이 없다(맥 키체인은 macOS에서만 읽는다) — ANTHROPIC_API_KEY를 준다")
+    except subprocess.CalledProcessError:
+        sys.exit(f"맥 키체인에 서비스 이름이 {service!r}인 항목이 없다 — BENCH_KEYCHAIN_SERVICE를 확인한다")
+
+
+def result_text(content) -> str:
+    """tool_result 내용(문자열이나 블록 목록)에서 글을 꺼낸다."""
+    if isinstance(content, str):
+        return content.strip()
+    return next((b.get("text", "").strip() for b in content or [] if isinstance(b, dict) and b.get("type") == "text"), "")
 
 
 def first_line(content) -> str:
-    if isinstance(content, str):
-        return content.strip().splitlines()[0] if content.strip() else ""
-    for block in content or []:
-        if isinstance(block, dict) and block.get("type") == "text":
-            text = block.get("text", "").strip()
-            return text.splitlines()[0] if text else ""
-    return ""
+    text = result_text(content)
+    return text.splitlines()[0] if text else ""
 
 
 def verdict(line: str) -> str:
@@ -114,6 +125,8 @@ def verdict(line: str) -> str:
         return "fail"
     if line.startswith("입력 오류"):
         return "input_error"
+    if line.startswith("그림이 너무 커서"):
+        return "too_big"
     return "other"
 
 
@@ -129,7 +142,7 @@ def parse_stream(lines: list[str]) -> dict:
         msg = ev.get("message") or {}
         if ev.get("type") == "assistant":
             for b in msg.get("content") or []:
-                if b.get("type") == "tool_use" and str(b.get("name", "")).startswith("mcp__cysuml__draw_"):
+                if b.get("type") == "tool_use" and str(b.get("name", "")).startswith(DRAW_PREFIX):
                     draw_ids.append(b["id"])
         elif ev.get("type") == "user":
             for b in msg.get("content") or []:
@@ -183,7 +196,9 @@ def run_one(job: dict, key: str) -> dict:
         "--no-session-persistence",
         prompt,
     ]
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("ANTHROPIC_", "CLAUDE_CODE_OAUTH"))}
+    # 키 말고 다른 인증·제공자(Bedrock·Vertex 등)로 새지 않게 그런 변수는 넘기지 않는다
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("ANTHROPIC_", "CLAUDE_CODE_OAUTH", "CLAUDE_CODE_USE_"))}
     env["ANTHROPIC_API_KEY"] = key
     started = time.time()
     try:
@@ -197,8 +212,9 @@ def run_one(job: dict, key: str) -> dict:
     row = {"model": job["model"], "effort": job["effort"], "problem": job["problem"], "run": job["run"],
            "exit": code, "wall_s": round(time.time() - started, 1)}
     row.update(parse_stream(stdout.splitlines()))
-    if code is None:
+    if code is None:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
         row["subtype"] = "timeout"
+        row["duration_s"] = row["wall_s"]
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
     return row
 
@@ -229,27 +245,35 @@ def main() -> None:
             for m in args.models for e in args.efforts for p in args.problems for r in range(1, args.runs + 1)]
     key = api_key()
     rows = []
-    with cf.ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(run_one, j, key): j for j in jobs}
-        for fut in cf.as_completed(futures):
-            j = futures[fut]
-            try:
-                row = fut.result()
-            except Exception as e:  # 한 실행이 죽어도 나머지는 계속 잰다
-                row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
-                       "subtype": f"harness_error: {type(e).__name__}: {e}"}
-            rows.append(row)
-            print(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed",
-                                                       "first_pass_draw", "draws", "cost_usd", "duration_s",
-                                                       "subtype")}, ensure_ascii=False), flush=True)
     base.mkdir(parents=True, exist_ok=True)
-    fields = sorted({k for r in rows for k in r})
+    pool = cf.ThreadPoolExecutor(max_workers=args.workers)
+    # 결과는 실행이 끝날 때마다 한 줄씩 써서, 중간에 멈춰도 끝난 실행은 남는다
     with (base / "results.csv").open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fields)
+        w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
         w.writeheader()
-        w.writerows(rows)
+        futures = {pool.submit(run_one, j, key): j for j in jobs}
+        try:
+            for fut in cf.as_completed(futures):
+                j = futures[fut]
+                try:
+                    row = fut.result()
+                except Exception as e:  # 한 실행이 죽어도 나머지는 계속 잰다
+                    row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
+                           "subtype": f"harness_error: {type(e).__name__}: {e}"}
+                rows.append(row)
+                w.writerow(row)
+                f.flush()
+                print(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed",
+                                                           "first_pass_draw", "draws", "cost_usd", "duration_s",
+                                                           "subtype")}, ensure_ascii=False), flush=True)
+        except KeyboardInterrupt:  # 남은 실행은 새로 띄우지 않는다(돌던 claude는 같은 Ctrl-C로 함께 끝난다)
+            pool.shutdown(wait=False, cancel_futures=True)
+            sys.exit(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다")
+    pool.shutdown()
     total = sum(r.get("cost_usd") or 0 for r in rows)
-    print(f"끝: {len(rows)}건, 합계 ${total:.2f}, 결과 {base / 'results.csv'}", flush=True)
+    unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
+    note = f", 비용을 모르는 실행 {unknown_cost}건은 합계에 들지 않았다" if unknown_cost else ""
+    print(f"끝: {len(rows)}건, 합계 ${total:.2f}{note}, 결과 {base / 'results.csv'}", flush=True)
 
 
 if __name__ == "__main__":

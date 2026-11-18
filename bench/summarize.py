@@ -26,8 +26,11 @@ def first_pass(r) -> int | None:
 
 
 def avg(values, fmt: str) -> str:
+    """빈 값은 빼고 평균을 낸다. 뺀 것이 있으면 몇 번으로 낸 평균인지 붙인다."""
     vals = [v for v in values if v is not None]
-    return fmt.format(mean(vals)) if vals else "-"
+    if not vals:
+        return "-"
+    return fmt.format(mean(vals)) + (f"({len(vals)}번)" if len(vals) < len(values) else "")
 
 
 ap = argparse.ArgumentParser()
