@@ -42,9 +42,16 @@ for tag_dir in map(Path, sys.argv[1:]):
             new_rows.append(r)
             continue
         row = {k: r.get(k) for k in ("model", "effort", "problem", "run", "exit", "wall_s")} | {"tool": tool}
-        row.update(parse_stream(stream.read_text(encoding="utf-8").splitlines(), tool, spec))
-        # 끝의 결과가 없고 종료 코드도 없으면 시간 초과로 끊긴 실행이다(timeout을 적기 전의 옛 기록도 이것으로 알아본다)
-        finish_row(row, timed_out=r.get("subtype") == "timeout" or (row["subtype"] is None and not r.get("exit")))
+        try:
+            row.update(parse_stream(stream.read_text(encoding="utf-8").splitlines(), tool, spec))
+        except Exception as e:  # 한 실행을 다시 읽지 못해도 나머지는 계속한다(문제를 cysUML이 못 읽게 된 경우 등)
+            print(f"{tag_dir.name}: {r['model']} {r['effort']} {r['problem']} run{r['run']} 다시 읽지 못해 원래 줄을 둔다: "
+                  f"{type(e).__name__}: {e}")
+            new_rows.append(r)
+            continue
+        # 원래 판정이 비었고 끝의 결과도 종료 코드도 없으면 시간 초과로 끊긴 실행이다(timeout을 적기 전의 옛 기록)
+        old_timeout = not r.get("subtype") and row["subtype"] is None and not r.get("exit")
+        finish_row(row, timed_out=r.get("subtype") == "timeout" or old_timeout)
         new_rows.append(row)
         if str(row["passed"]) != r.get("passed") or str(row["first_pass_draw"] or "") != (r.get("first_pass_draw") or ""):
             print(f"{tag_dir.name}: {r['model']} {r['effort']} {r['problem']} run{r['run']} "

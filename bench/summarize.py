@@ -9,7 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean
 
-from run_bench import MAX_DRAWS, counts_as_pass
+from run_bench import MAX_DRAWS, NOT_MEASURED, counts_as_pass
 
 
 def num(v):
@@ -55,6 +55,13 @@ for path in args.paths:
                 rows.append(r)
 for tag, problem in sorted(set(drops) - used):
     print(f"- 알림: --drop {tag}:{problem}에 맞는 줄이 없었다(태그나 문제 이름을 확인한다)")
+# 모델을 잰 것이 아닌 실행(MCP 서버가 안 붙음, claude가 시작하지 못함, 하네스 오류)은 표에서 빼고 아래에 따로 적는다
+def measured(r) -> bool:
+    return not (r.get("subtype") or "").startswith(NOT_MEASURED)
+
+
+skipped = [r for r in rows if not measured(r)]
+rows = [r for r in rows if measured(r)]
 
 groups = defaultdict(list)
 for r in rows:
@@ -89,6 +96,8 @@ if no_cost:
     print(f"- 비용이 빈 실행 {no_cost}건은 비용 평균과 합계에서 뺐다(칸에 몇 번으로 낸 평균인지 붙였다)")
 if no_time:
     print(f"- 시간이 빈 실행 {no_time}건은 시간 평균에서 뺐다")
+for r in skipped:
+    print(f"- 모델을 잰 것이 아니라 표에서 뺐다: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}")
 for r in rows:
     if r.get("subtype") != "success":
         print(f"- 확인 필요: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}")

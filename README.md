@@ -424,7 +424,7 @@ that makes 609. Most diagrams ran three times per model and effort, so small dif
 - If passing on the first draw matters most, use Fable 5.2: it did so most often. At medium effort it cost about half
   as much and, on diagrams of 11–23 elements, still passed on the first draw more often than Opus 5.5 at high effort,
   which cost about the same. Above 30 elements, Opus 5.5 at medium effort matched Fable 5.2 at high effort (6 of 9 on
-  the first draw) for less than half the cost ($0.73 vs $2.41 a run). Fable 5.2's high-effort average ($2.41) includes
+  the first draw) for less than half the cost ($0.73 vs $2.41 a run). On those diagrams, Fable 5.2's high-effort average ($2.41) includes
   two runs that went over the cost limit, one of them the failed run above; without them it is $1.67, still more than
   twice the $0.73 of Opus 5.5 at medium effort.
 
@@ -602,7 +602,7 @@ Claude 모델 넷에 자리를 지운 그림 26개(7종, 요소 2\~36개)를 주
 - 첫 그림에 합격하는 게 가장 중요하면 Fable 5.2를 쓴다. 첫 그림 합격이 가장 많았다. effort를 medium으로 낮추면 비용이
   절반쯤이고, 요소 11\~23개 그림에서 비용이 비슷한 Opus 5.5 high보다 첫 그림 합격이 많았다. 요소 30개가 넘으면 Opus 5.5
   medium이 Fable 5.2 high와 같은 첫 그림 합격(9번 중 6번)을 절반이 안 되는 비용(실행 한 번 $0.73 대 $2.41)으로 냈다. Fable
-  5.2 high의 평균($2.41)에는 비용 상한을 넘긴 실행 둘이 들어 있다. 하나는 위의 불합격 실행이고, 둘을 빼도 $1.67로 Opus 5.5
+  5.2 high의 이 그림 평균($2.41)에는 비용 상한을 넘긴 실행 둘이 들어 있다. 하나는 위의 불합격 실행이고, 둘을 빼도 $1.67로 Opus 5.5
   medium($0.73)의 두 배가 넘는다.
 
 2026-11-18에 cysUML 0.2.1과 Claude Code로, Claude API 요금 기준으로 쟀다. 다른 클라이언트나 구독 요금제에서는 비용이 다를

@@ -60,15 +60,9 @@ for _f in sorted(Path(__file__).parent.glob("problems_*.json")):
     SETS[_f.stem.removeprefix("problems_")] = list(_set)
     WRITTEN.update(_set)
 
-KIND = {
-    "draw_class_diagram": "class",
-    "draw_package_diagram": "package",
-    "draw_component_diagram": "component",
-    "draw_deployment_diagram": "deployment",
-    "draw_use_case_diagram": "use case",
-    "draw_state_diagram": "state",
-    "draw_activity_diagram": "activity",
-}
+def diagram_kind(tool: str) -> str:
+    """도구가 그리는 그림 이름(draw_use_case_diagram → use case)."""
+    return tool.removeprefix("draw_").removesuffix("_diagram").replace("_", " ")
 
 
 def strip_layout(x):
@@ -92,7 +86,7 @@ def load_problem(pid: str) -> tuple[str, dict]:
 
 def prompt_for(pid: str, tool: str, spec: dict) -> str:
     return (
-        f"Draw this UML {KIND[tool]} diagram with the cysUML tool `{tool}`. Use file_name \"{pid}\".\n"
+        f"Draw this UML {diagram_kind(tool)} diagram with the cysUML tool `{tool}`. Use file_name \"{pid}\".\n"
         "The elements and relations below have no positions — you choose every position "
         "(left/top, and bend points or sizes if they help).\n"
         "After each draw, read the check result. If it does not pass, fix the layout and draw again with the same "
@@ -144,27 +138,18 @@ def verdict(line: str) -> str:
     return "other"
 
 
-TOOL_MODULE = {
-    "draw_class_diagram": "classdiagram",
-    "draw_package_diagram": "packagediagram",
-    "draw_component_diagram": "componentdiagram",
-    "draw_deployment_diagram": "deploymentdiagram",
-    "draw_use_case_diagram": "usecasediagram",
-    "draw_state_diagram": "statediagram",
-    "draw_activity_diagram": "activitydiagram",
-}
-
-
 def tool_spec(tool: str):
-    """cysUML이 그 도구에 쓰는 Spec. 기본값(요소 목록 칸·kind·navigable)을 손으로 옮겨 적지 않으려고 그대로 읽는다."""
-    return importlib.import_module(f"cysuml.{TOOL_MODULE[tool]}").SPEC
+    """cysUML이 그 도구에 쓰는 Spec(draw_use_case_diagram → cysuml.usecasediagram). 기본값(요소 목록 칸·kind·navigable)을
+    손으로 옮겨 적지 않으려고 그대로 읽는다."""
+    return importlib.import_module("cysuml." + tool.removeprefix("draw_").replace("_", "")).SPEC
 
 
 def _text_key(v):
-    """이름을 견줄 꼴로 바꾼다. 여러 줄 이름(줄마다 문자열인 목록)은 줄을 이어 붙이고, 공백은 지운다."""
+    """이름을 견줄 꼴로 바꾼다. 여러 줄 이름(줄마다 문자열인 목록)은 줄 사이를 띄어쓰기 하나로 이어 붙이고, 이어진 공백은
+    하나로 줄인다."""
     if isinstance(v, list) and all(isinstance(x, str) for x in v):
-        v = "".join(v)
-    return "".join(v.split()) if isinstance(v, str) else v
+        v = " ".join(v)
+    return " ".join(v.split()) if isinstance(v, str) else v
 
 
 def _digest(x) -> str:
@@ -290,13 +275,21 @@ def tool_from_prompt(prompt: str) -> str | None:
     return m.group(1) if m else None
 
 
+# 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함, 하네스 오류
+NOT_MEASURED = ("mcp_failed", "no_init", "harness_error")
+
+
+class Stopped(Exception):
+    """Ctrl-C로 멈출 때 띄우지 않았거나 끝낸 실행. CSV에 쓰지 않는다."""
+
+
 def finish_row(row: dict, timed_out: bool) -> dict:
     """parse_stream 뒤 실행 한 줄의 마무리(run_one과 rescore.py가 같이 쓴다)."""
     if timed_out:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
         row["subtype"] = "timeout"
         row["duration_s"] = row.get("wall_s")
-    elif row.get("mcp") != "connected":  # 그림 도구가 없던 실행은 모델의 불합격이 아니다
-        row["subtype"] = f"mcp_failed: {row.get('mcp')}"
+    elif not row.get("draws") and row.get("mcp") != "connected":  # 그림 도구 없이 끝난 실행은 모델의 불합격이 아니다
+        row["subtype"] = f"mcp_failed: {row['mcp']}" if row.get("mcp") else "no_init"
     return row
 
 
@@ -377,7 +370,7 @@ def run_dir_for(base: Path, model: str, effort: str, problem: str, run) -> Path:
 
 def run_one(job: dict, key: str) -> dict:
     if _STOP.is_set():  # 멈춘 뒤에는 폴더도 건드리지 않는다
-        raise RuntimeError("멈춘 뒤라 띄우지 않았다")
+        raise Stopped("멈춘 뒤라 띄우지 않았다")
     run_dir: Path = job["dir"]
     if run_dir.exists():  # 멈췄던 실행의 옛 파일(stderr.txt·그림)이 새 기록 옆에 남지 않게 비우고 시작한다
         shutil.rmtree(run_dir)
@@ -404,7 +397,8 @@ def run_one(job: dict, key: str) -> dict:
     started = time.time()
     with _RUNNING_LOCK:
         if _STOP.is_set():
-            raise RuntimeError("멈춘 뒤라 띄우지 않았다")
+            shutil.rmtree(run_dir, ignore_errors=True)
+            raise Stopped("멈춘 뒤라 띄우지 않았다")
         # 새 프로세스 그룹으로 띄워, 끝낼 때 claude가 띄운 MCP 서버(cysuml)까지 그룹째 끝낸다
         proc = subprocess.Popen(cmd, cwd=run_dir, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, encoding="utf-8", errors="replace", start_new_session=True)
@@ -429,7 +423,13 @@ def run_one(job: dict, key: str) -> dict:
            "exit": code, "wall_s": round(time.time() - started, 1)}
     row.update(parse_stream(stdout.splitlines(), tool, spec))
     finish_row(row, timed_out=code is None)
+    # 멈출 때 끝낸 실행. claude는 SIGTERM을 받으면 스스로 143으로 끝나고 SIGKILL이면 -9라, 0이 아닌 코드를 모두 본다
+    stopped = _STOP.is_set() and code is not None and code != 0
+    if stopped:
+        row["subtype"] = "stopped"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
+    if stopped:
+        raise Stopped("멈출 때 끝냈다")
     return row
 
 
@@ -452,6 +452,12 @@ def main() -> None:
     unknown = [p for p in args.problems if p not in PROBLEMS and p not in WRITTEN]
     if unknown:
         sys.exit(f"모르는 문제: {unknown} (있는 것: {list(PROBLEMS) + list(WRITTEN)})")
+    for p in args.problems:  # 합격한 그림을 문제와 견줄 수 없으면 돈을 쓴 실행이 하네스 오류로 끝나니 미리 읽어 본다
+        tool, spec = load_problem(p)
+        try:
+            _shape(spec, tool)
+        except InputError as e:
+            sys.exit(f"문제 {p}를 cysUML이 읽지 못한다: {e}")
 
     if not (ROOT / ".venv" / "bin" / "cysuml").exists():
         sys.exit(f"{ROOT / '.venv/bin/cysuml'}이 없다 — 레포에서 uv sync를 먼저 돌린다")
@@ -495,6 +501,7 @@ def main() -> None:
             finally:
                 writing["now"] = False
             if writing["stop"]:
+                writing["stop"] = False
                 raise KeyboardInterrupt
             return row
 
@@ -510,7 +517,6 @@ def main() -> None:
             pool.shutdown()
         except KeyboardInterrupt:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다(SIGINT가 파이썬에만 왔을 수 있다)
             signal.signal(signal.SIGINT, signal.SIG_IGN)  # 정리(길어야 10초) 중에 또 누른 Ctrl-C는 받지 않는다
-            finished = [fut for fut in futures if fut.done() and not fut.cancelled() and fut not in written]
             with _RUNNING_LOCK:
                 _STOP.set()
                 procs = list(_RUNNING)
@@ -523,8 +529,11 @@ def main() -> None:
             for p in procs:
                 if p.poll() is None:
                     stop_group(p, signal.SIGKILL)
-            for fut in finished:  # 멈추기 전에 이미 끝났는데 아직 쓰지 못한 실행만 남긴다(끊긴 실행은 쓰지 않는다)
-                record(fut)
+            cf.wait([fut for fut in futures if not fut.done()], timeout=10)  # 끝낸 실행의 스레드가 기록을 마치기를 기다린다
+            # 끝났는데 아직 쓰지 못한 실행만 남긴다(정리하는 동안 스스로 끝난 실행도 든다, 끊긴 실행은 쓰지 않는다)
+            for fut in futures:
+                if fut.done() and not fut.cancelled() and fut not in written and not isinstance(fut.exception(), Stopped):
+                    record(fut)
             sys.exit(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)")
     total = sum(r.get("cost_usd") or 0 for r in rows)
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
