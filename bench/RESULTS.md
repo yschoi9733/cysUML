@@ -34,7 +34,7 @@ readme 묶음은 문제마다 1번, 나머지 묶음은 문제마다 3번씩 돌
 - Haiku high `billing`: `component_icon`을 `component`로 바꿈
 - Sonnet medium `subscription-xl`: 관계 하나를 바꿈
 
-그 가운데 Opus low 1번은 다시 그려 두 번째 그림에 합격했고, 나머지 열하나는 불합격이 되었다.
+`changed` 차례가 난 11번 가운데 Opus low 1번은 다시 그려 두 번째 그림에 합격했고, 나머지 10번은 불합격이 되었다. 여기에 10번을 넘겨 합격한 Haiku low 1번을 더해, 다시 읽어 불합격이 된 실행은 열하나다.
 
 ### effort high, 묶음별
 

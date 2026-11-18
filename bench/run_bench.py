@@ -319,6 +319,7 @@ def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
 # 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함,
 # 서버 쪽 API 오류, 끝의 결과 없이 오류 코드로 끝남(크래시 등), 하네스 오류
 NOT_MEASURED = ("mcp_failed", "no_init", "api_error", "no_result", "harness_error")
+NATURAL_ENDS = ("success", "error_max_budget_usd", "error_max_turns")  # claude가 스스로 끝낸 결과 이벤트의 subtype
 # api_error_status가 없을 때만 보는 오류 글
 API_ERROR = re.compile(r"API Error: (?:401|403|404|429|5\d\d)|Connection error|Request timed out|overloaded", re.I)
 
@@ -356,8 +357,8 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
         # 서버 쪽 오류로 10번을 다 그리기 전에 끊긴 실행만 결과를 알 수 없어 뺀다. 합격했거나 10번을 다 그린 실행, 모델 탓인
         # 오류로 끝난 실행은 잰 그대로 둔다
         row["subtype"] = "api_error"
-    elif (row["subtype"] is None and meta.get("exit") not in (None, "", 0, "0") and not row["passed"]
-          and row["draws"] < MAX_DRAWS):  # 끝의 결과 없이 오류 코드로 끝났다(크래시, stderr로만 낸 오류)
+    elif row["ended"] is None and not row["passed"] and row["draws"] < MAX_DRAWS:
+        # 끝의 결과 없이 끝났다(크래시, stderr로만 낸 오류, 밖에서 온 시그널) — 종료 코드는 0일 수도 있다
         row["subtype"] = "no_result"
     return row
 
@@ -408,7 +409,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "turns": result.get("num_turns"),
         "duration_s": round(result["duration_ms"] / 1000, 1) if result.get("duration_ms") is not None else None,
         "subtype": result.get("subtype"),
-        "ended": bool(result),  # 끝의 결과 이벤트를 냈다
+        "ended": result.get("subtype"),  # 끝의 결과 이벤트의 subtype(이벤트가 없으면 None, build_row가 subtype을 바꿔도 남는다)
         "is_error": result.get("is_error"),
         "api_status": result.get("api_error_status"),
         "error": (str(result.get("result") or result.get("errors") or "")[:200] or None) if result.get("is_error") else None,
@@ -496,8 +497,9 @@ def run_one(job: dict, key: str) -> dict:
     meta = {"exit": code, "wall_s": round(time.time() - started, 1), "timed_out": code is None}
     (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")  # 해석이 실패해도 rescore.py가 다시 읽게
     row = build_row(job | meta, stdout.splitlines(), tool, spec, meta["timed_out"])
-    # 멈추며 시그널을 보낸 실행이 끝의 결과도, 합격이나 10번 그림도 내기 전이면 끊긴 것이다(종료 코드는 143·0·1 모두 나온다)
-    stopped = (proc.pid in _SIGNALED and not row["ended"] and not row["timed_out"] and not row["passed"]
+    # 멈추며 시그널을 보낸 실행이 스스로 끝(NATURAL_ENDS)도, 합격이나 10번 그림도 내기 전이면 끊긴 것이다. 시그널을 받고
+    # 결과 이벤트를 내며 끝나도 그 subtype은 스스로 끝난 것이 아니다
+    stopped = (proc.pid in _SIGNALED and row["ended"] not in NATURAL_ENDS and not row["timed_out"] and not row["passed"]
                and row["draws"] < MAX_DRAWS)
     if stopped:
         row["subtype"] = "stopped"
@@ -538,8 +540,8 @@ def main() -> None:
     if not (ROOT / ".venv" / "bin" / "cysuml").exists():
         sys.exit(f"{ROOT / '.venv/bin/cysuml'}이 없다 — 레포에서 uv sync를 먼저 돌린다")
     base = args.out / args.tag
-    if (base / "results.csv").exists():
-        sys.exit(f"이미 결과가 있는 태그다: {base} — --tag로 다른 이름을 준다")
+    if base.exists() and any(base.iterdir()):  # 남은 실행 폴더에 새 기록이 섞이지 않게
+        sys.exit(f"이미 기록이 있는 태그다: {base} — --tag로 다른 이름을 준다")
     jobs = [{"model": m, "effort": e, "problem": p, "run": r, "budget": args.budget, "timeout": args.timeout,
              "dir": run_dir_for(base, m, e, p, r)}
             for m in args.models for e in args.efforts for p in args.problems for r in range(1, args.runs + 1)]
@@ -558,7 +560,8 @@ def main() -> None:
         def on_sigint(signum, frame):  # 한 줄을 쓰는 도중의 Ctrl-C는 다 쓴 뒤로 미룬다(줄이 잘리거나 두 번 쓰이지 않게)
             if writing["now"]:
                 writing["stop"] = True
-            else:
+            else:  # 정리에 들어가는 순간부터 또 누른 Ctrl-C는 받지 않는다(정리를 건너뛰지 않게)
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
                 raise KeyboardInterrupt
 
         def record(fut) -> dict:
@@ -581,6 +584,7 @@ def main() -> None:
                 writing["now"] = False
             if writing["stop"]:
                 writing["stop"] = False
+                signal.signal(signal.SIGINT, signal.SIG_IGN)
                 raise KeyboardInterrupt
             return row
 
