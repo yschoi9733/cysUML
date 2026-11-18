@@ -33,9 +33,9 @@ EXAMPLES = ROOT / "docs" / "images"
 DEFAULT_OUT = Path.home() / "Documents" / "cysUML-bench-runs"
 LAYOUT_KEYS = {"left", "top", "via", "width", "height", "name_side"}
 MAX_DRAWS = 10
-DRAW_PREFIX = "mcp__cysuml__draw_"  # 그린 차례로 세는 도구 호출 이름의 앞부분
+DRAW_PREFIX = "mcp__cysuml__draw_"
 FIELDS = ["model", "effort", "problem", "run", "tool", "passed", "first_pass_draw", "draws", "verdicts", "changed",
-          "input_errors", "mcp",
+          "input_errors", "mcp", "error",
           "cost_usd", "duration_s", "wall_s", "turns", "subtype", "is_error", "exit",
           "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens"]
 
@@ -196,13 +196,13 @@ def _diagram(data: dict, tool: str) -> B.Diagram:
     return B.parse(s, {s.list_field: items, "relations": rels})
 
 
-def _shape(d: B.Diagram, tool: str, known: dict[str, str]) -> tuple[list, list]:
+def _shape(d: B.Diagram, known: dict[str, str]) -> tuple[list, list]:
     """cysUML이 읽은 그림을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 자리(left·top·크기·name_side·via)와 열쇠(id)는 보지 않는다.
     이름이 하나뿐인 요소는 이름으로 가리키고, 이름 없는 점·마름모와 이름이 겹치는 요소는 이웃(들고 나는 관계, 담긴 곳, 담은
     요소)으로 더 갈라지지 않을 때까지 다듬은 꼬리표로 가리킨다 — id를 어떻게 바꿔 써도 같은 그림이면 같은 꼴, 흐름을 바꿔
     이으면 다른 꼴이 된다. 양 끝 모양이 고정되지 않은 관계(연관)는 양 끝을 바꾸고 다중도·navigable도 맞바꿔 적어도 같은 그림이라
     두 방향 중 한쪽으로 맞춘다."""
-    s = tool_spec(tool)
+    s = d.spec
     boxes = d.boxes
     index = {e.key: i for i, e in enumerate(boxes)}
     names = [_name_key(e.name, known) if e.name else None for e in boxes]
@@ -248,7 +248,7 @@ def faithful(drawn: dict, spec: dict, tool: str, problem: tuple | None = None) -
     입력은 문제와 같다고 볼 수 없다. problem은 미리 만든 problem_shape(spec, tool)이다."""
     known, want = problem or problem_shape(spec, tool)
     try:
-        return _shape(_diagram(drawn, tool), tool, known) == want
+        return _shape(_diagram(drawn, tool), known) == want
     except InputError:
         return False
 
@@ -257,7 +257,7 @@ def problem_shape(spec: dict, tool: str) -> tuple[dict[str, str], tuple[list, li
     """문제의 이름 열쇠와 견줄 꼴. cysUML이 못 읽는 문제는 InputError."""
     d = _diagram(spec, tool)
     known = _known_names(d)
-    return known, _shape(d, tool, known)
+    return known, _shape(d, known)
 
 
 def read_events(lines) -> list[dict]:
@@ -322,6 +322,7 @@ def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
 # 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함,
 # API 오류(인증·429·529 등), 하네스 오류
 NOT_MEASURED = ("mcp_failed", "no_init", "api_error", "harness_error")
+API_ERROR = re.compile(r"API Error: (?:401|403|429|5\d\d)|Connection error|Request timed out|overloaded", re.I)
 
 
 class Stopped(Exception):
@@ -339,9 +340,9 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
         row["subtype"] = (f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") + (" (timeout)" if timed_out else "")
     elif timed_out:
         row["subtype"] = "timeout"
-    elif row["is_error"] and row["subtype"] == "success" and not row["passed"] and row["draws"] < MAX_DRAWS:
-        # claude -p는 API 오류(인증·429·529)를 이렇게 낸다(상한 초과는 다른 subtype). 10번을 다 그리기 전에 끊긴 실행만
-        # 결과를 알 수 없어 뺀다 — 합격했거나 10번을 다 그린 실행은 잰 그대로 둔다
+    elif row["is_error"] and API_ERROR.search(row["error"] or "") and not row["passed"] and row["draws"] < MAX_DRAWS:
+        # 서버 쪽 오류로 10번을 다 그리기 전에 끊긴 실행만 결과를 알 수 없어 뺀다. 합격했거나 10번을 다 그린 실행, 모델 탓인
+        # 오류(글이 너무 길어짐 등)로 끝난 실행은 잰 그대로 둔다
         row["subtype"] = "api_error"
     return row
 
@@ -393,6 +394,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "duration_s": round(result["duration_ms"] / 1000, 1) if result.get("duration_ms") is not None else None,
         "subtype": result.get("subtype"),
         "is_error": result.get("is_error"),
+        "error": (str(result.get("result") or result.get("errors") or "")[:200] or None) if result.get("is_error") else None,
         "input_tokens": usage.get("input_tokens"),
         "cache_read_tokens": usage.get("cache_read_input_tokens"),
         "cache_write_tokens": usage.get("cache_creation_input_tokens"),
@@ -400,12 +402,10 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
     }
 
 
-_RUNNING: set[subprocess.Popen] = set()  # 멈출 때 직접 끝낼 claude 프로세스
+_RUNNING: set[subprocess.Popen] = set()
 _RUNNING_LOCK = threading.Lock()
 _STOP = threading.Event()  # 멈춘 뒤에는 새 claude를 띄우지 않는다(_RUNNING_LOCK 안에서 보고 세운다)
-_SIGNALED: set[int] = set()  # 멈추며 끝낸 claude 프로세스의 pid(_RUNNING_LOCK 안에서 넣는다)
-# 시그널로 끝난 종료 코드. claude는 SIGTERM을 받으면 스스로 143으로 끝난다
-STOP_CODES = {-signal.SIGTERM, -signal.SIGKILL, 128 + signal.SIGTERM, 128 + signal.SIGKILL}
+_SIGNALED: set[int] = set()  # _RUNNING_LOCK 안에서 넣는다
 # claude에 넘기는 환경 변수. 셸에 있는 Claude Code 설정(effort·생각 토큰·캐시·제공자 전환 등)이 측정에 섞이지 않게
 # 이것만 넘긴다(프록시·인증서 변수는 API에 닿는 데 필요할 수 있어 넘긴다)
 KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG",
@@ -414,6 +414,8 @@ KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG"
 
 
 def stop_group(proc: subprocess.Popen, sig: int) -> None:
+    if proc.returncode is not None:  # 이미 거둔 프로세스의 pid(=그룹 번호)는 다른 프로세스가 받았을 수 있다
+        return
     try:
         os.killpg(proc.pid, sig)
     except (ProcessLookupError, PermissionError):  # macOS는 다 끝났지만 아직 거두지 않은 그룹에 EPERM을 낸다
@@ -473,14 +475,14 @@ def run_one(job: dict, key: str) -> dict:
     finally:
         with _RUNNING_LOCK:
             _RUNNING.discard(proc)
-    stop_group(proc, signal.SIGTERM)  # claude가 거두지 못한 MCP 서버가 남지 않게 그룹을 한 번 더 정리한다
     (run_dir / "stream.jsonl").write_text(stdout, encoding="utf-8")
     if stderr.strip():
         (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
     row = build_row(job | {"exit": code, "wall_s": round(time.time() - started, 1)}, stdout.splitlines(), tool, spec,
                     timed_out=code is None)
-    # 멈추며 시그널을 보낸 실행이 그 시그널로 끝났다(그 사이 스스로 끝났거나 죽은 실행은 그대로 남긴다)
-    stopped = proc.pid in _SIGNALED and code in STOP_CODES
+    # 멈추며 시그널을 보낸 실행이 결과(합격이나 10번을 다 그림)를 내기 전이면 끊긴 것이다. 시그널을 받은 claude는 143이나
+    # 0·1로 끝날 수 있어 종료 코드로는 가르지 않는다
+    stopped = proc.pid in _SIGNALED and not row["passed"] and row["draws"] < MAX_DRAWS
     if stopped:
         row["subtype"] = "stopped"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -554,6 +556,9 @@ def main() -> None:
                 w.writerow(row)
                 f.flush()
                 written.add(fut)
+                print(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed",
+                                                           "first_pass_draw", "draws", "cost_usd", "duration_s",
+                                                           "subtype")}, ensure_ascii=False), flush=True)
             finally:
                 writing["now"] = False
             if writing["stop"]:
@@ -566,10 +571,7 @@ def main() -> None:
             for j in jobs:
                 futures[pool.submit(run_one, j, key)] = j
             for fut in cf.as_completed(futures):
-                row = record(fut)
-                print(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed",
-                                                           "first_pass_draw", "draws", "cost_usd", "duration_s",
-                                                           "subtype")}, ensure_ascii=False), flush=True)
+                record(fut)
             pool.shutdown()
         except KeyboardInterrupt:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다(SIGINT가 파이썬에만 왔을 수 있다)
             signal.signal(signal.SIGINT, signal.SIG_IGN)  # 정리(길어야 10초) 중에 또 누른 Ctrl-C는 받지 않는다
