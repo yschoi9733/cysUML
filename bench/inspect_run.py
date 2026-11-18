@@ -1,8 +1,9 @@
 """실행 하나(stream.jsonl)의 인증 출처·모델별 토큰·그린 차례마다의 검사 결과 앞 세 줄을 보여 준다.
 
-이벤트를 읽고 그린 차례를 세는 법은 run_bench.py의 것을 그대로 쓴다. 그 문제의 도구는 같은 폴더의 prompt.txt에서 읽는다
-(없으면 cysUML 그리기 도구 호출을 모두 센다).
+이벤트를 읽고 그린 차례를 세는 법은 run_bench.py의 것을 그대로 쓴다. 그 문제의 도구는 같은 폴더의 row.json에서 읽고,
+그것이 없는 옛 기록은 prompt.txt에서 읽는다(둘 다 없으면 cysUML 그리기 도구 호출을 모두 센다).
 """
+import json
 import re
 import sys
 from pathlib import Path
@@ -11,9 +12,11 @@ from run_bench import draw_calls, draw_results, read_events, result_text
 
 stream = Path(sys.argv[1])
 events = read_events(stream.read_text(encoding="utf-8").splitlines())
-prompt = stream.with_name("prompt.txt")
-m = re.search(r"cysUML tool `(draw_\w+)`", prompt.read_text(encoding="utf-8")) if prompt.exists() else None
-tool = m.group(1) if m else None
+row = stream.with_name("row.json")
+tool = json.loads(row.read_text(encoding="utf-8")).get("tool") if row.exists() else None
+if tool is None and stream.with_name("prompt.txt").exists():
+    m = re.search(r"cysUML tool `(draw_\w+)`", stream.with_name("prompt.txt").read_text(encoding="utf-8"))
+    tool = m.group(1) if m else None
 
 for e in events:
     if e.get("type") == "system" and e.get("subtype") == "init":

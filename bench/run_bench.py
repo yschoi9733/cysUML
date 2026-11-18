@@ -26,7 +26,8 @@ DEFAULT_OUT = Path.home() / "Documents" / "cysUML-bench-runs"
 LAYOUT_KEYS = {"left", "top", "via", "width", "height", "name_side"}
 MAX_DRAWS = 10
 DRAW_PREFIX = "mcp__cysuml__draw_"  # 그린 차례로 세는 도구 호출(inspect_run.py도 이것을 쓴다)
-FIELDS = ["model", "effort", "problem", "run", "passed", "first_pass_draw", "draws", "verdicts", "input_errors",
+FIELDS = ["model", "effort", "problem", "run", "tool", "passed", "first_pass_draw", "draws", "verdicts", "changed",
+          "input_errors",
           "cost_usd", "duration_s", "wall_s", "turns", "subtype", "is_error", "exit",
           "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens"]
 
@@ -132,6 +133,36 @@ def verdict(line: str) -> str:
     return "other"
 
 
+ELEMENT_FIELDS = ("attributes", "operations", "literals", "actions", "stereotype")
+RELATION_FIELDS = ("name", "stereotype", "from_multiplicity", "to_multiplicity")
+DEFAULT_KIND = {"draw_class_diagram": "class", "draw_state_diagram": "transition", "draw_activity_diagram": "flow"}
+
+
+def _shape(spec: dict, tool: str) -> tuple[list, list]:
+    """그림 입력에서 자리 칸을 빼고, id·이름 별칭을 한 이름으로 풀어 견줄 꼴(요소 목록, 관계 목록)을 만든다."""
+    items = spec.get("classes") or spec.get("elements") or []
+    alias = {}
+    for e in items:
+        canon = e.get("name") or e.get("id")
+        for k in (e.get("id"), e.get("name")):
+            if k:
+                alias[k] = canon
+    elem_kind = "class" if tool in ("draw_class_diagram",) else None
+    elements = sorted(json.dumps([e.get("kind", elem_kind), alias.get(e.get("name") or e.get("id")),
+                                  alias.get(e.get("in"), e.get("in"))] + [e.get(f) for f in ELEMENT_FIELDS],
+                                 ensure_ascii=False) for e in items)
+    rel_kind = DEFAULT_KIND.get(tool) if tool != "draw_class_diagram" else None
+    relations = sorted(json.dumps([r.get("kind", rel_kind), alias.get(r.get("from"), r.get("from")),
+                                   alias.get(r.get("to"), r.get("to"))] + [r.get(f) for f in RELATION_FIELDS],
+                                  ensure_ascii=False) for r in spec.get("relations") or [])
+    return elements, relations
+
+
+def faithful(drawn: dict, spec: dict, tool: str) -> bool:
+    """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸은 보지 않는다)."""
+    return _shape(drawn, tool) == _shape(spec, tool)
+
+
 def read_events(lines) -> list[dict]:
     """stream-json 출력의 줄들을 이벤트로 읽는다. JSON이 아닌 줄은 건너뛴다."""
     events = []
@@ -170,21 +201,46 @@ def draw_results(events: list[dict], ids: list[str]) -> dict[str, dict]:
     return found
 
 
-def parse_stream(lines, tool: str | None = None) -> dict:
+def draw_inputs(events: list[dict], ids: list[str]) -> dict[str, dict]:
+    """tool_use id마다 모델이 보낸 그림 입력을 낸다."""
+    wanted, found = set(ids), {}
+    for ev in events:
+        if ev.get("type") != "assistant":
+            continue
+        for b in (ev.get("message") or {}).get("content") or []:
+            if b.get("type") == "tool_use" and b.get("id") in wanted:
+                found[b["id"]] = b.get("input") or {}
+    return found
+
+
+def counts_as_pass(first_pass: int | None) -> bool:
+    """지시한 최대 횟수를 넘겨 합격한 것은 불합격으로 친다(summarize.py도 이것으로 가른다)."""
+    return first_pass is not None and first_pass <= MAX_DRAWS
+
+
+def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> dict:
+    """spec(문제)을 주면, 검사에 합격했어도 문제를 바꿔 그린 차례(요소·관계를 빼거나 더하거나 바꿈)는 changed로 적고
+    합격으로 치지 않는다."""
     events = read_events(lines)
     ids = draw_calls(events, tool)
     results = draw_results(events, ids)
+    inputs = draw_inputs(events, ids) if spec is not None else {}
     result = next((e for e in reversed(events) if e.get("type") == "result"), {})
-    seq = [verdict(first_line(results[i].get("content"))) if i in results else "missing" for i in ids]
+    seq = []
+    for i in ids:
+        v = verdict(first_line(results[i].get("content"))) if i in results else "missing"
+        if v == "pass" and spec is not None and not faithful(inputs.get(i, {}), spec, tool):
+            v = "changed"
+        seq.append(v)
     first_pass = next((n for n, v in enumerate(seq, 1) if v == "pass"), None)
     usage = result.get("usage") or {}
     return {
         "draws": len(seq),
         "first_pass_draw": first_pass,
-        # 지시한 최대 횟수를 넘겨 합격한 것은 불합격으로 친다(처음 합격한 차례는 그대로 적어 summarize.py가 알린다)
-        "passed": first_pass is not None and first_pass <= MAX_DRAWS,
+        "passed": counts_as_pass(first_pass),
         "verdicts": " ".join(seq),
         "input_errors": seq.count("input_error"),
+        "changed": seq.count("changed"),
         "cost_usd": result.get("total_cost_usd"),
         "turns": result.get("num_turns"),
         "duration_s": round(result["duration_ms"] / 1000, 1) if result.get("duration_ms") is not None else None,
@@ -199,8 +255,12 @@ def parse_stream(lines, tool: str | None = None) -> dict:
 
 _RUNNING: set[subprocess.Popen] = set()  # 멈출 때 직접 끝낼 claude 프로세스
 _RUNNING_LOCK = threading.Lock()
-# claude에 넘기는 환경 변수. 셸에 있는 Claude Code 설정(effort·생각 토큰·캐시·제공자 전환 등)이 측정에 섞이지 않게 이것만 넘긴다
-KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG"}
+_STOP = threading.Event()  # 멈춘 뒤에는 새 claude를 띄우지 않는다(_RUNNING_LOCK 안에서 보고 세운다)
+# claude에 넘기는 환경 변수. 셸에 있는 Claude Code 설정(effort·생각 토큰·캐시·제공자 전환 등)이 측정에 섞이지 않게
+# 이것만 넘긴다(프록시·인증서 변수는 API에 닿는 데 필요할 수 있어 넘긴다)
+KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG",
+            "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy",
+            "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR"}
 
 
 def run_one(job: dict, key: str) -> dict:
@@ -214,6 +274,7 @@ def run_one(job: dict, key: str) -> dict:
     mcp = {"mcpServers": {"cysuml": {"command": str(ROOT / ".venv" / "bin" / "cysuml")}}}
     cmd = [
         "claude", "-p", "--bare",
+        "--setting-sources", "",  # 사용자·프로젝트 설정 파일(env·model·permissions)도 측정에 섞이지 않게 읽지 않는다
         "--model", job["model"], "--effort", job["effort"],
         "--tools", "",
         "--strict-mcp-config", "--mcp-config", json.dumps(mcp),
@@ -227,9 +288,11 @@ def run_one(job: dict, key: str) -> dict:
     env = {k: v for k, v in os.environ.items() if k in KEEP_ENV or k.startswith("LC_")}
     env["ANTHROPIC_API_KEY"] = key
     started = time.time()
-    proc = subprocess.Popen(cmd, cwd=run_dir, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, encoding="utf-8", errors="replace")
     with _RUNNING_LOCK:
+        if _STOP.is_set():
+            raise RuntimeError("멈춘 뒤라 띄우지 않았다")
+        proc = subprocess.Popen(cmd, cwd=run_dir, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, encoding="utf-8", errors="replace")
         _RUNNING.add(proc)
     try:
         stdout, stderr = proc.communicate(timeout=job["timeout"])
@@ -244,9 +307,9 @@ def run_one(job: dict, key: str) -> dict:
     (run_dir / "stream.jsonl").write_text(stdout, encoding="utf-8")
     if stderr.strip():
         (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
-    row = {"model": job["model"], "effort": job["effort"], "problem": job["problem"], "run": job["run"],
+    row = {"model": job["model"], "effort": job["effort"], "problem": job["problem"], "run": job["run"], "tool": tool,
            "exit": code, "wall_s": round(time.time() - started, 1)}
-    row.update(parse_stream(stdout.splitlines(), tool))
+    row.update(parse_stream(stdout.splitlines(), tool, spec))
     if code is None:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
         row["subtype"] = "timeout"
         row["duration_s"] = row["wall_s"]
@@ -268,6 +331,8 @@ def main() -> None:
     ap.add_argument("--tag", default=dt.datetime.now().strftime("%m%d-%H%M%S"))
     args = ap.parse_args()
     args.problems = list(dict.fromkeys(p for name in args.problems for p in SETS.get(name, [name])))
+    args.models = list(dict.fromkeys(args.models))  # 겹치면 같은 실행 폴더를 두 실행이 함께 쓴다
+    args.efforts = list(dict.fromkeys(args.efforts))
     unknown = [p for p in args.problems if p not in PROBLEMS and p not in WRITTEN]
     if unknown:
         sys.exit(f"모르는 문제: {unknown} (있는 것: {list(PROBLEMS) + list(WRITTEN)})")
@@ -287,25 +352,36 @@ def main() -> None:
         w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
         w.writeheader()
         futures = {pool.submit(run_one, j, key): j for j in jobs}
+        written = set()
+
+        def record(fut) -> dict:
+            j = futures[fut]
+            try:
+                row = fut.result()
+            except Exception as e:  # 한 실행이 죽어도 나머지는 계속 잰다
+                row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
+                       "subtype": f"harness_error: {type(e).__name__}: {e}"}
+            rows.append(row)
+            w.writerow(row)
+            f.flush()
+            written.add(fut)
+            return row
+
         try:
             for fut in cf.as_completed(futures):
-                j = futures[fut]
-                try:
-                    row = fut.result()
-                except Exception as e:  # 한 실행이 죽어도 나머지는 계속 잰다
-                    row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
-                           "subtype": f"harness_error: {type(e).__name__}: {e}"}
-                rows.append(row)
-                w.writerow(row)
-                f.flush()
+                row = record(fut)
                 print(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed",
                                                            "first_pass_draw", "draws", "cost_usd", "duration_s",
                                                            "subtype")}, ensure_ascii=False), flush=True)
         except KeyboardInterrupt:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다(SIGINT가 파이썬에만 왔을 수 있다)
-            pool.shutdown(wait=False, cancel_futures=True)
             with _RUNNING_LOCK:
+                _STOP.set()
                 for p in _RUNNING:
                     p.terminate()
+            pool.shutdown(wait=False, cancel_futures=True)
+            for fut in futures:  # 멈추기 직전에 끝났는데 아직 쓰지 못한 실행도 남긴다
+                if fut.done() and not fut.cancelled() and fut not in written:
+                    record(fut)
             sys.exit(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)")
     pool.shutdown()
     total = sum(r.get("cost_usd") or 0 for r in rows)

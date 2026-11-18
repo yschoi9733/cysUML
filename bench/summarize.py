@@ -9,7 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean
 
-from run_bench import MAX_DRAWS
+from run_bench import MAX_DRAWS, counts_as_pass
 
 
 def num(v):
@@ -20,9 +20,9 @@ def num(v):
 
 
 def first_pass(r) -> int | None:
-    """처음 합격한 그림 차례. 지시한 최대 횟수를 넘겨 합격한 것은 불합격으로 친다(그렇게 고치기 전에 쓴 결과도 같게)."""
+    """처음 합격한 그림 차례. 합격으로 치는 규칙은 run_bench.counts_as_pass 하나를 쓴다."""
     n = num(r.get("first_pass_draw"))
-    return int(n) if n is not None and n <= MAX_DRAWS else None
+    return int(n) if n is not None and counts_as_pass(int(n)) else None
 
 
 def avg(values, fmt: str) -> str:
@@ -44,10 +44,17 @@ for d in args.drop:
         ap.error(f"--drop은 태그:문제 꼴이다: {d}")
     drops.append((tag, problem))
 
-rows = []
+rows, used = [], set()
 for path in args.paths:
+    tag = path.resolve().parent.name
     with path.open(encoding="utf-8") as f:
-        rows += [r for r in csv.DictReader(f) if (path.parent.name, r["problem"]) not in drops]
+        for r in csv.DictReader(f):
+            if (tag, r["problem"]) in drops:
+                used.add((tag, r["problem"]))
+            else:
+                rows.append(r)
+for tag, problem in sorted(set(drops) - used):
+    print(f"- 알림: --drop {tag}:{problem}에 맞는 줄이 없었다(태그나 문제 이름을 확인한다)")
 
 groups = defaultdict(list)
 for r in rows:
