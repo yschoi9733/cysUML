@@ -139,6 +139,8 @@ def parse_stream(lines: list[str]) -> dict:
             result = ev
     seq = [verdicts.get(i, "missing") for i in draw_ids]
     first_pass = next((n for n, v in enumerate(seq, 1) if v == "pass"), None)
+    if first_pass is not None and first_pass > MAX_DRAWS:  # 지시한 최대 횟수를 넘겨 합격한 것은 불합격으로 친다
+        first_pass = None
     usage = result.get("usage") or {}
     return {
         "draws": len(seq),
@@ -148,7 +150,7 @@ def parse_stream(lines: list[str]) -> dict:
         "input_errors": seq.count("input_error"),
         "cost_usd": result.get("total_cost_usd"),
         "turns": result.get("num_turns"),
-        "duration_s": round((result.get("duration_ms") or 0) / 1000, 1),
+        "duration_s": round(result["duration_ms"] / 1000, 1) if result.get("duration_ms") is not None else None,
         "subtype": result.get("subtype"),
         "is_error": result.get("is_error"),
         "input_tokens": usage.get("input_tokens"),
@@ -158,11 +160,16 @@ def parse_stream(lines: list[str]) -> dict:
     }
 
 
+def _text(out) -> str:
+    return out.decode("utf-8", "replace") if isinstance(out, bytes) else (out or "")
+
+
 def run_one(job: dict, key: str) -> dict:
     run_dir: Path = job["dir"]
     run_dir.mkdir(parents=True, exist_ok=True)
     tool, spec = load_problem(job["problem"])
-    (run_dir / "prompt.txt").write_text(prompt_for(job["problem"], tool, spec), encoding="utf-8")
+    prompt = prompt_for(job["problem"], tool, spec)
+    (run_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
     mcp = {"mcpServers": {"cysuml": {"command": str(ROOT / ".venv" / "bin" / "cysuml")}}}
     cmd = [
         "claude", "-p", "--bare",
@@ -174,18 +181,24 @@ def run_one(job: dict, key: str) -> dict:
         "--max-turns", str(MAX_DRAWS + 4),
         "--max-budget-usd", str(job["budget"]),
         "--no-session-persistence",
-        prompt_for(job["problem"], tool, spec),
+        prompt,
     ]
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ANTHROPIC_", "CLAUDE_CODE_OAUTH"))}
     env["ANTHROPIC_API_KEY"] = key
     started = time.time()
-    proc = subprocess.run(cmd, cwd=run_dir, env=env, capture_output=True, text=True, timeout=job["timeout"])
-    (run_dir / "stream.jsonl").write_text(proc.stdout, encoding="utf-8")
-    if proc.stderr.strip():
-        (run_dir / "stderr.txt").write_text(proc.stderr, encoding="utf-8")
+    try:
+        proc = subprocess.run(cmd, cwd=run_dir, env=env, capture_output=True, text=True, timeout=job["timeout"])
+        stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
+    except subprocess.TimeoutExpired as e:  # 시간 초과여도 그때까지의 기록은 남긴다(비용은 끝의 결과가 없어 비운다)
+        stdout, stderr, code = _text(e.stdout), _text(e.stderr), None
+    (run_dir / "stream.jsonl").write_text(stdout, encoding="utf-8")
+    if stderr.strip():
+        (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
     row = {"model": job["model"], "effort": job["effort"], "problem": job["problem"], "run": job["run"],
-           "exit": proc.returncode, "wall_s": round(time.time() - started, 1)}
-    row.update(parse_stream(proc.stdout.splitlines()))
+           "exit": code, "wall_s": round(time.time() - started, 1)}
+    row.update(parse_stream(stdout.splitlines()))
+    if code is None:
+        row["subtype"] = "timeout"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
     return row
 
@@ -201,14 +214,16 @@ def main() -> None:
                     help="실행 한 번의 비용 상한(달러). bench/RESULTS.md의 표는 readme·hard $3, xl $5, xxl $4로 쟀다")
     ap.add_argument("--timeout", type=int, default=1800)
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    ap.add_argument("--tag", default=dt.datetime.now().strftime("%m%d-%H%M"))
+    ap.add_argument("--tag", default=dt.datetime.now().strftime("%m%d-%H%M%S"))
     args = ap.parse_args()
-    args.problems = [p for name in args.problems for p in SETS.get(name, [name])]
+    args.problems = list(dict.fromkeys(p for name in args.problems for p in SETS.get(name, [name])))
     unknown = [p for p in args.problems if p not in PROBLEMS and p not in WRITTEN]
     if unknown:
         sys.exit(f"모르는 문제: {unknown} (있는 것: {list(PROBLEMS) + list(WRITTEN)})")
 
     base = args.out / args.tag
+    if (base / "results.csv").exists():
+        sys.exit(f"이미 결과가 있는 태그다: {base} — --tag로 다른 이름을 준다")
     jobs = [{"model": m, "effort": e, "problem": p, "run": r, "budget": args.budget, "timeout": args.timeout,
              "dir": base / f"{m}_{e}" / p / f"run{r}"}
             for m in args.models for e in args.efforts for p in args.problems for r in range(1, args.runs + 1)]

@@ -1,17 +1,23 @@
-"""실행 하나(stream.jsonl)의 인증 출처·모델별 토큰·그린 차례마다의 검사 결과 앞 세 줄을 보여 준다."""
+"""실행 하나(stream.jsonl)의 인증 출처·모델별 토큰·그린 차례마다의 검사 결과 앞 세 줄을 보여 준다.
+
+그린 차례는 run_bench.py의 parse_stream과 같게 cysUML 그리기 도구(mcp__cysuml__draw_*) 호출만 센다.
+"""
 import json
 import sys
 
 draws = {}
 for line in open(sys.argv[1], encoding="utf-8"):
-    e = json.loads(line)
+    try:
+        e = json.loads(line)
+    except json.JSONDecodeError:
+        continue
     msg = e.get("message") or {}
     if e.get("type") == "system" and e.get("subtype") == "init":
         print("init:", {k: e.get(k) for k in ("apiKeySource", "model", "permissionMode")},
               "mcp:", e.get("mcp_servers"), "tools:", e.get("tools"))
     elif e.get("type") == "assistant":
         for b in msg.get("content") or []:
-            if b.get("type") == "tool_use":
+            if b.get("type") == "tool_use" and str(b.get("name", "")).startswith("mcp__cysuml__draw_"):
                 draws[b["id"]] = len(draws) + 1
     elif e.get("type") == "user":
         for b in msg.get("content") or []:
