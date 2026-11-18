@@ -14,6 +14,7 @@ import datetime as dt
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -133,29 +134,43 @@ def verdict(line: str) -> str:
     return "other"
 
 
-ELEMENT_FIELDS = ("attributes", "operations", "literals", "actions", "stereotype")
-RELATION_FIELDS = ("name", "stereotype", "from_multiplicity", "to_multiplicity")
-DEFAULT_KIND = {"draw_class_diagram": "class", "draw_state_diagram": "transition", "draw_activity_diagram": "flow"}
+ELEMENT_KIND = {"draw_class_diagram": "class"}  # 이 도구는 요소 kind를 빼면 이 값이다
+RELATION_KIND = {"draw_state_diagram": "transition", "draw_activity_diagram": "flow"}  # 관계 kind를 빼면 이 값이다
+# 연관·집합·합성의 navigable 기본값(cysUML Spec.navigable). 기본값과 같은 navigable은 없는 것으로 본다 — 다른 값은
+# 화살촉을 더하거나 없애 그림을 바꾼 것이다
+NAVIGABLE_DEFAULT = {"draw_deployment_diagram": "none"}
+
+
+def _text_key(v):
+    """이름을 견줄 꼴로 바꾼다. 여러 줄 이름(줄마다 문자열인 목록)은 줄을 이어 붙이고, 공백은 지운다."""
+    if isinstance(v, list) and all(isinstance(x, str) for x in v):
+        v = "".join(v)
+    return "".join(v.split()) if isinstance(v, str) else v
 
 
 def _shape(spec: dict, tool: str) -> tuple[list, list]:
-    """그림 입력에서 자리 칸을 빼고, id·이름 별칭을 한 이름으로 풀어 견줄 꼴(요소 목록, 관계 목록)을 만든다."""
+    """그림 입력에서 자리 칸과 id를 빼고, 남은 모든 칸을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 요소는 이름으로 가리키고
+    (이름 없는 시작·끝 점·마름모는 종류로), from·to·in의 id·이름 별칭은 그 이름으로 푼다."""
     items = spec.get("classes") or spec.get("elements") or []
     alias = {}
     for e in items:
-        canon = e.get("name") or e.get("id")
-        for k in (e.get("id"), e.get("name")):
-            if k:
+        canon = _text_key(e["name"]) if e.get("name") else f"<{e.get('kind')}>"
+        for k in (e.get("id"), e.get("name"), canon):
+            if isinstance(k, str):
                 alias[k] = canon
-    elem_kind = "class" if tool in ("draw_class_diagram",) else None
-    elements = sorted(json.dumps([e.get("kind", elem_kind), alias.get(e.get("name") or e.get("id")),
-                                  alias.get(e.get("in"), e.get("in"))] + [e.get(f) for f in ELEMENT_FIELDS],
-                                 ensure_ascii=False) for e in items)
-    rel_kind = DEFAULT_KIND.get(tool) if tool != "draw_class_diagram" else None
-    relations = sorted(json.dumps([r.get("kind", rel_kind), alias.get(r.get("from"), r.get("from")),
-                                   alias.get(r.get("to"), r.get("to"))] + [r.get(f) for f in RELATION_FIELDS],
-                                  ensure_ascii=False) for r in spec.get("relations") or [])
-    return elements, relations
+
+    def key(d: dict, default_kind: str | None) -> str:
+        out = {}
+        for k, v in d.items():
+            if k in LAYOUT_KEYS or k == "id" or (k == "navigable" and v == NAVIGABLE_DEFAULT.get(tool, "to")):
+                continue
+            out[k] = _text_key(v) if k == "name" else alias.get(v, v) if k in ("in", "from", "to") and isinstance(v, str) else v
+        if default_kind:
+            out.setdefault("kind", default_kind)
+        return json.dumps(out, sort_keys=True, ensure_ascii=False)
+
+    return (sorted(key(e, ELEMENT_KIND.get(tool)) for e in items),
+            sorted(key(r, RELATION_KIND.get(tool)) for r in spec.get("relations") or []))
 
 
 def faithful(drawn: dict, spec: dict, tool: str) -> bool:
@@ -263,6 +278,18 @@ KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG"
             "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR"}
 
 
+def stop_group(proc: subprocess.Popen, sig: int) -> None:
+    try:
+        os.killpg(proc.pid, sig)
+    except ProcessLookupError:
+        pass
+
+
+def run_dir_for(base: Path, model: str, effort: str, problem: str, run) -> Path:
+    """실행 하나의 기록 폴더(rescore.py도 이것으로 찾는다)."""
+    return base / f"{model}_{effort}" / problem / f"run{run}"
+
+
 def run_one(job: dict, key: str) -> dict:
     run_dir: Path = job["dir"]
     if run_dir.exists():  # 멈췄던 실행의 옛 파일(stderr.txt·그림)이 새 기록 옆에 남지 않게 비우고 시작한다
@@ -291,15 +318,16 @@ def run_one(job: dict, key: str) -> dict:
     with _RUNNING_LOCK:
         if _STOP.is_set():
             raise RuntimeError("멈춘 뒤라 띄우지 않았다")
+        # 새 프로세스 그룹으로 띄워, 끝낼 때 claude가 띄운 MCP 서버(cysuml)까지 그룹째 끝낸다
         proc = subprocess.Popen(cmd, cwd=run_dir, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True, encoding="utf-8", errors="replace")
+                                text=True, encoding="utf-8", errors="replace", start_new_session=True)
         _RUNNING.add(proc)
     try:
         stdout, stderr = proc.communicate(timeout=job["timeout"])
         code = proc.returncode
     except subprocess.TimeoutExpired:  # 시간 초과여도 그때까지의 기록은 남긴다(비용은 끝의 결과가 없어 비운다)
-        proc.kill()
-        stdout, stderr = proc.communicate()
+        stop_group(proc, signal.SIGKILL)
+        stdout, stderr = proc.communicate(timeout=60)
         code = None
     finally:
         with _RUNNING_LOCK:
@@ -341,7 +369,7 @@ def main() -> None:
     if (base / "results.csv").exists():
         sys.exit(f"이미 결과가 있는 태그다: {base} — --tag로 다른 이름을 준다")
     jobs = [{"model": m, "effort": e, "problem": p, "run": r, "budget": args.budget, "timeout": args.timeout,
-             "dir": base / f"{m}_{e}" / p / f"run{r}"}
+             "dir": run_dir_for(base, m, e, p, r)}
             for m in args.models for e in args.efforts for p in args.problems for r in range(1, args.runs + 1)]
     key = api_key()
     rows = []
@@ -374,14 +402,14 @@ def main() -> None:
                                                            "first_pass_draw", "draws", "cost_usd", "duration_s",
                                                            "subtype")}, ensure_ascii=False), flush=True)
         except KeyboardInterrupt:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다(SIGINT가 파이썬에만 왔을 수 있다)
+            finished = [fut for fut in futures if fut.done() and not fut.cancelled() and fut not in written]
             with _RUNNING_LOCK:
                 _STOP.set()
                 for p in _RUNNING:
-                    p.terminate()
+                    stop_group(p, signal.SIGTERM)
             pool.shutdown(wait=False, cancel_futures=True)
-            for fut in futures:  # 멈추기 직전에 끝났는데 아직 쓰지 못한 실행도 남긴다
-                if fut.done() and not fut.cancelled() and fut not in written:
-                    record(fut)
+            for fut in finished:  # 멈추기 전에 이미 끝났는데 아직 쓰지 못한 실행만 남긴다(끊긴 실행은 쓰지 않는다)
+                record(fut)
             sys.exit(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)")
     pool.shutdown()
     total = sum(r.get("cost_usd") or 0 for r in rows)

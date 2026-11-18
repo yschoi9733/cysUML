@@ -392,20 +392,22 @@ The full input format is in each tool's argument descriptions, which your client
 
 Four Claude models were given 26 diagrams of 7 kinds (2–36 elements) with every position removed, and each drew until
 the check passed (at most 10 draws). One run is one diagram drawn until it passes or stops. Sequence diagrams were left
-out, as cysUML lays them out itself. Effort was varied too: how much the model thinks before it answers, which
-Claude Code sets with `--effort` (not every client lets you set it). Only 8 of 609 runs did not pass: 5 with Haiku (1 at
-high effort, 4 at low or medium), 1 each with Opus and Sonnet at lower effort, and 1 with Fable that hit the cost limit
-set on each run. A draw that passes the check but changes the diagram (drops or alters an element or relation) does not
-count as a pass; 4 of the 606 passing draws did that. Every model passed each of the 26 diagrams at least once, except
-Haiku on one diagram it drew only once.
+out, as cysUML lays them out itself. Effort was varied too: how much the model thinks before it answers, which Claude
+Code sets with `--effort` (not every client lets you set it).
+
+A draw counts as a pass only if it passes the check and still draws the diagram as given. 11 of the 606 draws that
+passed the check had changed the diagram instead, for example by removing every arrowhead with `navigable: none` or by
+dropping a state's actions. In all, 15 of 609 runs did not pass: 10 because of such a change, 4 with Haiku at low or
+medium effort (one of them passed only after the 10-draw limit), and 1 with Fable that hit the cost limit set on each
+run. Every model passed each of the 26 diagrams at least once, except Haiku on one diagram it drew only once.
 
 The models differ in how many draws they need, and in how often the first picture they draw already passes. At high
 effort:
 
 | Model | Passed on the first draw | Average draws to pass | Average cost per run |
 |---|---|---|---|
-| Claude Haiku 5.5 | 25 of 66 runs | 1.2–2.8 | $0.003–0.11 |
-| Claude Sonnet 5.5 | 27 of 60 runs | 1.2–2.3 | $0.04–0.63 |
+| Claude Haiku 5.5 | 25 of 66 runs | 1.2–2.5 | $0.003–0.11 |
+| Claude Sonnet 5.5 | 26 of 60 runs | 1.2–2.4 | $0.04–0.63 |
 | Claude Opus 5.5 | 41 of 60 runs | 1.2–1.4 | $0.08–1.34 |
 | Claude Fable 5.2 | 52 of 60 runs | 1.1–1.2 | $0.14–2.41 |
 
@@ -415,8 +417,10 @@ pictures at the top and their Korean versions count as one diagram, and the sequ
 ones three times (60 runs); Haiku ran each of the three largest twice more (66). With the low- and medium-effort runs,
 that makes 609. Most diagrams ran three times per model and effort, so small differences may be chance.
 
-- To keep costs low, use Haiku 5.5 at high effort. It passed 65 of 66 runs (the miss changed one element's notation)
-  but redrew the most; lower effort cost about the same and failed 4 runs.
+- To keep costs low, use Haiku 5.5 at high effort. It passed 63 of 66 runs (the 3 misses changed the diagram) but
+  redrew the most; lower effort cost about the same and failed 4 runs.
+- If every run must draw the diagram as given, use Opus 5.5 at high effort: it passed all 60 runs and never changed a
+  diagram.
 - If passing on the first draw matters most, use Fable 5.2: it did so most often. At medium effort it cost about half
   as much and, on diagrams of 11–23 elements, still passed on the first draw more often than Opus 5.5 at high effort,
   which cost about the same. Above 30 elements, Opus 5.5 at medium effort matched Fable 5.2 at high effort (6 of 9 on
@@ -571,17 +575,19 @@ uvx cysuml
 
 Claude 모델 넷에 자리를 지운 그림 26개(7종, 요소 2\~36개)를 주고 검사에 합격할 때까지(최대 10번) 고쳐 그리게 했다. 실행
 한 번은 그림 하나를 합격할 때까지(또는 멈출 때까지) 그린 것이다. 교류도는 cysUML이 배치하므로 뺐다. effort(모델이 답하기
-전에 얼마나 깊게 생각하는지 — Claude Code에서는 `--effort`로 정하고, 정할 수 없는 클라이언트도 있다)도 바꿔 가며 쟀다. 실행
-609번 가운데 불합격은 8번뿐이다(Haiku 5번 — high 1번, low·medium 4번, effort를 낮춘 Opus·Sonnet 1번씩, 실행마다 건 비용
-상한에 걸린 Fable 1번). 검사에 합격했어도 요소나 관계를 빼거나 바꿔 그린 차례는 합격으로 치지 않았다(합격한 차례 606번 중
-4번). Haiku가 한 번만 그린 그림 하나를 빼면, 네 모델 모두 26개 그림을 한 번 이상 합격했다.
+전에 얼마나 깊게 생각하는지 — Claude Code에서는 `--effort`로 정하고, 정할 수 없는 클라이언트도 있다)도 바꿔 가며 쟀다.
+
+검사에 합격하고 주어진 그림을 그대로 그린 차례만 합격으로 쳤다. 검사에 합격한 차례 606번 가운데 11번은 그림을 바꿔 그린
+것이었다(`navigable: none`으로 화살촉을 모두 없애거나 상태의 동작 줄을 빼는 등). 그래서 실행 609번 가운데 15번이 불합격이다.
+10번은 이렇게 그림을 바꿨고, 4번은 effort를 low·medium으로 낮춘 Haiku(그중 한 번은 10번을 넘겨 합격), 1번은 실행마다 건 비용
+상한에 걸린 Fable이다. Haiku가 한 번만 그린 그림 하나를 빼면, 네 모델 모두 26개 그림을 한 번 이상 합격했다.
 
 모델 차이는 몇 번 만에 합격하느냐, 처음 그린 그림이 바로 합격하느냐에서 난다. effort high에서:
 
 | 모델 | 첫 그림에 합격 | 합격까지 평균 그림 수 | 실행 한 번 평균 비용 |
 |---|---|---|---|
-| Claude Haiku 5.5 | 66번 중 25번 | 1.2\~2.8번 | $0.003\~0.11 |
-| Claude Sonnet 5.5 | 60번 중 27번 | 1.2\~2.3번 | $0.04\~0.63 |
+| Claude Haiku 5.5 | 66번 중 25번 | 1.2\~2.5번 | $0.003\~0.11 |
+| Claude Sonnet 5.5 | 60번 중 26번 | 1.2\~2.4번 | $0.04\~0.63 |
 | Claude Opus 5.5 | 60번 중 41번 | 1.2\~1.4번 | $0.08\~1.34 |
 | Claude Fable 5.2 | 60번 중 52번 | 1.1\~1.2번 | $0.14\~2.41 |
 
@@ -590,8 +596,9 @@ Claude 모델 넷에 자리를 지운 그림 26개(7종, 요소 2\~36개)를 주
 17개는 3번씩 돌려 60번이고, Haiku는 가장 큰 그림 셋을 2번씩 더 돌려 66번이다. effort low·medium 실행까지 합치면 609번이다.
 모델·effort마다 대개 3번씩 돌렸으니 작은 차이는 우연일 수 있다.
 
-- 비용을 아끼려면 Haiku 5.5를 effort high로 쓴다. 66번 중 65번 합격했지만(놓친 하나는 요소 하나의 표기를 바꿔 그렸다) 가장
-  여러 번 고쳐 그렸다. effort를 낮춰도 비용은 거의 같았고 4번 불합격했다.
+- 비용을 아끼려면 Haiku 5.5를 effort high로 쓴다. 66번 중 63번 합격했지만(놓친 셋은 모두 그림을 바꿨다) 가장 여러 번 고쳐
+  그렸다. effort를 낮춰도 비용은 거의 같았고 4번 불합격했다.
+- 모든 실행이 주어진 그림 그대로 합격해야 하면 Opus 5.5를 effort high로 쓴다. 60번 모두 합격했고 그림을 바꾼 적이 없다.
 - 첫 그림에 합격하는 게 가장 중요하면 Fable 5.2를 쓴다. 첫 그림 합격이 가장 많았다. effort를 medium으로 낮추면 비용이
   절반쯤이고, 요소 11\~23개 그림에서 비용이 비슷한 Opus 5.5 high보다 첫 그림 합격이 많았다. 요소 30개가 넘으면 Opus 5.5
   medium이 Fable 5.2 high와 같은 첫 그림 합격(9번 중 6번)을 절반이 안 되는 비용(실행 한 번 $0.73 대 $2.41)으로 냈다. Fable
