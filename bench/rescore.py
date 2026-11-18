@@ -43,9 +43,8 @@ for tag_dir in map(Path, sys.argv[1:]):
             continue
         row = {k: r.get(k) for k in ("model", "effort", "problem", "run", "exit", "wall_s")} | {"tool": tool}
         row.update(parse_stream(stream.read_text(encoding="utf-8").splitlines(), tool, spec))
-        finish_row(row, timed_out=r.get("subtype") == "timeout")
-        if row["subtype"] == "timeout":  # 끊긴 실행은 시간도 원래 기록을 따른다
-            row["duration_s"] = r.get("duration_s")
+        # 끝의 결과가 없고 종료 코드도 없으면 시간 초과로 끊긴 실행이다(timeout을 적기 전의 옛 기록도 이것으로 알아본다)
+        finish_row(row, timed_out=r.get("subtype") == "timeout" or (row["subtype"] is None and not r.get("exit")))
         new_rows.append(row)
         if str(row["passed"]) != r.get("passed") or str(row["first_pass_draw"] or "") != (r.get("first_pass_draw") or ""):
             print(f"{tag_dir.name}: {r['model']} {r['effort']} {r['problem']} run{r['run']} "

@@ -25,6 +25,9 @@ import time
 from collections import Counter
 from pathlib import Path
 
+from cysuml import boxdiagram as B
+from cysuml.parsing import InputError
+
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = ROOT / "docs" / "images"
 DEFAULT_OUT = Path.home() / "Documents" / "cysUML-bench-runs"
@@ -150,8 +153,6 @@ TOOL_MODULE = {
     "draw_state_diagram": "statediagram",
     "draw_activity_diagram": "activitydiagram",
 }
-EMPTY = (None, "", [], {})  # 이 값인 칸은 빠진 칸과 같게 본다
-REFINE_ROUNDS = 4  # 이름으로 못 가리키는 요소의 꼬리표를 이웃으로 다듬는 횟수
 
 
 def tool_spec(tool: str):
@@ -170,75 +171,72 @@ def _digest(x) -> str:
     return hashlib.sha1(json.dumps(x, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 
 
-def _fields(d: dict, spec, default_kind: str | None, skip: set) -> dict:
-    """요소·관계 하나에서 견줄 칸만 남긴다. 자리 칸·skip·빈 칸·기본값 칸(kind·navigable)은 빼고, 이름은 _text_key로."""
-    out = {}
-    for k, v in d.items():
-        if (k in LAYOUT_KEYS or k in skip or v in EMPTY or (k == "kind" and v == default_kind)
-                or (k == "navigable" and v == spec.navigable)):
-            continue
-        out[k] = _text_key(v) if k == "name" else v
-    return out
-
-
-def _shape(drawing: dict, tool: str) -> tuple[list, list]:
-    """그림 입력을 견줄 꼴(요소 목록, 관계 목록)로 만든다. id는 쓰지 않는다 — 이름이 하나뿐인 요소는 이름으로 가리키고,
-    이름 없는 점·마름모와 이름이 겹치는 요소는 이웃(들고 나는 관계, 담긴 곳, 담은 요소)으로 REFINE_ROUNDS번 다듬은
-    꼬리표로 가리킨다. 그래서 id를 어떻게 바꿔 써도 같은 그림이면 같은 꼴이 나오고, 흐름을 바꿔 이으면 달라진다. 방향이 없는
-    연관(navigable이 none이고 다중도가 없음)은 양 끝 차례를 보지 않는다."""
+def _diagram(data: dict, tool: str) -> B.Diagram:
+    """cysUML이 그 입력을 읽은 모델. 요소 열쇠(id·이름)와 kind·navigable 기본값을 cysUML이 그대로 풀게 한다. 자리가 없는 문제
+    입력도 읽히도록 빠진 left·top과 자기 자신으로 가는 관계의 꺾는 점을 채운다(자리는 견주지 않는다). 도구 입력에는 그림 밖의
+    인자(file_name 등)도 있어 요소 목록과 관계만 넘긴다."""
     s = tool_spec(tool)
-    items = drawing.get(s.list_field) or []
-    ref = {}
-    for i, e in enumerate(items):
-        for k in (e.get("id"), e.get("name") if isinstance(e.get("name"), str) else None):
-            if k is not None:
-                ref.setdefault(k, i)
+    items = [{"left": 0, "top": 0, **e} for e in data.get(s.list_field) or []]
+    rels = [{"via": [[0, 0], [1, 1]], **r} if r.get("from") == r.get("to") else r for r in data.get("relations") or []]
+    return B.parse(s, {s.list_field: items, "relations": rels})
 
-    def end(k):  # 가리키는 요소의 번호, 모르는 열쇠면 그 열쇠 자체
-        return ref.get(k, ("?", k))
 
-    fields = [_fields(e, s, s.default_kind, {"id", "in"}) for e in items]
-    parent = [end(e["in"]) if e.get("in") is not None else None for e in items]
-    names = [_text_key(e["name"]) if e.get("name") else None for e in items]
-    counts = Counter(n for n in names if n is not None)
+def _shape(data: dict, tool: str) -> tuple[list, list]:
+    """그림 입력을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 자리(left·top·크기·name_side·via)와 열쇠(id)는 보지 않는다.
+    이름이 하나뿐인 요소는 이름으로 가리키고, 이름 없는 점·마름모와 이름이 겹치는 요소는 이웃(들고 나는 관계, 담긴 곳, 담은
+    요소)으로 더 갈라지지 않을 때까지 다듬은 꼬리표로 가리킨다 — id를 어떻게 바꿔 써도 같은 그림이면 같은 꼴, 흐름을 바꿔
+    이으면 다른 꼴이 된다. 양 끝 모양이 고정되지 않은 관계(연관)는 양 끝을 바꾸고 다중도·navigable도 맞바꿔 적어도 같은 그림이라
+    두 방향 중 한쪽으로 맞춘다."""
+    s = tool_spec(tool)
+    d = _diagram(data, tool)
+    boxes = d.boxes
+    index = {e.key: i for i, e in enumerate(boxes)}
+    names = [_text_key(list(e.name)) if e.name else None for e in boxes]
+    counts = Counter(n for n in names if n)
     anchored = [n is not None and counts[n] == 1 for n in names]
-    relations = []
-    for r in drawing.get("relations") or []:
-        undirected = (r.get("kind", s.default_relation) == "association" and r.get("navigable", s.navigable) == "none"
-                      and not r.get("from_multiplicity") and not r.get("to_multiplicity"))
-        relations.append((_fields(r, s, s.default_relation, {"from", "to"}), end(r.get("from")), end(r.get("to")),
-                          undirected))
+    own = [[e.kind, names[i], e.stereotype or None, repr(e.data)] for i, e in enumerate(boxes)]
+    parent = [index[e.parent] if e.parent is not None else None for e in boxes]
+    flip = {"to": "from", "from": "to"}
+    rels = []
+    for r in d.relations:
+        t = s.relations[r.kind]
+        fwd = [r.kind, _text_key(list(r.name)), r.stereotype or None, r.source_multiplicity, r.target_multiplicity,
+               r.navigable]
+        rev = fwd[:3] + [r.target_multiplicity, r.source_multiplicity, flip.get(r.navigable, r.navigable)]
+        free = t.navigable and t.start is None and t.end is None
+        rels.append((fwd, rev if free else None, index[r.source], index[r.target]))
 
-    labels = [f"name:{names[i]}" if anchored[i] else _digest(fields[i]) for i in range(len(items))]
-
-    def label(x) -> str:
-        return labels[x] if isinstance(x, int) else _digest(list(x))
-
-    for _ in range(REFINE_ROUNDS):
-        around = [[] for _ in items]
-        for f, a, b, undirected in relations:
-            if isinstance(a, int):
-                around[a].append(["~" if undirected else ">", f, label(b)])
-            if isinstance(b, int):
-                around[b].append(["~" if undirected else "<", f, label(a)])
+    labels = [f"name:{names[i]}" if anchored[i] else _digest(own[i]) for i in range(len(boxes))]
+    for _ in range(len(boxes)):
+        around = [[] for _ in boxes]
+        for fwd, rev, a, b in rels:
+            around[a].append(["~" if rev else ">", fwd, labels[b]])
+            around[b].append(["~", rev, labels[a]] if rev else ["<", fwd, labels[a]])
         for i, p in enumerate(parent):
             if p is not None:
-                around[i].append(["in", {}, label(p)])
-                if isinstance(p, int):
-                    around[p].append(["holds", {}, labels[i]])
-        labels = [labels[i] if anchored[i] else _digest([labels[i], sorted(_digest(x) for x in around[i])])
-                  for i in range(len(items))]
+                around[i].append(["in", labels[p]])
+                around[p].append(["holds", labels[i]])
+        new = [labels[i] if anchored[i] else _digest([labels[i], sorted(_digest(x) for x in around[i])])
+               for i in range(len(boxes))]
+        if len(set(new)) == len(set(labels)):  # 더 갈라지지 않는다
+            break
+        labels = new
 
-    elements = sorted(_digest([label(i), fields[i], label(parent[i]) if parent[i] is not None else None])
-                      for i in range(len(items)))
-    rels = sorted(_digest([f, sorted([label(a), label(b)]) if undirected else [label(a), label(b)]])
-                  for f, a, b, undirected in relations)
-    return elements, rels
+    elements = sorted(_digest([labels[i], own[i], labels[parent[i]] if parent[i] is not None else None])
+                      for i in range(len(boxes)))
+    relations = sorted(min(_digest([fwd, labels[a], labels[b]]), _digest([rev, labels[b], labels[a]])) if rev
+                       else _digest([fwd, labels[a], labels[b]]) for fwd, rev, a, b in rels)
+    return elements, relations
 
 
 def faithful(drawn: dict, spec: dict, tool: str) -> bool:
-    """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸·id·빈 칸·기본값 칸은 보지 않는다)."""
-    return _shape(drawn, tool) == _shape(spec, tool)
+    """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸·id는 보지 않는다). cysUML이 읽지 못하는
+    입력은 문제와 같다고 볼 수 없다."""
+    try:
+        got = _shape(drawn, tool)
+    except InputError:
+        return False
+    return got == _shape(spec, tool)
 
 
 def read_events(lines) -> list[dict]:
@@ -280,7 +278,10 @@ def mcp_status(events: list[dict]) -> str | None:
 def spec_from_prompt(prompt: str) -> dict | None:
     """prompt.txt에서 그 실행에 실제로 준 문제(요소·관계 JSON)를 꺼낸다. rescore.py가 지금 문제 대신 이것과 견준다."""
     _, sep, tail = prompt.partition(PROMPT_SPEC_MARK)
-    return json.loads(tail) if sep else None
+    try:
+        return json.loads(tail) if sep else None
+    except json.JSONDecodeError:  # 잘렸거나 뒤에 다른 글이 붙은 기록
+        return None
 
 
 def tool_from_prompt(prompt: str) -> str | None:
@@ -365,7 +366,7 @@ KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG"
 def stop_group(proc: subprocess.Popen, sig: int) -> None:
     try:
         os.killpg(proc.pid, sig)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):  # macOS는 다 끝났지만 아직 거두지 않은 그룹에 EPERM을 낸다
         pass
 
 
@@ -470,20 +471,34 @@ def main() -> None:
         w.writeheader()
         futures: dict = {}
         written = set()
+        writing = {"now": False, "stop": False}
+
+        def on_sigint(signum, frame):  # 한 줄을 쓰는 도중의 Ctrl-C는 다 쓴 뒤로 미룬다(줄이 잘리거나 두 번 쓰이지 않게)
+            if writing["now"]:
+                writing["stop"] = True
+            else:
+                raise KeyboardInterrupt
 
         def record(fut) -> dict:
-            written.add(fut)  # 쓰기 전에 표시해, 쓰는 도중 Ctrl-C가 와도 아래 정리에서 같은 줄을 두 번 쓰지 않는다
             j = futures[fut]
+            writing["now"] = True
             try:
-                row = fut.result()
-            except Exception as e:  # 한 실행이 죽어도 나머지는 계속 잰다
-                row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
-                       "subtype": f"harness_error: {type(e).__name__}: {e}"}
-            rows.append(row)
-            w.writerow(row)
-            f.flush()
+                try:
+                    row = fut.result()
+                except Exception as e:  # 한 실행이 죽어도 나머지는 계속 잰다
+                    row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
+                           "subtype": f"harness_error: {type(e).__name__}: {e}"}
+                rows.append(row)
+                w.writerow(row)
+                f.flush()
+                written.add(fut)
+            finally:
+                writing["now"] = False
+            if writing["stop"]:
+                raise KeyboardInterrupt
             return row
 
+        signal.signal(signal.SIGINT, on_sigint)
         try:  # 띄우기부터 정리까지 어디서 Ctrl-C가 와도 아래에서 멈춘다
             for j in jobs:
                 futures[pool.submit(run_one, j, key)] = j
@@ -494,6 +509,7 @@ def main() -> None:
                                                            "subtype")}, ensure_ascii=False), flush=True)
             pool.shutdown()
         except KeyboardInterrupt:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다(SIGINT가 파이썬에만 왔을 수 있다)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)  # 정리(길어야 10초) 중에 또 누른 Ctrl-C는 받지 않는다
             finished = [fut for fut in futures if fut.done() and not fut.cancelled() and fut not in written]
             with _RUNNING_LOCK:
                 _STOP.set()
