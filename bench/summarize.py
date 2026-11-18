@@ -20,13 +20,11 @@ def num(v):
 
 
 def first_pass(r) -> int | None:
-    """처음 합격한 그림 차례. 합격으로 치는 규칙은 run_bench.counts_as_pass 하나를 쓴다."""
     n = num(r.get("first_pass_draw"))
     return int(n) if n is not None and counts_as_pass(int(n)) else None
 
 
 def avg(values, fmt: str) -> str:
-    """빈 값은 빼고 평균을 낸다. 뺀 것이 있으면 몇 번으로 낸 평균인지 붙인다."""
     vals = [v for v in values if v is not None]
     if not vals:
         return "-"
@@ -99,6 +97,9 @@ if no_time:
 for r in skipped:
     print(f"- 모델을 잰 것이 아니라 표에서 뺐다: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}")
 for r in rows:
+    if "other" in (r.get("verdicts") or "").split():  # cysUML 검사 결과 문구가 바뀌면 여기서 드러난다
+        print(f"- 확인 필요: 검사 결과 첫 줄을 읽지 못한 그림이 있다: {r['model']} {r['effort']} {r['problem']} "
+              f"run{r.get('run')} → {r.get('verdicts')}")
     if r.get("subtype") != "success":
         print(f"- 확인 필요: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}")
     elif num(r.get("first_pass_draw")) is not None and first_pass(r) is None:

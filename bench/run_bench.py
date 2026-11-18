@@ -58,10 +58,11 @@ WRITTEN: dict = {}
 for _f in sorted(Path(__file__).parent.glob("problems_*.json")):
     _set = json.loads(_f.read_text(encoding="utf-8"))
     SETS[_f.stem.removeprefix("problems_")] = list(_set)
+    if set(_set) & (set(WRITTEN) | set(PROBLEMS)):
+        raise SystemExit(f"{_f.name}의 문제 이름이 다른 문제와 겹친다: {sorted(set(_set) & (set(WRITTEN) | set(PROBLEMS)))}")
     WRITTEN.update(_set)
 
 def diagram_kind(tool: str) -> str:
-    """도구가 그리는 그림 이름(draw_use_case_diagram → use case)."""
     return tool.removeprefix("draw_").removesuffix("_diagram").replace("_", " ")
 
 
@@ -115,7 +116,6 @@ def api_key() -> str:
 
 
 def result_text(content) -> str:
-    """tool_result 내용(문자열이나 블록 목록)에서 글을 꺼낸다."""
     if isinstance(content, str):
         return content.strip()
     return next((b.get("text", "").strip() for b in content or [] if isinstance(b, dict) and b.get("type") == "text"), "")
@@ -144,12 +144,12 @@ def tool_spec(tool: str):
     return importlib.import_module("cysuml." + tool.removeprefix("draw_").replace("_", "")).SPEC
 
 
-def _text_key(v):
-    """이름을 견줄 꼴로 바꾼다. 여러 줄 이름(줄마다 문자열인 목록)은 줄 사이를 띄어쓰기 하나로 이어 붙이고, 이어진 공백은
-    하나로 줄인다."""
-    if isinstance(v, list) and all(isinstance(x, str) for x in v):
-        v = " ".join(v)
-    return " ".join(v.split()) if isinstance(v, str) else v
+def _name_key(lines: tuple[str, ...], known: frozenset = frozenset()) -> str:
+    """이름 줄을 견줄 꼴로. 줄 사이는 띄어쓰기 하나로 보지만, 띄우지 않고 이은 이름이 문제(known)에 있으면 그것으로 본다 —
+    긴 한 단어를 줄로 나눈 것이다. 'Order Service'와 'OrderService'처럼 한 줄 안의 띄어쓰기가 다른 것은 다른 이름이다."""
+    spaced = " ".join(" ".join(lines).split())
+    joined = " ".join("".join(lines).split())
+    return joined if joined in known and spaced not in known else spaced
 
 
 def _digest(x) -> str:
@@ -166,7 +166,7 @@ def _diagram(data: dict, tool: str) -> B.Diagram:
     return B.parse(s, {s.list_field: items, "relations": rels})
 
 
-def _shape(data: dict, tool: str) -> tuple[list, list]:
+def _shape(data: dict, tool: str, known: frozenset = frozenset()) -> tuple[list, list]:
     """그림 입력을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 자리(left·top·크기·name_side·via)와 열쇠(id)는 보지 않는다.
     이름이 하나뿐인 요소는 이름으로 가리키고, 이름 없는 점·마름모와 이름이 겹치는 요소는 이웃(들고 나는 관계, 담긴 곳, 담은
     요소)으로 더 갈라지지 않을 때까지 다듬은 꼬리표로 가리킨다 — id를 어떻게 바꿔 써도 같은 그림이면 같은 꼴, 흐름을 바꿔
@@ -176,7 +176,7 @@ def _shape(data: dict, tool: str) -> tuple[list, list]:
     d = _diagram(data, tool)
     boxes = d.boxes
     index = {e.key: i for i, e in enumerate(boxes)}
-    names = [_text_key(list(e.name)) if e.name else None for e in boxes]
+    names = [_name_key(e.name, known) if e.name else None for e in boxes]
     counts = Counter(n for n in names if n)
     anchored = [n is not None and counts[n] == 1 for n in names]
     own = [[e.kind, names[i], e.stereotype or None, repr(e.data)] for i, e in enumerate(boxes)]
@@ -185,7 +185,7 @@ def _shape(data: dict, tool: str) -> tuple[list, list]:
     rels = []
     for r in d.relations:
         t = s.relations[r.kind]
-        fwd = [r.kind, _text_key(list(r.name)), r.stereotype or None, r.source_multiplicity, r.target_multiplicity,
+        fwd = [r.kind, _name_key(r.name, known), r.stereotype or None, r.source_multiplicity, r.target_multiplicity,
                r.navigable]
         rev = fwd[:3] + [r.target_multiplicity, r.source_multiplicity, flip.get(r.navigable, r.navigable)]
         free = t.navigable and t.start is None and t.end is None
@@ -217,15 +217,16 @@ def _shape(data: dict, tool: str) -> tuple[list, list]:
 def faithful(drawn: dict, spec: dict, tool: str) -> bool:
     """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸·id는 보지 않는다). cysUML이 읽지 못하는
     입력은 문제와 같다고 볼 수 없다."""
+    given = _diagram(spec, tool)
+    known = frozenset(_name_key(x.name) for x in (*given.boxes, *given.relations) if x.name)
     try:
-        got = _shape(drawn, tool)
+        got = _shape(drawn, tool, known)
     except InputError:
         return False
     return got == _shape(spec, tool)
 
 
 def read_events(lines) -> list[dict]:
-    """stream-json 출력의 줄들을 이벤트로 읽는다. JSON이 아닌 줄은 건너뛴다."""
     events = []
     for raw in lines:
         try:
@@ -275,8 +276,9 @@ def tool_from_prompt(prompt: str) -> str | None:
     return m.group(1) if m else None
 
 
-# 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함, 하네스 오류
-NOT_MEASURED = ("mcp_failed", "no_init", "harness_error")
+# 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함,
+# API 오류(인증·429·529 등), 하네스 오류
+NOT_MEASURED = ("mcp_failed", "no_init", "api_error", "harness_error")
 
 
 class Stopped(Exception):
@@ -284,17 +286,17 @@ class Stopped(Exception):
 
 
 def finish_row(row: dict, timed_out: bool) -> dict:
-    """parse_stream 뒤 실행 한 줄의 마무리(run_one과 rescore.py가 같이 쓴다)."""
     if timed_out:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
-        row["subtype"] = "timeout"
+        row["subtype"] = "timeout" if row.get("mcp") else "no_init: timeout"
         row["duration_s"] = row.get("wall_s")
+    elif row.get("is_error") and row.get("subtype") == "success":  # claude -p는 API 오류를 이렇게 낸다(상한 초과는 다른 subtype)
+        row["subtype"] = "api_error"
     elif not row.get("draws") and row.get("mcp") != "connected":  # 그림 도구 없이 끝난 실행은 모델의 불합격이 아니다
         row["subtype"] = f"mcp_failed: {row['mcp']}" if row.get("mcp") else "no_init"
     return row
 
 
 def draw_results(events: list[dict], ids: list[str]) -> dict[str, dict]:
-    """tool_use id마다 그 tool_result 블록을 낸다."""
     wanted, found = set(ids), {}
     for ev in events:
         if ev.get("type") != "user":
@@ -364,7 +366,6 @@ def stop_group(proc: subprocess.Popen, sig: int) -> None:
 
 
 def run_dir_for(base: Path, model: str, effort: str, problem: str, run) -> Path:
-    """실행 하나의 기록 폴더(rescore.py도 이것으로 찾는다)."""
     return base / f"{model}_{effort}" / problem / f"run{run}"
 
 
@@ -422,9 +423,10 @@ def run_one(job: dict, key: str) -> dict:
     row = {"model": job["model"], "effort": job["effort"], "problem": job["problem"], "run": job["run"], "tool": tool,
            "exit": code, "wall_s": round(time.time() - started, 1)}
     row.update(parse_stream(stdout.splitlines(), tool, spec))
+    ended_itself = row["subtype"] is not None  # 끝의 결과가 있다(상한 초과 등으로 스스로 끝남)
     finish_row(row, timed_out=code is None)
-    # 멈출 때 끝낸 실행. claude는 SIGTERM을 받으면 스스로 143으로 끝나고 SIGKILL이면 -9라, 0이 아닌 코드를 모두 본다
-    stopped = _STOP.is_set() and code is not None and code != 0
+    # 멈출 때 끝낸 실행: 끝의 결과 없이 0이 아닌 코드로 끝났다(claude는 SIGTERM을 받으면 143, SIGKILL이면 -9)
+    stopped = _STOP.is_set() and code is not None and code != 0 and not ended_itself
     if stopped:
         row["subtype"] = "stopped"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -534,7 +536,11 @@ def main() -> None:
             for fut in futures:
                 if fut.done() and not fut.cancelled() and fut not in written and not isinstance(fut.exception(), Stopped):
                     record(fut)
-            sys.exit(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)")
+            print(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)",
+                  file=sys.stderr, flush=True)
+            # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
+            # 줄마다 flush했다
+            os._exit(1)
     total = sum(r.get("cost_usd") or 0 for r in rows)
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
     note = f", 비용을 모르는 실행 {unknown_cost}건은 합계에 들지 않았다" if unknown_cost else ""

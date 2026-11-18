@@ -17,7 +17,7 @@ from run_bench import FIELDS, finish_row, load_problem, parse_stream, run_dir_fo
 def given_problem(run_dir: Path, r: dict) -> tuple[str | None, dict | None]:
     prompt = run_dir / "prompt.txt"
     text = prompt.read_text(encoding="utf-8") if prompt.exists() else ""
-    tool, spec = r.get("tool") or tool_from_prompt(text), spec_from_prompt(text) if text else None
+    tool, spec = tool_from_prompt(text) or r.get("tool"), spec_from_prompt(text) if text else None
     if tool is None or spec is None:
         try:
             now_tool, now_spec = load_problem(r["problem"])
