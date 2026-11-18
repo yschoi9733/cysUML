@@ -11,16 +11,18 @@ import argparse
 import concurrent.futures as cf
 import csv
 import datetime as dt
+import hashlib
 import importlib
-import itertools
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -149,7 +151,7 @@ TOOL_MODULE = {
     "draw_activity_diagram": "activitydiagram",
 }
 EMPTY = (None, "", [], {})  # 이 값인 칸은 빠진 칸과 같게 본다
-MAX_RENAMED = 6  # id만 바꿔 쓴 이름 없는 요소를 맞바꿔 보는 개수 상한(6!=720가지)
+REFINE_ROUNDS = 4  # 이름으로 못 가리키는 요소의 꼬리표를 이웃으로 다듬는 횟수
 
 
 def tool_spec(tool: str):
@@ -164,58 +166,79 @@ def _text_key(v):
     return "".join(v.split()) if isinstance(v, str) else v
 
 
-def _shape(spec: dict, tool: str, rename: dict | None = None) -> tuple[list, list]:
-    """그림 입력에서 자리 칸·id·빈 칸·기본값 칸을 빼고, 남은 모든 칸을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 요소는
-    이름으로 가리키고(이름 없는 시작·끝 점·마름모는 id로 — rename이 있으면 그 id를 바꿔 읽는다), from·to·in의 id·이름 별칭은
-    그것으로 푼다."""
+def _digest(x) -> str:
+    return hashlib.sha1(json.dumps(x, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+
+
+def _fields(d: dict, spec, default_kind: str | None, skip: set) -> dict:
+    """요소·관계 하나에서 견줄 칸만 남긴다. 자리 칸·skip·빈 칸·기본값 칸(kind·navigable)은 빼고, 이름은 _text_key로."""
+    out = {}
+    for k, v in d.items():
+        if (k in LAYOUT_KEYS or k in skip or v in EMPTY or (k == "kind" and v == default_kind)
+                or (k == "navigable" and v == spec.navigable)):
+            continue
+        out[k] = _text_key(v) if k == "name" else v
+    return out
+
+
+def _shape(drawing: dict, tool: str) -> tuple[list, list]:
+    """그림 입력을 견줄 꼴(요소 목록, 관계 목록)로 만든다. id는 쓰지 않는다 — 이름이 하나뿐인 요소는 이름으로 가리키고,
+    이름 없는 점·마름모와 이름이 겹치는 요소는 이웃(들고 나는 관계, 담긴 곳, 담은 요소)으로 REFINE_ROUNDS번 다듬은
+    꼬리표로 가리킨다. 그래서 id를 어떻게 바꿔 써도 같은 그림이면 같은 꼴이 나오고, 흐름을 바꿔 이으면 달라진다. 방향이 없는
+    연관(navigable이 none이고 다중도가 없음)은 양 끝 차례를 보지 않는다."""
     s = tool_spec(tool)
-    default_relation = next(iter(s.relations)) if len(s.relations) == 1 else None
-    rename = rename or {}
-    items = spec.get(s.list_field) or []
-    alias = {}
-    for e in items:
-        canon = _text_key(e["name"]) if e.get("name") else "#" + str(rename.get(e.get("id"), e.get("id")))
-        for k in (e.get("id"), e.get("name"), canon):
-            if isinstance(k, str):
-                alias[k] = canon
+    items = drawing.get(s.list_field) or []
+    ref = {}
+    for i, e in enumerate(items):
+        for k in (e.get("id"), e.get("name") if isinstance(e.get("name"), str) else None):
+            if k is not None:
+                ref.setdefault(k, i)
 
-    def key(d: dict, default_kind: str | None) -> str:
-        out = {}
-        for k, v in d.items():
-            if (k in LAYOUT_KEYS or k == "id" or v in EMPTY or (k == "kind" and v == default_kind)
-                    or (k == "navigable" and v == s.navigable)):
-                continue
-            out[k] = _text_key(v) if k == "name" else alias.get(v, v) if k in ("in", "from", "to") and isinstance(v, str) else v
-        return json.dumps(out, sort_keys=True, ensure_ascii=False)
+    def end(k):  # 가리키는 요소의 번호, 모르는 열쇠면 그 열쇠 자체
+        return ref.get(k, ("?", k))
 
-    return (sorted(key(e, s.default_kind) for e in items),
-            sorted(key(r, default_relation) for r in spec.get("relations") or []))
+    fields = [_fields(e, s, s.default_kind, {"id", "in"}) for e in items]
+    parent = [end(e["in"]) if e.get("in") is not None else None for e in items]
+    names = [_text_key(e["name"]) if e.get("name") else None for e in items]
+    counts = Counter(n for n in names if n is not None)
+    anchored = [n is not None and counts[n] == 1 for n in names]
+    relations = []
+    for r in drawing.get("relations") or []:
+        undirected = (r.get("kind", s.default_relation) == "association" and r.get("navigable", s.navigable) == "none"
+                      and not r.get("from_multiplicity") and not r.get("to_multiplicity"))
+        relations.append((_fields(r, s, s.default_relation, {"from", "to"}), end(r.get("from")), end(r.get("to")),
+                          undirected))
+
+    labels = [f"name:{names[i]}" if anchored[i] else _digest(fields[i]) for i in range(len(items))]
+
+    def label(x) -> str:
+        return labels[x] if isinstance(x, int) else _digest(list(x))
+
+    for _ in range(REFINE_ROUNDS):
+        around = [[] for _ in items]
+        for f, a, b, undirected in relations:
+            if isinstance(a, int):
+                around[a].append(["~" if undirected else ">", f, label(b)])
+            if isinstance(b, int):
+                around[b].append(["~" if undirected else "<", f, label(a)])
+        for i, p in enumerate(parent):
+            if p is not None:
+                around[i].append(["in", {}, label(p)])
+                if isinstance(p, int):
+                    around[p].append(["holds", {}, labels[i]])
+        labels = [labels[i] if anchored[i] else _digest([labels[i], sorted(_digest(x) for x in around[i])])
+                  for i in range(len(items))]
+
+    elements = sorted(_digest([label(i), fields[i], label(parent[i]) if parent[i] is not None else None])
+                      for i in range(len(items)))
+    rels = sorted(_digest([f, sorted([label(a), label(b)]) if undirected else [label(a), label(b)]])
+                  for f, a, b, undirected in relations)
+    return elements, rels
 
 
 def faithful(drawn: dict, spec: dict, tool: str) -> bool:
-    """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸은 보지 않는다). 이름 없는 요소의 id만
-    바꿔 쓴 것은 같은 종류끼리 id를 맞바꿔 보고 같아지면 같은 그림으로 친다 — 종류로만 견주면 두 마름모의 흐름을 서로 바꿔
-    이어도 같아 보인다."""
-    want = _shape(spec, tool)
-    if _shape(drawn, tool) == want:
-        return True
-    s = tool_spec(tool)
-
-    def nameless(sp: dict) -> dict:
-        return {e["id"]: e.get("kind") for e in sp.get(s.list_field) or [] if not e.get("name") and e.get("id")}
-
-    got, given = nameless(drawn), nameless(spec)
-    extra = {i: k for i, k in got.items() if i not in given}
-    missing = {i: k for i, k in given.items() if i not in got}
-    if not extra or len(extra) > MAX_RENAMED or sorted(extra.values()) != sorted(missing.values()):
-        return False
-    groups = [([i for i, k in extra.items() if k == kind], [i for i, k in missing.items() if k == kind])
-              for kind in sorted(set(extra.values()))]
-    for choice in itertools.product(*(itertools.permutations(to) for _, to in groups)):
-        rename = {old: new for (frm, _), to in zip(groups, choice) for old, new in zip(frm, to)}
-        if _shape(drawn, tool, rename) == want:
-            return True
-    return False
+    """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸·id·빈 칸·기본값 칸은 보지 않는다)."""
+    return _shape(drawn, tool) == _shape(spec, tool)
 
 
 def read_events(lines) -> list[dict]:
@@ -258,6 +281,22 @@ def spec_from_prompt(prompt: str) -> dict | None:
     """prompt.txt에서 그 실행에 실제로 준 문제(요소·관계 JSON)를 꺼낸다. rescore.py가 지금 문제 대신 이것과 견준다."""
     _, sep, tail = prompt.partition(PROMPT_SPEC_MARK)
     return json.loads(tail) if sep else None
+
+
+def tool_from_prompt(prompt: str) -> str | None:
+    """prompt.txt에서 그 실행의 도구 이름을 꺼낸다(row.json이 없는 옛 기록용, prompt_for의 첫 문장을 읽는다)."""
+    m = re.search(r"cysUML tool `(draw_\w+)`", prompt)
+    return m.group(1) if m else None
+
+
+def finish_row(row: dict, timed_out: bool) -> dict:
+    """parse_stream 뒤 실행 한 줄의 마무리(run_one과 rescore.py가 같이 쓴다)."""
+    if timed_out:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
+        row["subtype"] = "timeout"
+        row["duration_s"] = row.get("wall_s")
+    elif row.get("mcp") != "connected":  # 그림 도구가 없던 실행은 모델의 불합격이 아니다
+        row["subtype"] = f"mcp_failed: {row.get('mcp')}"
+    return row
 
 
 def draw_results(events: list[dict], ids: list[str]) -> dict[str, dict]:
@@ -336,6 +375,8 @@ def run_dir_for(base: Path, model: str, effort: str, problem: str, run) -> Path:
 
 
 def run_one(job: dict, key: str) -> dict:
+    if _STOP.is_set():  # 멈춘 뒤에는 폴더도 건드리지 않는다
+        raise RuntimeError("멈춘 뒤라 띄우지 않았다")
     run_dir: Path = job["dir"]
     if run_dir.exists():  # 멈췄던 실행의 옛 파일(stderr.txt·그림)이 새 기록 옆에 남지 않게 비우고 시작한다
         shutil.rmtree(run_dir)
@@ -386,11 +427,7 @@ def run_one(job: dict, key: str) -> dict:
     row = {"model": job["model"], "effort": job["effort"], "problem": job["problem"], "run": job["run"], "tool": tool,
            "exit": code, "wall_s": round(time.time() - started, 1)}
     row.update(parse_stream(stdout.splitlines(), tool, spec))
-    if code is None:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
-        row["subtype"] = "timeout"
-        row["duration_s"] = row["wall_s"]
-    elif row["mcp"] != "connected":  # 그림 도구가 없던 실행은 모델의 불합격이 아니다
-        row["subtype"] = f"mcp_failed: {row['mcp']}"
+    finish_row(row, timed_out=code is None)
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
     return row
 
@@ -435,6 +472,7 @@ def main() -> None:
         written = set()
 
         def record(fut) -> dict:
+            written.add(fut)  # 쓰기 전에 표시해, 쓰는 도중 Ctrl-C가 와도 아래 정리에서 같은 줄을 두 번 쓰지 않는다
             j = futures[fut]
             try:
                 row = fut.result()
@@ -444,7 +482,6 @@ def main() -> None:
             rows.append(row)
             w.writerow(row)
             f.flush()
-            written.add(fut)
             return row
 
         try:  # 띄우기부터 정리까지 어디서 Ctrl-C가 와도 아래에서 멈춘다
