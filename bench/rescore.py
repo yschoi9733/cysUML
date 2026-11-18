@@ -11,13 +11,13 @@ import csv
 import sys
 from pathlib import Path
 
-from run_bench import FIELDS, build_row, load_problem, run_dir_for, spec_from_prompt, tool_from_prompt
+from run_bench import FIELDS, build_row, load_problem, run_dir_for, run_tool, spec_from_prompt
 
 
 def given_problem(run_dir: Path, r: dict) -> tuple[str | None, dict | None]:
     prompt = run_dir / "prompt.txt"
     text = prompt.read_text(encoding="utf-8") if prompt.exists() else ""
-    tool, spec = tool_from_prompt(text) or r.get("tool"), spec_from_prompt(text) if text else None
+    tool, spec = run_tool(run_dir, r.get("tool")), spec_from_prompt(text) if text else None
     if tool is None or spec is None:
         try:
             now_tool, now_spec = load_problem(r["problem"])
@@ -33,6 +33,11 @@ for tag_dir in map(Path, sys.argv[1:]):
         old_rows = list(csv.DictReader(f))
     new_rows = []
     for r in old_rows:
+        sub = r.get("subtype") or ""
+        if sub.startswith("harness_error"):  # 종료 코드·시간이 남지 않아 다시 읽어도 잰 줄로 되살릴 수 없다
+            print(f"{tag_dir.name}: {r['model']} {r['effort']} {r['problem']} run{r['run']} 하네스 오류 줄은 그대로 둔다")
+            new_rows.append(r)
+            continue
         run_dir = run_dir_for(tag_dir, r["model"], r["effort"], r["problem"], r["run"])
         stream = run_dir / "stream.jsonl"
         tool, spec = given_problem(run_dir, r)
@@ -41,8 +46,9 @@ for tag_dir in map(Path, sys.argv[1:]):
                   f"기록이나 문제가 없어 원래 줄을 둔다")
             new_rows.append(r)
             continue
-        # 원래 판정에 timeout이 있거나, 판정(끝의 결과)도 종료 코드도 없으면 시간 초과로 끊긴 실행이다(뒤는 옛 기록)
-        timed_out = "timeout" in (r.get("subtype") or "") or (not r.get("subtype") and not r.get("exit"))
+        # 시간 초과로 적힌 실행(build_row가 'timeout'이나 '… (timeout)'으로 적는다), 또는 판정(끝의 결과)도 종료 코드도 없는
+        # 옛 기록은 시간 초과로 끊긴 실행이다
+        timed_out = sub == "timeout" or sub.endswith("(timeout)") or (not sub and not r.get("exit"))
         try:
             row = build_row(r, stream.read_text(encoding="utf-8").splitlines(), tool, spec, timed_out)
         except Exception as e:  # 한 실행을 다시 읽지 못해도 나머지는 계속한다(문제를 cysUML이 못 읽게 된 경우 등)

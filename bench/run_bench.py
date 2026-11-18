@@ -33,7 +33,7 @@ EXAMPLES = ROOT / "docs" / "images"
 DEFAULT_OUT = Path.home() / "Documents" / "cysUML-bench-runs"
 LAYOUT_KEYS = {"left", "top", "via", "width", "height", "name_side"}
 MAX_DRAWS = 10
-DRAW_PREFIX = "mcp__cysuml__draw_"  # 그린 차례로 세는 도구 호출(inspect_run.py도 이것을 쓴다)
+DRAW_PREFIX = "mcp__cysuml__draw_"  # 그린 차례로 세는 도구 호출 이름의 앞부분
 FIELDS = ["model", "effort", "problem", "run", "tool", "passed", "first_pass_draw", "draws", "verdicts", "changed",
           "input_errors", "mcp",
           "cost_usd", "duration_s", "wall_s", "turns", "subtype", "is_error", "exit",
@@ -61,6 +61,8 @@ for _f in sorted(Path(__file__).parent.glob("problems_*.json")):
     if set(_set) & (set(WRITTEN) | set(PROBLEMS)):
         raise SystemExit(f"{_f.name}의 문제 이름이 다른 문제와 겹친다: {sorted(set(_set) & (set(WRITTEN) | set(PROBLEMS)))}")
     WRITTEN.update(_set)
+if set(SETS) & (set(WRITTEN) | set(PROBLEMS)):  # --problems는 묶음 이름을 먼저 풀어, 겹치면 그 문제를 따로 못 고른다
+    raise SystemExit(f"묶음 이름과 문제 이름이 겹친다: {sorted(set(SETS) & (set(WRITTEN) | set(PROBLEMS)))}")
 
 def diagram_kind(tool: str) -> str:
     return tool.removeprefix("draw_").removesuffix("_diagram").replace("_", " ")
@@ -160,7 +162,8 @@ def _known_names(d: B.Diagram) -> dict[str, str]:
 
 def _name_key(lines: tuple[str, ...], known: dict[str, str]) -> str:
     """이름 줄을 견줄 꼴로. 줄 사이를 띄어 잇거나 붙여 이은 꼴이 문제 이름(known)과 같으면 그 이름으로 본다 — 줄을 어디서
-    나눴든 같은 이름이다. 'Order Service'와 'OrderService'처럼 한 줄 안의 띄어쓰기가 다른 것은 다른 이름이다."""
+    나눴든 같은 이름이다. 'Order Service'와 'OrderService'처럼 띄어쓰기를 더하거나 뺀 것은 다른 이름이다(이어진 공백은 하나로,
+    앞뒤 공백은 없는 것으로 본다)."""
     spaced, joined = _name_forms(lines)
     return known.get(spaced) or known.get(joined) or spaced
 
@@ -240,27 +243,21 @@ def _shape(d: B.Diagram, tool: str, known: dict[str, str]) -> tuple[list, list]:
     return elements, relations
 
 
-def faithful(drawn: dict, spec: dict, tool: str) -> bool:
+def faithful(drawn: dict, spec: dict, tool: str, problem: tuple | None = None) -> bool:
     """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸·id는 보지 않는다). cysUML이 읽지 못하는
-    입력은 문제와 같다고 볼 수 없다."""
-    known, want = problem_shape(spec, tool)
+    입력은 문제와 같다고 볼 수 없다. problem은 미리 만든 problem_shape(spec, tool)이다."""
+    known, want = problem or problem_shape(spec, tool)
     try:
         return _shape(_diagram(drawn, tool), tool, known) == want
     except InputError:
         return False
 
 
-_PROBLEMS_READ: dict[str, tuple[dict, tuple]] = {}
-
-
 def problem_shape(spec: dict, tool: str) -> tuple[dict[str, str], tuple[list, list]]:
-    """문제의 이름 열쇠와 견줄 꼴. 한 실행 안에서 문제는 그대로라 한 번만 만든다. cysUML이 못 읽는 문제는 InputError."""
-    k = _digest([tool, spec])
-    if k not in _PROBLEMS_READ:
-        d = _diagram(spec, tool)
-        known = _known_names(d)
-        _PROBLEMS_READ[k] = known, _shape(d, tool, known)
-    return _PROBLEMS_READ[k]
+    """문제의 이름 열쇠와 견줄 꼴. cysUML이 못 읽는 문제는 InputError."""
+    d = _diagram(spec, tool)
+    known = _known_names(d)
+    return known, _shape(d, tool, known)
 
 
 def read_events(lines) -> list[dict]:
@@ -308,9 +305,18 @@ def spec_from_prompt(prompt: str) -> dict | None:
 
 
 def tool_from_prompt(prompt: str) -> str | None:
-    """prompt.txt에서 그 실행의 도구 이름을 꺼낸다(row.json이 없는 옛 기록용, prompt_for의 첫 문장을 읽는다)."""
-    m = re.search(r"cysUML tool `(draw_\w+)`", prompt)
+    m = re.search(r"cysUML tool `(draw_\w+)`", prompt)  # prompt_for의 첫 문장
     return m.group(1) if m else None
+
+
+def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
+    """그 실행의 도구. 실제로 준 지시(prompt.txt) → row.json → fallback(results.csv의 tool) 차례로 찾는다(rescore.py와
+    inspect_run.py가 같이 쓴다)."""
+    prompt, row = run_dir / "prompt.txt", run_dir / "row.json"
+    tool = tool_from_prompt(prompt.read_text(encoding="utf-8")) if prompt.exists() else None
+    if tool is None and row.exists():
+        tool = json.loads(row.read_text(encoding="utf-8")).get("tool")
+    return tool or fallback
 
 
 # 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함,
@@ -333,8 +339,9 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
         row["subtype"] = (f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") + (" (timeout)" if timed_out else "")
     elif timed_out:
         row["subtype"] = "timeout"
-    elif row["is_error"] and row["subtype"] == "success" and not row["passed"]:
-        # claude -p는 API 오류(인증·429·529)를 이렇게 낸다(상한 초과는 다른 subtype). 합격을 이미 기록했으면 그대로 둔다
+    elif row["is_error"] and row["subtype"] == "success" and not row["passed"] and row["draws"] < MAX_DRAWS:
+        # claude -p는 API 오류(인증·429·529)를 이렇게 낸다(상한 초과는 다른 subtype). 10번을 다 그리기 전에 끊긴 실행만
+        # 결과를 알 수 없어 뺀다 — 합격했거나 10번을 다 그린 실행은 잰 그대로 둔다
         row["subtype"] = "api_error"
     return row
 
@@ -363,10 +370,12 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
     ids, inputs = [i for i, _ in uses], dict(uses)
     results = draw_results(events, ids)
     result = next((e for e in reversed(events) if e.get("type") == "result"), {})
-    seq = []
+    seq, problem = [], None
     for i in ids:
         v = verdict(first_line(results[i].get("content"))) if i in results else "missing"
-        if v == "pass" and spec is not None and not faithful(inputs.get(i, {}), spec, tool):
+        if v == "pass" and spec is not None:
+            problem = problem or problem_shape(spec, tool)  # 한 실행 안에서 문제는 그대로라 한 번만 만든다
+        if v == "pass" and spec is not None and not faithful(inputs.get(i, {}), spec, tool, problem):
             v = "changed"
         seq.append(v)
     first_pass = next((n for n, v in enumerate(seq, 1) if v == "pass"), None)
@@ -457,12 +466,14 @@ def run_one(job: dict, key: str) -> dict:
         stop_group(proc, signal.SIGKILL)
         try:
             stdout, stderr = proc.communicate(timeout=60)
-        except subprocess.TimeoutExpired:  # 그룹 밖으로 나간 자손이 출력을 쥐고 있으면 끝내도 닫히지 않는다
-            stdout, stderr = "", "끝낸 뒤에도 출력이 닫히지 않아 기록을 읽지 못했다"
+        except subprocess.TimeoutExpired as e:  # 그룹 밖으로 나간 자손이 출력을 쥐고 있으면 끝내도 닫히지 않는다
+            stdout = (e.stdout or b"").decode("utf-8", "replace")  # 그때까지 받은 기록은 남긴다
+            stderr = (e.stderr or b"").decode("utf-8", "replace") + "\n끝낸 뒤에도 출력이 닫히지 않아 그때까지 받은 기록만 남겼다"
         code = None
     finally:
         with _RUNNING_LOCK:
             _RUNNING.discard(proc)
+    stop_group(proc, signal.SIGTERM)  # claude가 거두지 못한 MCP 서버가 남지 않게 그룹을 한 번 더 정리한다
     (run_dir / "stream.jsonl").write_text(stdout, encoding="utf-8")
     if stderr.strip():
         (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")

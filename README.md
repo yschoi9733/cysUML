@@ -397,9 +397,10 @@ Code sets with `--effort` (not every client lets you set it).
 
 A draw counts as a pass only if it passes the check and still draws the diagram as given. 11 of the 606 draws that
 passed the check had changed the diagram instead, for example by removing every arrowhead with `navigable: none` or by
-dropping a state's actions. In all, 15 of 609 runs did not pass: 10 because of such a change, 4 with Haiku at low or
-medium effort (one of them passed only after the 10-draw limit), and 1 with Fable that hit the cost limit set on each
-run. Every model passed each of the 26 diagrams at least once, except Haiku on one diagram it drew only once.
+dropping a state's actions; in one run the model then drew it again as given and passed. In all, 15 of 609 runs did
+not pass: 10 because of such a change, 4 with Haiku at low or medium effort (one of them passed only after the 10-draw
+limit), and 1 with Fable that hit the cost limit set on each run. Every model passed each of the 26 diagrams at least
+once, except Haiku on one diagram that was run only once.
 
 The models differ in how many draws they need, and in how often the first picture they draw already passes. At high
 effort:
@@ -580,9 +581,10 @@ Claude 모델 넷에 자리를 지운 그림 26개(7종, 요소 2\~36개)를 주
 전에 얼마나 깊게 생각하는지 — Claude Code에서는 `--effort`로 정하고, 정할 수 없는 클라이언트도 있다)도 바꿔 가며 쟀다.
 
 검사에 합격하고 주어진 그림을 그대로 그린 차례만 합격으로 쳤다. 검사에 합격한 차례 606번 가운데 11번은 그림을 바꿔 그린
-것이었다(`navigable: none`으로 화살촉을 모두 없애거나 상태의 동작 줄을 빼는 등). 그래서 실행 609번 가운데 15번이 불합격이다.
-10번은 이렇게 그림을 바꿨고, 4번은 effort를 low·medium으로 낮춘 Haiku(그중 한 번은 10번을 넘겨 합격), 1번은 실행마다 건 비용
-상한에 걸린 Fable이다. Haiku가 한 번만 그린 그림 하나를 빼면, 네 모델 모두 26개 그림을 한 번 이상 합격했다.
+것이었다(`navigable: none`으로 화살촉을 모두 없애거나 상태의 동작 줄을 빼는 등). 그중 한 실행은 다시 그대로 그려 합격했다.
+그래서 실행 609번 가운데 15번이 불합격이다. 10번은 이렇게 그림을 바꿨고, 4번은 effort를 low·medium으로 낮춘 Haiku(그중 한
+번은 10번을 넘겨 합격), 1번은 실행마다 건 비용 상한에 걸린 Fable이다. 실행을 한 번만 한 그림 하나에서 Haiku가 불합격한 것을
+빼면, 네 모델 모두 26개 그림을 한 번 이상 합격했다.
 
 모델 차이는 몇 번 만에 합격하느냐, 처음 그린 그림이 바로 합격하느냐에서 난다. effort high에서:
 
