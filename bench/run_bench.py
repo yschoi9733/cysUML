@@ -158,10 +158,10 @@ def _name_forms(lines: tuple[str, ...]) -> tuple[str, str]:
 
 def _known_names(d: B.Diagram) -> dict[str, str]:
     """문제의 이름마다 견줄 열쇠. 여러 줄 이름은 띄우지 않고 이은 꼴로도 찾는다(긴 한 단어를 줄로 나눈 것일 수 있다)."""
-    names = [x.name for x in (*d.boxes, *d.relations) if x.name]
-    known = {_name_forms(n)[0]: _name_forms(n)[0] for n in names}
-    for n in names:
-        known.setdefault(_name_forms(n)[1], _name_forms(n)[0])
+    forms = [_name_forms(x.name) for x in (*d.boxes, *d.relations) if x.name]
+    known = {spaced: spaced for spaced, _ in forms}
+    for spaced, joined in forms:
+        known.setdefault(joined, spaced)
     return known
 
 
@@ -447,6 +447,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         seq.append(v)
     first_pass = next((n for n, v in enumerate(seq, 1) if v == "pass"), None)
     usage = result.get("usage") or {}
+    mcp, init_tools = mcp_status(events), init_event(events).get("tools") or []
     return {
         "draws": len(seq),
         "first_pass_draw": first_pass,
@@ -455,7 +456,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "input_errors": seq.count("input_error"),
         "changed": seq.count("changed"),
         "save_errors": save_errors,
-        "mcp": mcp_status(events),
+        "mcp": mcp,
         "cost_usd": result.get("total_cost_usd"),
         "turns": result.get("num_turns"),
         "duration_s": round(result["duration_ms"] / 1000, 1) if result.get("duration_ms") is not None else None,
@@ -463,8 +464,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "ended": result.get("subtype"),  # build_row가 subtype을 바꿔도 남는다
         "answered": any(e.get("type") == "assistant" for e in events),
         # 그 문제의 그리기 도구를 쓸 수 있었는지(init의 도구 목록). MCP 상태가 pending이어도 도구가 있으면 모델이 판단한 것이다
-        "tool_ready": mcp_status(events) == "connected"
-        or (bool(tool) and DRAW_PREFIX + tool.removeprefix("draw_") in (init_event(events).get("tools") or [])),
+        "tool_ready": mcp == "connected" or (bool(tool) and DRAW_PREFIX + tool.removeprefix("draw_") in init_tools),
         "is_error": result.get("is_error"),
         "api_status": result.get("api_error_status"),
         "error": (str(result.get("result") or result.get("errors") or "") or None) if result.get("is_error") else None,
@@ -479,6 +479,7 @@ _RUNNING: set[subprocess.Popen] = set()
 _RUNNING_LOCK = threading.Lock()
 _STOP = threading.Event()  # 멈춘 뒤에는 새 claude를 띄우지 않는다(_RUNNING_LOCK 안에서 보고 세운다)
 _SIGNALED: set[int] = set()  # _RUNNING_LOCK 안에서 넣는다
+_MEMBERS: dict[int, list[int]] = {}  # 멈출 때 기억한 그룹별 구성원(force_exit도 쓴다)
 # claude에 넘기는 환경 변수. 셸에 있는 Claude Code 설정(effort·생각 토큰·캐시·제공자 전환 등)이 측정에 섞이지 않게
 # 이것만 넘긴다(프록시·인증서 변수는 API에 닿는 데 필요할 수 있어 넘긴다)
 KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG",
@@ -490,9 +491,13 @@ STOP_SIGNALS = tuple(getattr(signal, n) for n in ("SIGINT", "SIGTERM", "SIGHUP")
 
 
 def force_exit(signum, frame) -> None:
-    """정리 중에 신호가 한 번 더 오면 돌던 claude를 바로 끝내고 나간다(정리가 막혔을 때의 탈출구)."""
+    """정리 중에 신호가 한 번 더 오면 돌던 claude와 기억한 그룹 구성원을 바로 끝내고 나간다(정리가 막혔을 때의 탈출구)."""
     for p in list(_RUNNING):
         stop_group(p, signal.SIGKILL)
+    for pgid, pids in list(_MEMBERS.items()):
+        for pid in pids:
+            kill_if_member(pid, pgid)
+    say("정리를 기다리지 않고 바로 끝냈다(돌던 claude는 끝냈다)", file=sys.stderr)
     os._exit(1)
 
 
@@ -510,7 +515,10 @@ def say(text: str, file=None) -> None:
 
 
 def group_members(pgid: int) -> list[int]:
-    out = subprocess.run(["pgrep", "-g", str(pgid)], capture_output=True, text=True).stdout
+    try:
+        out = subprocess.run(["pgrep", "-g", str(pgid)], capture_output=True, text=True).stdout
+    except FileNotFoundError:  # pgrep이 없으면 그룹째 보내는 SIGTERM에만 기댄다
+        return []
     return [int(x) for x in out.split()]
 
 
@@ -538,7 +546,7 @@ def run_dir_for(base: Path, model: str, effort: str, problem: str, run) -> Path:
 
 
 def run_one(job: dict, key: str) -> dict:
-    if _STOP.is_set():  # 멈춘 뒤에는 폴더도 건드리지 않는다
+    if _STOP.is_set():
         raise Stopped("멈춘 뒤라 띄우지 않았다")
     run_dir: Path = job["dir"]
     run_dir.mkdir(parents=True)
@@ -582,7 +590,7 @@ def run_one(job: dict, key: str) -> dict:
             stdout = (e.stdout or b"").decode("utf-8", "replace")  # 그때까지 받은 기록은 남긴다
             stderr = (e.stderr or b"").decode("utf-8", "replace") + "\n끝낸 뒤에도 출력이 닫히지 않아 그때까지 받은 기록만 남겼다"
             try:
-                proc.wait(timeout=10)  # 출력과 상관없이 끝낸 claude는 거둔다
+                proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 pass
         code = None
@@ -644,12 +652,15 @@ def main() -> None:
     rows = []
     base.mkdir(parents=True, exist_ok=True)
     pool = cf.ThreadPoolExecutor(max_workers=args.workers)
-    stop = {"why": None, "signals": 0}  # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다
+    stop = {"why": None, "first": None}  # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다
 
     def on_stop(signum, frame):  # 예외를 던지지 않아 쓰던 줄이 잘리거나 잠금을 쥔 채 끊기지 않는다
-        stop["signals"] += 1
-        if stop["signals"] > 1:  # 두 번째 신호: 정리가 막혔어도 바로 끝낸다
+        now = time.monotonic()
+        # uv run은 받은 신호를 python에도 넘기고 셸은 앞그룹 전체에 보내, 한 번의 Ctrl-C·터미널 닫기가 두 번 온다. 그래서
+        # 2초 안에 다시 온 것은 같은 신호로 보고, 그 뒤에 또 오면 정리가 막혔어도 바로 끝낸다
+        if stop["first"] is not None and now - stop["first"] > 2:
             force_exit(signum, frame)
+        stop["first"] = stop["first"] or now
         stop["why"] = stop["why"] or signal.Signals(signum).name
 
     previous = {s: signal.getsignal(s) for s in STOP_SIGNALS}
@@ -710,7 +721,9 @@ def main() -> None:
                     record(fut)
         except Exception as e:  # 결과를 쓰다 난 오류(디스크가 가득 참 등)
             stop["why"] = stop["why"] or f"오류: {type(e).__name__}: {e}"
-        if stop["why"] is not None:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다
+        if stop["why"] is not None and all(fut.done() for fut in futures):  # 멈출 때 남은 실행이 없었다
+            say(f"알림: {stop['why']}", file=sys.stderr)
+        elif stop["why"] is not None:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다
             try:
                 with _RUNNING_LOCK:
                     _STOP.set()
@@ -718,7 +731,7 @@ def main() -> None:
                     live = [p for p in procs if p.poll() is None]  # 이미 스스로 끝난 실행은 신호를 보낸 실행이 아니다
                     _SIGNALED.update(p.pid for p in live)
                 # 그룹 구성원(MCP 서버 등)을 지금 기억해, claude가 먼저 끝나도 남은 구성원까지 끝낸다
-                members = {p.pid: group_members(p.pid) for p in live}
+                _MEMBERS.update({p.pid: group_members(p.pid) for p in live})
                 for p in live:
                     stop_group(p, signal.SIGTERM)
                 pool.shutdown(wait=False, cancel_futures=True)
@@ -728,10 +741,10 @@ def main() -> None:
                 for p in procs:  # SIGKILL은 아직 거두지 않은 claude의 그룹과, 아직 그 그룹에 남은 구성원에만
                     if p.poll() is None:
                         stop_group(p, signal.SIGKILL)
-                for pgid, pids in members.items():
+                for pgid, pids in list(_MEMBERS.items()):
                     for pid in pids:
                         kill_if_member(pid, pgid)
-                cf.wait([fut for fut in futures if not fut.done()], timeout=10)  # 끝낸 실행의 스레드가 기록을 마치기를 기다린다
+                cf.wait([fut for fut in futures if not fut.done()], timeout=10)
                 for fut in futures:  # 끝났는데 아직 쓰지 못한 실행(정리하는 동안 스스로 끝난 실행도 든다)
                     if fut.done() and fut not in recorded:
                         try:
