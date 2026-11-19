@@ -173,6 +173,28 @@ def test_timeout_before_any_draw_is_not_measured_even_after_text():
     assert row["subtype"] == "no_answer (timeout)"
 
 
+def test_tool_exception_and_internal_crash_are_not_the_models_failure():
+    tool, spec = bench.load_problem("order")
+    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 0, "wall_s": 9.0}
+    # cysUML 도구가 예외를 내 그 차례로 끝났다
+    events = [INIT, *_draws(spec, [FAIL, "Error executing tool draw_class_diagram: KeyError 'x'"])]
+    events[-1]["message"]["content"][0]["is_error"] = True
+    row = bench.build_row(meta, [json.dumps(e) for e in [*events, ENDED]], tool, spec, False)
+    assert row["verdicts"] == "fail tool_error" and row["subtype"] == "tool_error"
+    # claude 안의 오류로 끝났다(결과 이벤트는 냈다)
+    crash = {"type": "result", "subtype": "error_during_execution", "is_error": True}
+    row = bench.build_row(meta, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), crash]], tool, spec, False)
+    assert row["subtype"] == "no_result"
+
+
+def test_non_object_lines_are_skipped():
+    tool, spec = bench.load_problem("order")
+    lines = ["null", "3", '"x"', *[json.dumps(e) for e in [INIT, *_draws(spec, [PASS]), ENDED]]]
+    row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 0, "wall_s": 9.0},
+                          lines, tool, spec, False)
+    assert row["passed"] and row["subtype"] == "success"
+
+
 def test_tool_call_rejected_by_the_sdk_is_an_input_error():
     tool, spec = bench.load_problem("order")
     events = [INIT, *_draws(spec, ["Error executing tool draw_class_diagram: 1 validation error"])]
@@ -189,9 +211,8 @@ def test_config_errors_stop_the_bench():
     assert not bench.config_error({"is_error": True, "api_status": 400, "error": "Prompt is too long"})
     # 문제 이름(billing·BillingService)이 오류 글에 인용돼도 크레딧 부족이 아니다
     assert not bench.config_error({"is_error": True, "api_status": 400, "error": "invalid input near BillingService"})
-    # 403은 오류 글이 모델을 말하면 그 모델만, 아니면 키·조직 전체의 권한 문제다
-    assert bench.config_error({"is_error": True, "api_status": 403, "error": "no access to model claude-x"}) == "model"
-    assert bench.config_error({"is_error": True, "api_status": 403, "error": "permission denied"}) == "key"
+    # 403은 그 모델만인지 키·조직 전체인지 오류만으로 가를 수 없다(record가 두 모델째에서 전체를 멈춘다)
+    assert bench.config_error({"is_error": True, "api_status": 403, "error": "permission to use the model"}) == "forbidden"
 
 
 @pytest.mark.parametrize("ended, draws, stopped", [

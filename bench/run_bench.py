@@ -289,9 +289,11 @@ def read_events(lines) -> list[dict]:
     events = []
     for raw in lines:
         try:
-            events.append(json.loads(raw))
+            ev = json.loads(raw)
         except json.JSONDecodeError:
             continue
+        if isinstance(ev, dict):  # 감싼 도구가 찍은 null·숫자 줄 등은 이벤트가 아니다
+            events.append(ev)
     return events
 
 
@@ -303,6 +305,8 @@ def draw_uses(events: list[dict], tool: str | None = None) -> list[tuple[str, di
         if ev.get("type") != "assistant":
             continue
         for b in (ev.get("message") or {}).get("content") or []:
+            if not isinstance(b, dict):
+                continue
             name = str(b.get("name", ""))
             if b.get("type") == "tool_use" and (name == DRAW_PREFIX + tool.removeprefix("draw_") if tool
                                                 else name.startswith(DRAW_PREFIX)):
@@ -346,7 +350,7 @@ def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
 
 # 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함,
 # 모델이 한 번도 답하지 않은 채 시간이 다 감, 서버 쪽 API 오류, 끝의 결과 없이 끝남(크래시 등), 하네스 오류, 멈출 때 끊김
-NOT_MEASURED = ("mcp_failed", "no_init", "no_answer", "api_error", "no_result", "harness_error", "stopped")
+NOT_MEASURED = ("mcp_failed", "no_init", "no_answer", "api_error", "no_result", "tool_error", "harness_error", "stopped")
 NATURAL_ENDS = ("success", "error_max_budget_usd", "error_max_turns")  # claude가 스스로 끝낸 결과 이벤트의 subtype
 BILLING = re.compile(r"credit balance", re.I)  # 크레딧이 떨어지면 400 "Your credit balance is too low"로 온다
 OUTAGE = re.compile(r"Connection error|Request timed out|overloaded", re.I)  # 상태 번호 없이 오는 서버 쪽 오류 글
@@ -362,16 +366,14 @@ def _api_code(row: dict) -> int | None:
 
 
 def config_error(row: dict) -> str | None:
-    """남은 실행도 같은 오류로 끝날 원인: billing(크레딧 부족)·key(401, 키·조직 권한의 403)는 모든 모델, model(404, 그
-    모델 권한의 403)은 그 모델만."""
+    """남은 실행도 같은 오류로 끝날 원인: billing(크레딧 부족)·key(401)는 모든 모델, model(404)은 그 모델만,
+    forbidden(403)은 그 모델만인지 키·조직 전체인지 오류만으로 가를 수 없어 record가 겪은 대로 정한다."""
     if not row.get("is_error") or row.get("passed"):
         return None
     if BILLING.search(row.get("error") or ""):
         return "billing"
     code = _api_code(row)
-    if code == 403:  # 권한 오류는 오류 글이 모델을 말하면 그 모델만의 문제다
-        return "model" if re.search(r"model", row.get("error") or "", re.I) else "key"
-    return "key" if code == 401 else "model" if code == 404 else None
+    return "key" if code == 401 else "model" if code == 404 else "forbidden" if code == 403 else None
 
 
 def server_side(row: dict) -> bool:
@@ -403,12 +405,12 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
         row["duration_s"] = row["wall_s"]
     no_tool = not row["draws"] and not row["tool_ready"]  # 그림 도구 없이 끝났다
     no_answer = not row["draws"] and timed_out  # 한 번도 그리기 전에 시간이 다 갔다(API가 멈춘 것과 가를 수 없다)
-    # 그리는 도중 MCP 서버가 끊겨 그 차례로 끝났다(그 뒤에도 그렸으면 잠깐 끊긴 것이라 잰 실행이다)
-    mcp_broke = (not row["passed"] and row["draws"] < MAX_DRAWS
-                 and (row["verdicts"].split() or [""])[-1] == "mcp_error")
-    if no_tool or no_answer or mcp_broke:  # 모델의 불합격이 아니다
+    # 그리는 도중 MCP 서버가 끊기거나 도구가 예외를 내 그 차례로 끝났다(그 뒤에도 그렸으면 잠깐 그런 것이라 잰 실행이다)
+    last = (row["verdicts"].split() or [""])[-1]
+    broke = not row["passed"] and row["draws"] < MAX_DRAWS and last in ("mcp_error", "tool_error")
+    if no_tool or no_answer or broke:  # 모델의 불합격이 아니다
         why = ((f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") if no_tool
-               else "no_answer" if no_answer else "mcp_failed: during run")
+               else "no_answer" if no_answer else "mcp_failed: during run" if last == "mcp_error" else "tool_error")
         row["subtype"] = why + (" (timeout)" if timed_out else "")
     elif timed_out:
         row["subtype"] = "timeout"
@@ -416,8 +418,9 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
         # 서버 쪽 오류로 10번을 다 그리기 전에 끊긴 실행만 결과를 알 수 없어 뺀다. 합격했거나 10번을 다 그린 실행, 모델 탓인
         # 오류로 끝난 실행은 잰 그대로 둔다
         row["subtype"] = "api_error"
-    elif row["ended"] is None and not row["passed"] and row["draws"] < MAX_DRAWS:
-        # 끝의 결과 없이 끝났다(크래시, stderr로만 낸 오류, 밖에서 온 시그널) — 종료 코드는 0일 수도 있다
+    elif row["ended"] in (None, "error_during_execution") and not row["passed"] and row["draws"] < MAX_DRAWS:
+        # 끝의 결과 없이 끝났거나 claude 안의 오류로 끝났다(크래시, stderr로만 낸 오류, 밖에서 온 시그널) — 종료 코드는
+        # 0일 수도 있다
         row["subtype"] = "no_result"
     if (meta.get("signaled") and row["ended"] not in NATURAL_ENDS and not timed_out and not row["passed"]
             and row["draws"] < MAX_DRAWS):
@@ -456,8 +459,10 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         text = result_text(results[i].get("content")) if i in results else ""
         v = verdict_of(text) if i in results else "missing"
         if v == "other" and results[i].get("is_error"):
-            # MCP 서버가 죽거나 요청 시간이 넘은 것은 mcp_error(모델 탓이 아니다), 그 밖은 SDK가 인자를 거절한 것 등
-            v = "mcp_error" if text.startswith("MCP error") else "input_error"
+            # MCP 서버가 죽거나 요청 시간이 넘었다(mcp_error), SDK가 인자를 거절했다(input_error, 모델 탓), 도구가 예외를
+            # 냈다(tool_error, cysUML 탓)
+            v = ("mcp_error" if text.startswith("MCP error") else "input_error" if "validation error" in text
+                 else "tool_error")
         # 저장에 실패하면 서버는 오류 결과에 검사 요약을 붙인다. 판정은 요약으로 하되, 모델은 결과가 합격으로 시작하지 않아
         # 계속 그릴 수 있어 summarize.py가 알리게 센다
         save_errors += v == "pass" and bool(results[i].get("is_error"))
@@ -689,7 +694,7 @@ def main() -> None:
     base.mkdir(parents=True, exist_ok=True)
     pool = cf.ThreadPoolExecutor(max_workers=args.workers)
     # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다. failed는 결과를 쓰다 난 오류
-    stop = {"why": None, "first": None, "signum": None, "failed": False, "skipped": []}
+    stop = {"why": None, "first": None, "signum": None, "failed": False, "skipped": [], "forbidden": set()}
 
     def on_stop(signum, frame):  # 예외를 던지지 않아 쓰던 줄이 잘리거나 잠금을 쥔 채 끊기지 않는다
         now = time.monotonic()
@@ -738,6 +743,9 @@ def main() -> None:
             if stop["why"] is not None:
                 return
             cause = config_error(row)
+            if cause == "forbidden":  # 403이 두 모델째에서도 나면 키·조직 전체의 권한 문제다
+                stop["forbidden"].add(j["model"])
+                cause = "key" if len(stop["forbidden"]) > 1 else "model"
             if cause == "model" and j["model"] not in stop["skipped"]:  # 그 모델만 쓸 수 없다(이름 오타·권한)
                 stop["skipped"].append(j["model"])
                 skipped = [x for x, job in futures.items()
@@ -746,10 +754,11 @@ def main() -> None:
                     f"{row.get('error')}",
                     file=sys.stderr)
             elif cause in ("key", "billing"):  # 키·크레딧은 모든 실행에 걸리니 바로 멈춘다(이미 뺀 모델의 404는 여기 오지 않는다)
-                what = "크레딧이 떨어졌다" if cause == "billing" else "API 키가 틀렸다"
+                what = "크레딧이 떨어졌다" if cause == "billing" else "API 키가 틀렸거나 키·조직에 권한이 없다"
                 stop["why"] = f"{what}({row.get('api_status')}): {row.get('error')}"
             elif not any(is_measured(r.get("subtype")) for r in rows):
-                started_badly = [r for r in rows if (r.get("subtype") or "").startswith(("no_init", "mcp_failed"))]
+                started_badly = [r for r in rows if (r.get("subtype") or "").startswith(("no_init", "mcp_failed"))
+                                 and "during run" not in r["subtype"]]  # 그리다가 끊긴 것은 시작은 했다
                 if len(started_badly) >= 3:  # 잰 실행 없이 시작 실패만 나면 설정·환경 문제다
                     stop["why"] = f"claude가 시작하지 못하거나 MCP가 붙지 않는다({len(started_badly)}번): {row.get('subtype')}"
 
