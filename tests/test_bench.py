@@ -138,6 +138,22 @@ def test_config_errors_stop_the_bench():
     assert bench.config_error({"is_error": True, "api_status": 400, "error": "Your credit balance is too low"})
     assert not bench.config_error({"is_error": True, "api_status": 529, "error": ""})
     assert not bench.config_error({"is_error": True, "api_status": 400, "error": "Prompt is too long"})
+    # 문제 이름(billing·BillingService)이 오류 글에 인용돼도 크레딧 부족이 아니다
+    assert not bench.config_error({"is_error": True, "api_status": 400, "error": "invalid input near BillingService"})
+
+
+@pytest.mark.parametrize("ended, draws, stopped", [
+    (None, 2, True),  # 결과 없이 끊김
+    ("error_during_execution", 2, True),  # 신호를 받고 낸 결과는 스스로 끝난 것이 아니다
+    ("success", 2, False),  # 신호 전에 스스로 끝났다(모델이 포기함)
+    (None, 10, False),  # 10번을 다 그렸으면 잰 불합격이다
+])
+def test_signaled_runs(ended, draws, stopped):
+    tool, spec = bench.load_problem("order")
+    events = [INIT, *_draws(spec, [FAIL] * draws)] + ([{"type": "result", "subtype": ended}] if ended else [])
+    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 143, "wall_s": 9.0, "signaled": True}
+    row = bench.build_row(meta, [json.dumps(e) for e in events], tool, spec, False)
+    assert (row["subtype"] == "stopped") == stopped and bench.is_measured(row["subtype"]) != stopped
 
 
 def test_lists_sent_as_json_text_are_read():

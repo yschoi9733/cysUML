@@ -331,10 +331,10 @@ def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
 
 
 # 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함,
-# 모델이 한 번도 답하지 않은 채 시간이 다 감, 서버 쪽 API 오류, 끝의 결과 없이 끝남(크래시 등), 하네스 오류
-NOT_MEASURED = ("mcp_failed", "no_init", "no_answer", "api_error", "no_result", "harness_error")
+# 모델이 한 번도 답하지 않은 채 시간이 다 감, 서버 쪽 API 오류, 끝의 결과 없이 끝남(크래시 등), 하네스 오류, 멈출 때 끊김
+NOT_MEASURED = ("mcp_failed", "no_init", "no_answer", "api_error", "no_result", "harness_error", "stopped")
 NATURAL_ENDS = ("success", "error_max_budget_usd", "error_max_turns")  # claude가 스스로 끝낸 결과 이벤트의 subtype
-BILLING = re.compile(r"credit balance|billing", re.I)  # 크레딧이 떨어지면 400으로 온다
+BILLING = re.compile(r"credit balance", re.I)  # 크레딧이 떨어지면 400 "Your credit balance is too low"로 온다
 OUTAGE = re.compile(r"Connection error|Request timed out|overloaded", re.I)  # 상태 번호 없이 오는 서버 쪽 오류 글
 
 
@@ -395,6 +395,11 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool, problem
     elif row["ended"] is None and not row["passed"] and row["draws"] < MAX_DRAWS:
         # 끝의 결과 없이 끝났다(크래시, stderr로만 낸 오류, 밖에서 온 시그널) — 종료 코드는 0일 수도 있다
         row["subtype"] = "no_result"
+    if (meta.get("signaled") and row["ended"] not in NATURAL_ENDS and not timed_out and not row["passed"]
+            and row["draws"] < MAX_DRAWS):
+        # 멈추며 신호를 보낸 실행이 스스로 끝(NATURAL_ENDS)도, 합격이나 10번 그림도 내기 전이면 끊긴 것이다. 신호를 받고
+        # 결과 이벤트를 내며 끝나도 그 subtype은 스스로 끝난 것이 아니다
+        row["subtype"] = "stopped"
     return row
 
 
@@ -473,9 +478,15 @@ KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG"
 STOP_SIGNALS = tuple(getattr(signal, n) for n in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, n))  # Windows엔 SIGHUP이 없다
 
 
-def ignore_stop_signals() -> None:
-    for s in STOP_SIGNALS:
-        signal.signal(s, signal.SIG_IGN)
+def _ignored(signum, frame) -> None:
+    pass
+
+
+def ignore_stop_signals(signals) -> None:
+    # SIG_IGN은 그 사이 새로 띄운 claude가 물려받아 SIGTERM을 무시하게 되니, 아무것도 하지 않는 처리기를 건다(새 프로그램을
+    # 띄우면 기본값으로 돌아간다)
+    for s in signals:
+        signal.signal(s, _ignored)
 
 
 def force_exit(signum, frame) -> None:
@@ -498,10 +509,8 @@ def say(text: str, file=None) -> None:
         pass
 
 
-def stop_group(proc: subprocess.Popen, sig: int, force: bool = False) -> None:
-    # 이미 거둔 프로세스의 pid(=그룹 번호)는 다른 프로세스가 받았을 수 있다. force는 멈춘 뒤(새 claude를 띄우지 않을 때) 그룹에
-    # 남은 MCP 서버까지 끝낼 때 쓴다
-    if proc.returncode is not None and not force:
+def stop_group(proc: subprocess.Popen, sig: int) -> None:
+    if proc.returncode is not None:  # 이미 거둔 프로세스의 pid(=그룹 번호)는 다른 프로세스가 받았을 수 있다
         return
     try:
         os.killpg(proc.pid, sig)
@@ -568,15 +577,11 @@ def run_one(job: dict, key: str) -> dict:
     (run_dir / "stream.jsonl").write_text(stdout, encoding="utf-8")
     if stderr.strip():
         (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
-    meta = {"exit": code, "wall_s": round((timed_out_at or time.time()) - started, 1), "timed_out": code is None}
+    meta = {"exit": code, "wall_s": round((timed_out_at or time.time()) - started, 1), "timed_out": code is None,
+            "signaled": proc.pid in _SIGNALED}
     (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")  # 해석이 실패해도 rescore.py가 다시 읽게
     row = build_row(job | meta, stdout.split("\n"), tool, spec, meta["timed_out"], PROBLEM_SHAPES.get(job["problem"]))
-    # 멈추며 시그널을 보낸 실행이 스스로 끝(NATURAL_ENDS)도, 합격이나 10번 그림도 내기 전이면 끊긴 것이다. 시그널을 받고
-    # 결과 이벤트를 내며 끝나도 그 subtype은 스스로 끝난 것이 아니다
-    stopped = (proc.pid in _SIGNALED and row["ended"] not in NATURAL_ENDS and not row["timed_out"] and not row["passed"]
-               and row["draws"] < MAX_DRAWS)
-    if stopped:
-        row["subtype"] = "stopped"
+    stopped = row["subtype"] == "stopped"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
     if stopped:
         raise Stopped("멈출 때 끝냈다")
@@ -637,7 +642,7 @@ def main() -> None:
             if writing["now"]:
                 writing["stop"] = True
             else:  # 정리에 들어가는 순간부터 또 온 신호는 받지 않는다(정리를 건너뛰지 않게)
-                ignore_stop_signals()
+                ignore_stop_signals(watched)
                 raise KeyboardInterrupt
 
         def record(fut) -> dict:
@@ -660,10 +665,11 @@ def main() -> None:
             # 키·모델 이름이 틀리면(401·403·404) 남은 실행도 모두 같은 오류로 끝나 표에서 빠지니 바로 멈춘다
             stop_all = config_error(row) and not _STOP.is_set()
             if stop_all:
-                say(f"API 키나 모델 이름이 틀려 멈춘다({row['api_status']}): {row.get('error')}", file=sys.stderr)
+                why = "크레딧이 떨어져" if BILLING.search(row.get("error") or "") else "API 키나 모델 이름이 틀려"
+                say(f"{why} 멈춘다({row.get('api_status')}): {row.get('error')}", file=sys.stderr)
             if writing["stop"] or stop_all:
                 writing["stop"] = False
-                ignore_stop_signals()
+                ignore_stop_signals(watched)
                 raise KeyboardInterrupt
             return row
 
@@ -677,6 +683,7 @@ def main() -> None:
                 futures[pool.submit(run_one, j, key)] = j
             for fut in cf.as_completed(futures):
                 record(fut)
+            restore_stop_signals(previous)
         except BaseException as e:  # 신호나 결과를 쓰다 난 오류: 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다
             try:  # 정리 중에 또 신호나 오류가 나면 돌던 claude를 바로 끝내고 나간다
                 for s in watched:
@@ -691,8 +698,9 @@ def main() -> None:
                 deadline = time.time() + 10  # SIGTERM을 무시하는 그룹은 10초 뒤 SIGKILL로 끝낸다
                 while time.time() < deadline and any(p.poll() is None for p in procs):
                     time.sleep(0.2)
-                for p in procs:  # claude가 먼저 끝났어도 그룹에 남은 MCP 서버까지
-                    stop_group(p, signal.SIGKILL, force=True)
+                for p in procs:  # SIGTERM은 그룹째 보내 MCP 서버도 받았다. SIGKILL은 아직 거두지 않은 claude의 그룹에만
+                    if p.poll() is None:
+                        stop_group(p, signal.SIGKILL)
                 cf.wait([fut for fut in futures if not fut.done()], timeout=10)  # 끝낸 실행의 스레드가 기록을 마치기를 기다린다
                 # 끝났는데 아직 쓰지 못한 실행만 남긴다(정리하는 동안 스스로 끝난 실행도 든다, 끊긴 실행은 쓰지 않는다)
                 try:
@@ -710,7 +718,6 @@ def main() -> None:
             # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
             # 줄마다 flush했다
             os._exit(1)
-    restore_stop_signals(previous)
     pool.shutdown()
     total = sum(r.get("cost_usd") or 0 for r in rows)
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
