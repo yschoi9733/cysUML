@@ -12,7 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from run_bench import FIELDS, NOT_MEASURED, build_row, load_problem, run_dir_for, run_tool, spec_from_prompt
+from run_bench import FIELDS, build_row, is_measured, load_problem, run_dir_for, run_tool, spec_from_prompt
 
 
 class Kept(Exception):
@@ -38,8 +38,8 @@ def rescore_row(tag_dir: Path, r: dict) -> dict:
         tool, spec = tool or now_tool, spec or now_spec
     if str(meta.get("timed_out")) in ("True", "False"):
         timed_out = str(meta["timed_out"]) == "True"
-    else:  # timed_out을 남기기 전의 옛 기록: 그때 적은 판정 문구나, 판정(끝의 결과)도 종료 코드도 없는 것으로 가린다
-        timed_out = sub == "timeout" or sub.endswith("(timeout)") or (not sub and not r.get("exit"))
+    else:  # timed_out을 남기기 전의 옛 기록은 그때 적은 판정 문구로만 가린다
+        timed_out = sub == "timeout" or sub.endswith("(timeout)")
     return build_row(meta, stream.read_text(encoding="utf-8").splitlines(), tool, spec, timed_out)
 
 
@@ -57,9 +57,9 @@ for tag_dir in map(Path, sys.argv[1:]):
             new_rows.append(r)
             continue
         new_rows.append(row)
-        was, now = ((x or "").startswith(NOT_MEASURED) for x in (r.get("subtype"), row["subtype"]))
+        was, now = is_measured(r.get("subtype")), is_measured(row["subtype"])
         if was != now:  # 표에 드는 실행 수가 바뀐다
-            print(f"{name} {'표에서 빠짐' if now else '표에 들어옴'}: {r.get('subtype') or '-'}→{row['subtype'] or '-'}")
+            print(f"{name} {'표에 들어옴' if now else '표에서 빠짐'}: {r.get('subtype') or '-'}→{row['subtype'] or '-'}")
         if str(row["passed"]) != r.get("passed") or str(row["first_pass_draw"] or "") != (r.get("first_pass_draw") or ""):
             print(f"{name} 합격 {r.get('passed')}→{row['passed']}, 첫 합격 차례 {r.get('first_pass_draw') or '-'}"
                   f"→{row['first_pass_draw'] or '-'}, 판정 {row['verdicts']}")

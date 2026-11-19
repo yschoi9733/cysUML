@@ -36,7 +36,7 @@ LAYOUT_KEYS = {"left", "top", "via", "width", "height", "name_side"}
 MAX_DRAWS = 10
 DRAW_PREFIX = "mcp__cysuml__draw_"
 FIELDS = ["model", "effort", "problem", "run", "tool", "passed", "first_pass_draw", "draws", "verdicts", "changed",
-          "input_errors", "mcp", "api_status", "error",
+          "input_errors", "save_errors", "mcp", "api_status", "error",
           "cost_usd", "duration_s", "wall_s", "turns", "subtype", "is_error", "exit", "timed_out",
           "input_tokens", "cache_read_tokens", "cache_write_tokens", "output_tokens"]
 
@@ -88,6 +88,9 @@ def load_problem(pid: str) -> tuple[str, dict]:
     return tool, strip_layout(data)
 
 
+PROMPT_SPEC_MARK = "Elements and relations (JSON):\n"  # 이 뒤가 문제 JSON이다(spec_from_prompt가 이것으로 꺼낸다)
+
+
 def prompt_for(pid: str, tool: str, spec: dict) -> str:
     return (
         f"Draw this UML {diagram_kind(tool)} diagram with the cysUML tool `{tool}`. Use file_name \"{pid}\".\n"
@@ -97,9 +100,6 @@ def prompt_for(pid: str, tool: str, spec: dict) -> str:
         f"file_name. Stop as soon as a draw passes the check (its result starts with 합격), or after {MAX_DRAWS} draws.\n\n"
         + PROMPT_SPEC_MARK + json.dumps(spec, ensure_ascii=False, indent=1)
     )
-
-
-PROMPT_SPEC_MARK = "Elements and relations (JSON):\n"  # 이 뒤가 문제 JSON이다(spec_from_prompt가 이것으로 꺼낸다)
 
 
 def api_key() -> str:
@@ -127,8 +127,13 @@ def result_text(content) -> str:
     return next((b.get("text", "").strip() for b in content or [] if isinstance(b, dict) and b.get("type") == "text"), "")
 
 
+# 저장에 실패하면 서버가 이 글을 검사 요약 앞에 붙인다. 검사는 그대로라 판정은 요약으로 하되, 모델은 결과가 합격으로
+# 시작하지 않아 계속 그릴 수 있어 save_errors로 세어 summarize.py가 알린다
+SAVE_FAILED = ("그림을 저장하지 못했다", "입력 파일을 저장하지 못했다")
+
+
 def verdict_of(text: str) -> str:
-    """판정 머리로 시작하는 첫 줄로 가른다. 저장에 실패하면 서버가 그 오류 글을 검사 요약 앞에 붙인다."""
+    """판정 머리로 시작하는 첫 줄로 가른다."""
     return next((v for v in map(verdict, text.splitlines()) if v != "other"), "other")
 
 
@@ -146,12 +151,6 @@ def verdict(line: str) -> str:
 
 def tool_module(tool: str):
     return importlib.import_module("cysuml." + tool.removeprefix("draw_").replace("_", ""))
-
-
-def tool_spec(tool: str):
-    """cysUML이 그 도구에 쓰는 Spec(draw_use_case_diagram → cysuml.usecasediagram). 기본값(요소 목록 칸·kind·navigable)을
-    손으로 옮겨 적지 않으려고 그대로 읽는다."""
-    return tool_module(tool).SPEC
 
 
 def _name_forms(lines: tuple[str, ...]) -> tuple[str, str]:
@@ -185,7 +184,7 @@ def _diagram(data: dict, tool: str) -> B.Diagram:
     입력도 읽히도록 빠진 left·top과 자기 자신으로 가는 관계의 꺾는 점을 채운다(자리는 견주지 않는다). 도구 입력에는 그림 밖의
     인자(file_name 등)도 있어 요소 목록과 관계만 넘긴다. 목록을 JSON 글로 보낸 것은 풀어 읽고, 꼴이 틀린 입력은 cysUML이
     InputError로 거절하게 그대로 넘긴다."""
-    s = tool_spec(tool)
+    s = tool_module(tool).SPEC
 
     def listed(v):
         if isinstance(v, str):
@@ -335,13 +334,32 @@ def server_side(row: dict) -> bool:
     """서버 쪽 API 오류(인증·없는 모델·429·5xx·연결)로 끝났는지. 400(글이 너무 길어짐 등)은 모델 탓이라 넣지 않는다."""
     if not row["is_error"]:
         return False
-    try:
-        status = int(row["api_status"])
-    except (TypeError, ValueError):
-        status = None
+    status = _api_status(row)
     if status is not None:
         return status in (401, 403, 404, 429) or status >= 500
     return bool(API_ERROR.search(row["error"] or ""))
+
+
+def config_error(row: dict) -> bool:
+    """키·모델 이름이 틀려(401·403·404) 남은 실행도 모두 같은 오류로 끝날 실행."""
+    if row.get("subtype") != "api_error":
+        return False
+    status = _api_status(row)
+    if status is not None:
+        return status in (401, 403, 404)
+    return bool(re.search(r"API Error: (?:401|403|404)", row.get("error") or ""))
+
+
+def _api_status(row: dict) -> int | None:
+    try:
+        return int(row["api_status"])
+    except (TypeError, ValueError):
+        return None
+
+
+def is_measured(subtype) -> bool:
+    """모델을 잰 실행인지(summarize.py가 표에 넣고 rescore.py가 바뀐 것을 알린다)."""
+    return not (subtype or "").startswith(NOT_MEASURED)
 
 
 class Stopped(Exception):
@@ -394,9 +412,11 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
     ids, inputs = [i for i, _ in uses], dict(uses)
     results = draw_results(events, ids)
     result = next((e for e in reversed(events) if e.get("type") == "result"), {})
-    seq, problem = [], None
+    seq, problem, save_errors = [], None, 0
     for i in ids:
-        v = verdict_of(result_text(results[i].get("content"))) if i in results else "missing"
+        text = result_text(results[i].get("content")) if i in results else ""
+        save_errors += text.startswith(SAVE_FAILED)
+        v = verdict_of(text) if i in results else "missing"
         if v == "pass" and spec is not None:
             problem = problem or problem_shape(spec, tool)  # 한 실행 안에서 문제는 그대로라 한 번만 만든다
         if v == "pass" and spec is not None and not faithful(inputs.get(i, {}), spec, tool, problem):
@@ -411,6 +431,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "verdicts": " ".join(seq),
         "input_errors": seq.count("input_error"),
         "changed": seq.count("changed"),
+        "save_errors": save_errors,
         "mcp": mcp_status(events),
         "cost_usd": result.get("total_cost_usd"),
         "turns": result.get("num_turns"),
@@ -444,6 +465,11 @@ STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 def ignore_stop_signals() -> None:
     for s in STOP_SIGNALS:
         signal.signal(s, signal.SIG_IGN)
+
+
+def restore_stop_signals() -> None:
+    for s in STOP_SIGNALS:
+        signal.signal(s, signal.default_int_handler if s == signal.SIGINT else signal.SIG_DFL)
 
 
 def say(text: str, file=None) -> None:
@@ -490,7 +516,7 @@ def run_one(job: dict, key: str) -> dict:
     ]
     env = {k: v for k, v in os.environ.items() if k in KEEP_ENV or k.startswith("LC_")}
     env["ANTHROPIC_API_KEY"] = key
-    started = time.time()
+    started, timed_out_at = time.time(), None
     with _RUNNING_LOCK:
         if _STOP.is_set():
             shutil.rmtree(run_dir, ignore_errors=True)
@@ -503,6 +529,7 @@ def run_one(job: dict, key: str) -> dict:
         stdout, stderr = proc.communicate(timeout=job["timeout"])
         code = proc.returncode
     except subprocess.TimeoutExpired:  # 시간 초과여도 그때까지의 기록은 남긴다(비용은 끝의 결과가 없어 비운다)
+        timed_out_at = time.time()  # 시간은 끝내고 기다린 동안을 빼고 잰다
         stop_group(proc, signal.SIGKILL)
         try:
             stdout, stderr = proc.communicate(timeout=60)
@@ -516,7 +543,7 @@ def run_one(job: dict, key: str) -> dict:
     (run_dir / "stream.jsonl").write_text(stdout, encoding="utf-8")
     if stderr.strip():
         (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
-    meta = {"exit": code, "wall_s": round(time.time() - started, 1), "timed_out": code is None}
+    meta = {"exit": code, "wall_s": round((timed_out_at or time.time()) - started, 1), "timed_out": code is None}
     (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")  # 해석이 실패해도 rescore.py가 다시 읽게
     row = build_row(job | meta, stdout.splitlines(), tool, spec, meta["timed_out"])
     # 멈추며 시그널을 보낸 실행이 스스로 끝(NATURAL_ENDS)도, 합격이나 10번 그림도 내기 전이면 끊긴 것이다. 시그널을 받고
@@ -605,10 +632,10 @@ def main() -> None:
             finally:
                 writing["now"] = False
             # 키·모델 이름이 틀리면(401·403·404) 남은 실행도 모두 같은 오류로 끝나 표에서 빠지니 바로 멈춘다
-            config_error = row.get("subtype") == "api_error" and str(row.get("api_status")) in ("401", "403", "404")
-            if config_error and not _STOP.is_set():
+            stop_all = config_error(row) and not _STOP.is_set()
+            if stop_all:
                 say(f"API 키나 모델 이름이 틀려 멈춘다({row['api_status']}): {row.get('error')}", file=sys.stderr)
-            if writing["stop"] or (config_error and not _STOP.is_set()):
+            if writing["stop"] or stop_all:
                 writing["stop"] = False
                 ignore_stop_signals()
                 raise KeyboardInterrupt
@@ -622,6 +649,7 @@ def main() -> None:
             for fut in cf.as_completed(futures):
                 record(fut)
             pool.shutdown()
+            restore_stop_signals()
         except KeyboardInterrupt:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다(SIGINT가 파이썬에만 왔을 수 있다)
             ignore_stop_signals()  # 정리(길어야 10초) 중에 또 온 신호는 받지 않는다
             with _RUNNING_LOCK:
@@ -650,7 +678,7 @@ def main() -> None:
     total = sum(r.get("cost_usd") or 0 for r in rows)
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
     note = f", 비용을 모르는 실행 {unknown_cost}건은 합계에 들지 않았다" if unknown_cost else ""
-    print(f"끝: {len(rows)}건, 합계 ${total:.2f}{note}, 결과 {base / 'results.csv'}", flush=True)
+    say(f"끝: {len(rows)}건, 합계 ${total:.2f}{note}, 결과 {base / 'results.csv'}")
 
 
 if __name__ == "__main__":
