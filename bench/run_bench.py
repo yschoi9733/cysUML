@@ -397,7 +397,8 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
     used_up = len(seq) >= MAX_DRAWS and seq[MAX_DRAWS - 1] != "missing"
     if row["passed"] or used_up:
         why = "timeout" if timed_out else None
-    elif meta.get("signaled"):  # 멈출 때 우리가 끊었다(그 사이 스스로 끝났어도 끝난 꼴로는 가를 수 없어 뺀다)
+    elif meta.get("signaled") and not timed_out:
+        # 멈출 때 우리가 끊었다(그 사이 스스로 끝났어도 끝난 꼴로는 가를 수 없어 뺀다). 시간 초과로 먼저 끝낸 실행은 아래 규칙을 따른다
         why = "stopped"
     elif row["is_error"] and row["ended"] == "success":
         # API 오류로 끝났다(MCP가 붙기 전이어도). 서버 탓(인증·크레딧·429·5xx)과 모델 탓(글이 너무 길어진 400 등)을
@@ -614,8 +615,8 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     ap.add_argument("--tag", default=dt.datetime.now().strftime("%m%d-%H%M%S"))
     args = ap.parse_args()
-    if args.workers < 1 or args.runs < 1:
-        ap.error("--workers와 --runs는 1 이상이다")
+    if args.workers < 1 or args.runs < 1 or args.timeout < 1 or args.budget <= 0:
+        ap.error("--workers·--runs·--timeout은 1 이상, --budget은 0보다 커야 한다")
     args.problems = list(dict.fromkeys(p for name in args.problems for p in SETS.get(name, [name])))
     args.models = list(dict.fromkeys(args.models))  # 겹치면 같은 실행 폴더를 두 실행이 함께 쓴다
     args.efforts = list(dict.fromkeys(args.efforts))
@@ -721,8 +722,8 @@ def main() -> None:
                             record(fut)
                         except Exception as more:
                             say(f"끝난 실행 하나를 쓰지 못했다: {type(more).__name__}: {more}", file=sys.stderr)
-                say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에 "
-                    "들지 않는다)", file=sys.stderr)
+                say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에도 "
+                    "비용 합계에도 들지 않으니, 실제로 쓴 돈은 Claude Console에서 본다)", file=sys.stderr)
                 say_totals(rows, base)
             finally:
                 # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는

@@ -311,6 +311,14 @@ def test_budget_end_with_retry_noise_and_quiet_abort():
     assert row["subtype"] == "stopped"
 
 
+def test_run_that_timed_out_before_the_stop_keeps_the_timeout_rule():
+    # 시간 초과로 먼저 끝낸 실행에 멈춤 표시가 붙어도 끊은 실행이 아니다(한 번이라도 그렸으면 모델의 불합격)
+    tool, spec = bench.load_problem("order")
+    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": None, "wall_s": 9.0, "signaled": True}
+    row = bench.build_row(meta, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL])]], tool, spec, True)
+    assert row["subtype"] == "timeout" and bench.is_measured(row["subtype"])
+
+
 def test_tool_call_rejected_by_the_sdk_is_an_input_error():
     tool, spec = bench.load_problem("order")
     sdk = "Error executing tool draw_class_diagram: 1 validation error for draw_class_diagramArguments\nfile_name"

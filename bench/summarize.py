@@ -102,7 +102,8 @@ def main() -> None:
     if no_time:
         print(f"- 시간이 빈 실행 {no_time}건은 시간 평균에서 뺐다")
     for r in skipped:
-        print(f"- 모델을 잰 것이 아니라 표에서 뺐다: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}")
+        print(f"- 모델을 잰 것이 아니라 표에서 뺐다: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}"
+              + (f" ({str(r['error'])[:120]})" if r.get("error") else ""))
     for r in rows:
         if "other" in (r.get("verdicts") or "").split():  # cysUML 검사 결과 문구가 바뀌면 여기서 드러난다
             print(f"- 확인 필요: 검사 결과의 판정을 읽지 못한 그림이 있다: {r['model']} {r['effort']} {r['problem']} "

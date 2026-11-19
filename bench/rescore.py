@@ -12,8 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from run_bench import (FIELDS, build_row, is_measured, load_problem, run_dir_for, run_tool, spec_from_prompt,
-                       tool_from_prompt)
+from run_bench import FIELDS, build_row, is_measured, load_problem, run_dir_for, run_tool, spec_from_prompt
 
 
 class Kept(Exception):
@@ -31,7 +30,7 @@ def rescore_row(tag_dir: Path, r: dict) -> dict:
     if sub.startswith("harness_error") and not run_json.exists():
         raise Kept("하네스 오류 줄인데 종료 코드·시간(run.json)이 남지 않았다")
     text = prompt.read_text(encoding="utf-8") if prompt.exists() else ""
-    tool = tool_from_prompt(text) or run_tool(run_dir, r.get("tool"))
+    tool = run_tool(run_dir, r.get("tool"))
     spec = spec_from_prompt(text) if text else None
     if not tool or spec is None:
         print(f"  {r['model']} {r['effort']} {r['problem']} run{r['run']}: 준 문제를 못 찾아 지금 문제 파일과 견준다")
