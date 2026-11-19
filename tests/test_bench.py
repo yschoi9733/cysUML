@@ -87,7 +87,8 @@ def test_names(given, drawn, same):
     assert bench.faithful(one(drawn), one(given), NODES) == same
 
 
-INIT = {"type": "system", "subtype": "init", "mcp_servers": [{"name": "cysuml", "status": "connected"}]}
+INIT = {"type": "system", "subtype": "init", "mcp_servers": [{"name": "cysuml", "status": "connected"}],
+           "tools": ["mcp__cysuml__draw_class_diagram"]}
 
 
 def _draws(spec, verdicts):
@@ -131,6 +132,25 @@ def test_run_classification(events, exit, timed_out, subtype, measured):
     meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": exit, "wall_s": 9.0}
     row = bench.build_row(meta, [json.dumps(x) for x in flat], tool, spec, timed_out)
     assert row["subtype"] == subtype and bench.is_measured(row["subtype"]) == measured
+
+
+def test_tool_listed_at_init_means_the_model_could_draw():
+    # MCP 상태가 pending이어도 그리기 도구가 목록에 있었으면, 그리지 않고 끝난 것은 모델의 판단이다
+    tool, spec = bench.load_problem("order")
+    pending = {**INIT, "mcp_servers": [{"name": "cysuml", "status": "pending"}]}
+    row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 1, "wall_s": 9.0},
+                          [json.dumps(e) for e in [pending, {"type": "result", "subtype": "error_max_turns"}]],
+                          tool, spec, False)
+    assert row["subtype"] == "error_max_turns" and bench.is_measured(row["subtype"])
+
+
+def test_tool_call_rejected_by_the_sdk_is_an_input_error():
+    tool, spec = bench.load_problem("order")
+    events = [INIT, *_draws(spec, ["Error executing tool draw_class_diagram: 1 validation error"])]
+    events[-1]["message"]["content"][0]["is_error"] = True
+    row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 0, "wall_s": 9.0},
+                          [json.dumps(e) for e in [*events, ENDED]], tool, spec, False)
+    assert row["verdicts"] == "input_error" and row["input_errors"] == 1
 
 
 def test_config_errors_stop_the_bench():

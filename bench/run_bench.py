@@ -144,6 +144,9 @@ def verdict(line: str) -> str:
     return "other"
 
 
+_PARSE_LOCK = threading.Lock()
+
+
 def tool_module(tool: str):
     return importlib.import_module("cysuml." + tool.removeprefix("draw_").replace("_", ""))
 
@@ -195,7 +198,8 @@ def _diagram(data: dict, tool: str) -> B.Diagram:
     if isinstance(rels, list):
         rels = [{"via": [[0, 0], [1, 1]], **r} if isinstance(r, dict) and r.get("from") == r.get("to") else r
                 for r in rels]
-    return tool_module(tool).parse({s.list_field: items, "relations": rels})
+    with _PARSE_LOCK:  # parse는 글자 폭을 재려고 공유 글꼴 객체를 쓴다(서버도 그리기를 한 번에 하나씩 한다)
+        return tool_module(tool).parse({s.list_field: items, "relations": rels})
 
 
 def _shape(d: B.Diagram, known: dict[str, str]) -> tuple[list, list]:
@@ -375,7 +379,7 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool, problem
     row["timed_out"] = timed_out
     if timed_out:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
         row["duration_s"] = row["wall_s"]
-    no_tool = not row["draws"] and row["mcp"] != "connected"  # 그림 도구 없이 끝났다
+    no_tool = not row["draws"] and not row["tool_ready"]  # 그림 도구 없이 끝났다
     no_answer = not row["draws"] and timed_out and not row["answered"]  # 첫 요청부터 멈춘 채 시간이 다 갔다
     if no_tool or no_answer:  # 모델의 불합격이 아니다
         why = (f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") if no_tool else "no_answer"
@@ -425,6 +429,8 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None, probl
     for i in ids:
         text = result_text(results[i].get("content")) if i in results else ""
         v = verdict_of(text) if i in results else "missing"
+        if v == "other" and results[i].get("is_error"):  # MCP SDK가 인자 검증에서 거절한 것 등
+            v = "input_error"
         # 저장에 실패하면 서버는 오류 결과에 검사 요약을 붙인다. 판정은 요약으로 하되, 모델은 결과가 합격으로 시작하지 않아
         # 계속 그릴 수 있어 summarize.py가 알리게 센다
         save_errors += v == "pass" and bool(results[i].get("is_error"))
@@ -450,6 +456,8 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None, probl
         "subtype": result.get("subtype"),
         "ended": result.get("subtype"),  # build_row가 subtype을 바꿔도 남는다
         "answered": any(e.get("type") == "assistant" for e in events),
+        # 그 문제의 그리기 도구를 쓸 수 있었는지(init의 도구 목록). MCP 상태가 pending이어도 도구가 있으면 모델이 판단한 것이다
+        "tool_ready": bool(tool) and DRAW_PREFIX + tool.removeprefix("draw_") in (init_event(events).get("tools") or []),
         "is_error": result.get("is_error"),
         "api_status": result.get("api_error_status"),
         "error": (str(result.get("result") or result.get("errors") or "")[:200] or None) if result.get("is_error") else None,
@@ -636,6 +644,9 @@ def main() -> None:
 
         def record(fut) -> None:
             j = futures[fut]
+            if fut.cancelled():  # 쓸 수 없는 모델이라 띄우기 전에 뺀 실행
+                recorded.add(fut)
+                return
             try:
                 row = fut.result()
             except Stopped:  # 멈출 때 띄우지 않았거나 끊긴 실행은 쓰지 않는다
@@ -650,9 +661,20 @@ def main() -> None:
             recorded.add(fut)
             say(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed", "first_pass_draw",
                                                      "draws", "cost_usd", "duration_s", "subtype")}, ensure_ascii=False))
-            if config_error(row) and stop["why"] is None:  # 남은 실행도 모두 같은 오류로 끝나 표에서 빠지니 바로 멈춘다
-                cause = "크레딧이 떨어졌다" if BILLING.search(row.get("error") or "") else "API 키나 모델 이름이 틀렸다"
+            if stop["why"] is not None:
+                return
+            code, billing = _api_code(row), bool(BILLING.search(row.get("error") or ""))
+            if config_error(row) and code in (403, 404) and not billing:  # 그 모델만 쓸 수 없다(이름 오타·권한)
+                skipped = [x for x, job in futures.items() if job["model"] == j["model"] and x.cancel()]
+                say(f"{j['model']}을(를) 쓸 수 없어({code}) 그 모델의 남은 실행 {len(skipped)}건을 뺀다: {row.get('error')}",
+                    file=sys.stderr)
+            elif config_error(row):  # 키·크레딧은 모든 실행에 걸리니 바로 멈춘다
+                cause = "크레딧이 떨어졌다" if billing else "API 키가 틀렸다"
                 stop["why"] = f"{cause}({row.get('api_status')}): {row.get('error')}"
+            elif not any(is_measured(r.get("subtype")) for r in rows):
+                started_badly = [r for r in rows if (r.get("subtype") or "").startswith(("no_init", "mcp_failed"))]
+                if len(started_badly) >= 3:  # 잰 실행 없이 시작 실패만 나면 설정·환경 문제다
+                    stop["why"] = f"claude가 시작하지 못하거나 MCP가 붙지 않는다({len(started_badly)}번): {row.get('subtype')}"
 
         try:
             for j in jobs:
@@ -680,12 +702,12 @@ def main() -> None:
                     if p.poll() is None:
                         stop_group(p, signal.SIGKILL)
                 cf.wait([fut for fut in futures if not fut.done()], timeout=10)  # 끝낸 실행의 스레드가 기록을 마치기를 기다린다
-                try:  # 끝났는데 아직 쓰지 못한 실행(정리하는 동안 스스로 끝난 실행도 든다)
-                    for fut in futures:
-                        if fut.done() and not fut.cancelled() and fut not in recorded:
+                for fut in futures:  # 끝났는데 아직 쓰지 못한 실행(정리하는 동안 스스로 끝난 실행도 든다)
+                    if fut.done() and fut not in recorded:
+                        try:
                             record(fut)
-                except Exception as more:
-                    say(f"끝난 실행을 더 쓰지 못했다: {type(more).__name__}: {more}", file=sys.stderr)
+                        except Exception as more:
+                            say(f"끝난 실행 하나를 쓰지 못했다: {type(more).__name__}: {more}", file=sys.stderr)
                 say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 "
                     "들지 않는다)", file=sys.stderr)
             except BaseException:
