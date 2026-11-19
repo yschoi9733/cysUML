@@ -240,7 +240,7 @@ def test_non_object_lines_are_skipped():
 
 
 def test_classification_does_not_depend_on_branch_order():
-    # 33라운드 회귀: 고장 판정은 시간 초과보다, 서버 쪽 오류는 끝난 꼴보다 먼저 본다. 신호를 받고 낸 중단 오류도 끊긴 실행이다
+    # 고장 판정은 시간 초과보다, 서버 쪽 오류는 끝난 꼴보다 먼저 본다. 신호를 받고 낸 중단 오류도 끊긴 실행이다
     tool, spec = bench.load_problem("order")
     meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": None, "wall_s": 9.0}
     broken = [INIT, *_draws(spec, [FAIL, "MCP error -32000: Connection closed"])]
@@ -258,7 +258,7 @@ def test_classification_does_not_depend_on_branch_order():
 
 
 def test_result_is_settled_only_by_judged_draws():
-    # 34라운드: 10번째 그리기가 답을 기다리는 중이거나 고장 났으면 결과가 정해진 것이 아니다
+    # 10번째 그리기가 답을 기다리는 중이거나 고장 났으면 결과가 정해진 것이 아니다
     tool, spec = bench.load_problem("order")
     meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 143, "wall_s": 9.0, "signaled": True}
     pending = {"type": "assistant", "message": {"content": [
@@ -270,6 +270,22 @@ def test_result_is_settled_only_by_judged_draws():
     row = bench.build_row(meta | {"signaled": False, "exit": 0}, [json.dumps(e) for e in [*broken, ENDED]], tool, spec,
                           False)
     assert row["subtype"] == "mcp_failed: during run"
+
+
+def test_broken_draws_do_not_use_up_the_ten_draws():
+    # MCP가 끊긴 차례는 모델의 그림 횟수로 치지 않는다: 그 뒤 판정 10번째에 합격하면 합격이다
+    tool, spec = bench.load_problem("order")
+    events = [INIT, *_draws(spec, ["MCP error -32001: Request timed out"] + [FAIL] * 9 + [PASS])]
+    events[2]["message"]["content"][0]["is_error"] = True
+    row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 0, "wall_s": 9.0},
+                          [json.dumps(e) for e in [*events, ENDED]], tool, spec, False)
+    assert row["draws"] == 11 and row["first_pass_draw"] == 10 and row["passed"]
+
+
+def test_key_and_model_errors_are_read_from_the_cli_text_too():
+    assert bench.config_error({"is_error": True, "api_status": None, "error": "Invalid API key · Fix external API key"}) == "key"
+    assert bench.config_error({"is_error": True, "api_status": None,
+                               "error": "There's an issue with the selected model (claude-x)."}) == "model"
 
 
 def test_server_errors_win_over_stop_and_missing_tool():

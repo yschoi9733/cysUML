@@ -375,6 +375,7 @@ def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
 # 모델이 한 번도 답하지 않은 채 시간이 다 감, 서버 쪽 API 오류, 끝의 결과 없이 끝남(크래시 등), 하네스 오류, 멈출 때 끊김
 SDK_VALIDATION = re.compile(r"validation errors? for \w+Arguments")  # MCP SDK가 인자를 거절한 글(pydantic)
 NOT_MEASURED = ("mcp_failed", "no_init", "no_answer", "api_error", "no_result", "tool_error", "harness_error", "stopped")
+UNJUDGED = ("missing", "mcp_error", "tool_error")  # 검사 판정을 받지 못한 차례
 NATURAL_ENDS = ("success", "error_max_budget_usd", "error_max_turns")  # claude가 스스로 끝낸 결과 이벤트의 subtype
 BILLING = re.compile(r"credit balance", re.I)  # 크레딧이 떨어지면 400 "Your credit balance is too low"로 온다
 ABORTED = re.compile(r"\babort", re.I)  # 신호를 받은 claude가 결과에 담는 중단 글(Request was aborted)
@@ -382,12 +383,17 @@ OUTAGE = re.compile(r"Connection error|Request timed out|overloaded", re.I)  # �
 
 
 def _api_code(row: dict) -> int | None:
-    """API 오류의 상태 번호. api_error_status가 없으면 오류 글의 'API Error: NNN'에서 읽는다."""
+    """API 오류의 상태 번호. api_error_status가 없으면 오류 글의 'API Error: NNN'이나 알려진 안내 글에서 읽는다."""
     try:
         return int(row["api_status"])
     except (TypeError, ValueError, KeyError):
-        m = re.search(r"API Error: (\d{3})", row.get("error") or "")
-        return int(m.group(1)) if m else None
+        error = row.get("error") or ""
+        m = re.search(r"API Error: (\d{3})", error)
+        if m:
+            return int(m.group(1))
+        # 상태 번호 없이 CLI가 바꿔 쓴 안내 글만 올 때
+        return 401 if re.search(r"invalid api key", error, re.I) else 404 if re.search(
+            r"issue with the selected model", error, re.I) else None
 
 
 def config_error(row: dict) -> str | None:
@@ -430,16 +436,17 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
         row["duration_s"] = row["wall_s"]
     seq = row["verdicts"].split()
     last = (seq or [""])[-1]
-    judged = sum(v not in ("missing", "mcp_error", "tool_error") for v in seq)  # 검사 판정을 받은 차례
+    server = server_side(row)
+    judged = sum(v not in UNJUDGED for v in seq)  # 검사 판정을 받은 차례
     if row["passed"] or judged >= MAX_DRAWS:  # 결과가 정해졌다(합격이나 10번 다 판정받음): 잰 실행이다
         why = "timeout" if timed_out else None
     # 그 밖은 결과가 정해지기 전에 끝났다. 누가 끝냈는지를 차례로 본다
-    elif meta.get("signaled") and not timed_out and not server_side(row) and (
+    elif meta.get("signaled") and not timed_out and not server and (
             row["ended"] not in NATURAL_ENDS or bool(ABORTED.search(row["error"] or ""))):
         # 멈추며 우리가 신호로 끊었다. 신호를 받고 낸 결과 이벤트(중단 글을 담은 success 포함)는 스스로 끝난 것이 아니다.
         # 서버 쪽 API 오류는 신호와 상관없이 난 것이라 아래에서 api_error로 가른다
         why = "stopped"
-    elif server_side(row):  # 서버 쪽 API 오류로 끝났다(결과 이벤트의 subtype과 상관없이, MCP가 붙기 전이어도)
+    elif server:  # 서버 쪽 API 오류로 끝났다(결과 이벤트의 subtype과 상관없이, MCP가 붙기 전이어도)
         why = "api_error"
     elif not row["draws"] and not row["tool_ready"]:  # 그림 도구 없이 끝났다
         why = (f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") + (" (timeout)" if timed_out else "")
@@ -496,7 +503,9 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
             if not faithful(inputs.get(i, {}), spec, tool):
                 v = "changed"
         seq.append(v)
-    first_pass = next((n for n, v in enumerate(seq, 1) if v == "pass"), None)
+    # 몇 번째 판정에서 처음 합격했나(MCP·도구가 고장 나거나 답이 없던 차례는 모델의 그림 횟수로 치지 않는다)
+    judged = [v for v in seq if v not in UNJUDGED]
+    first_pass = next((n for n, v in enumerate(judged, 1) if v == "pass"), None)
     usage = result.get("usage") or {}
     mcp, init_tools = mcp_status(events), init_event(events).get("tools") or []
     return {
@@ -674,7 +683,12 @@ def run_one(job: dict, key: str) -> dict:
     meta = {"exit": code, "wall_s": round((timed_out_at or time.time()) - started, 1), "timed_out": code is None,
             "signaled": proc.pid in _SIGNALED}
     (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")  # 해석이 실패해도 rescore.py가 다시 읽게
-    row = build_row(job | meta, stdout.split("\n"), tool, spec, meta["timed_out"])
+    try:
+        row = build_row(job | meta, stdout.split("\n"), tool, spec, meta["timed_out"])
+    except Exception:
+        if meta["signaled"]:  # 멈추며 끊은 실행은 기록이 잘려 해석이 깨질 수 있다(CSV에 쓰지 않는다)
+            raise Stopped("멈출 때 끝냈다") from None
+        raise
     stopped = row["subtype"] == "stopped"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
     if stopped:
@@ -838,7 +852,10 @@ def main() -> None:
                 while time.time() < deadline and any(p.poll() is None for p in procs):
                     time.sleep(0.2)
                 kill_groups(procs)
-                cf.wait([fut for fut in futures if not fut.done()], timeout=10)
+                waiting = [fut for fut in futures if not fut.done()]
+                if waiting:
+                    say(f"끝난 실행의 기록을 기다린다(최대 30초, {len(waiting)}건)", file=sys.stderr)
+                    cf.wait(waiting, timeout=30)
                 drain()  # 정리하는 동안 스스로 끝난 실행도 든다
                 say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에 "
                     "들지 않는다)", file=sys.stderr)
