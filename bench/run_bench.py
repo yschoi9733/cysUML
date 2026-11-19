@@ -538,8 +538,6 @@ def run_dir_for(base: Path, model: str, effort: str, problem: str, run) -> Path:
 
 
 def run_one(job: dict, key: str) -> dict:
-    if _STOP.is_set():
-        raise Stopped("멈춘 뒤라 띄우지 않았다")
     run_dir: Path = job["dir"]
     run_dir.mkdir(parents=True)
     tool, spec = PREPARED[job["problem"]]
@@ -608,7 +606,7 @@ def run_one(job: dict, key: str) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="+", required=True)
-    ap.add_argument("--efforts", nargs="+", default=["high"])
+    ap.add_argument("--efforts", nargs="+", default=["high"], choices=["low", "medium", "high", "xhigh", "max"])
     ap.add_argument("--problems", nargs="+", default=["readme"], help="문제 이름이나 묶음(readme·hard·xl·xxl)")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--workers", type=int, default=3)
@@ -666,7 +664,6 @@ def main() -> None:
     watched = [s for s in STOP_SIGNALS if previous[s] is not signal.SIG_IGN]
     for s in watched:
         signal.signal(s, on_stop)
-    # 결과는 실행이 끝날 때마다 한 줄씩 써서, 중간에 멈춰도 끝난 실행은 남는다
     f = (base / "results.csv").open("w", newline="", encoding="utf-8")
     try:
         w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
@@ -688,8 +685,8 @@ def main() -> None:
                 row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
                        "subtype": f"harness_error: {type(e).__name__}: {e}"}
             w.writerow(row)
-            rows.append(row)
             f.flush()
+            rows.append(row)
             say(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed", "first_pass_draw",
                                                      "draws", "cost_usd", "duration_s", "subtype")}, ensure_ascii=False))
 
@@ -704,7 +701,7 @@ def main() -> None:
         except Exception as e:  # 결과를 쓰다 난 오류(디스크가 가득 참 등)
             stop["why"] = stop["why"] or f"오류: {type(e).__name__}: {e}"
 
-        if stop["why"] is not None:  # 남은 실행은 띄우지 않고, 돌던 claude는 그룹째(MCP 서버까지) 바로 끝낸다
+        if stop["why"] is not None:
             try:
                 with _RUNNING_LOCK:
                     _STOP.set()
@@ -725,8 +722,9 @@ def main() -> None:
                             record(fut)
                         except Exception as more:
                             say(f"끝난 실행 하나를 쓰지 못했다: {type(more).__name__}: {more}", file=sys.stderr)
-                say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에도 "
-                    "비용 합계에도 들지 않으니, 실제로 쓴 돈은 Claude Console에서 본다)", file=sys.stderr)
+                say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(결과가 정해지기 전에 "
+                    "끊은 실행은 CSV에 들지 않고, 끊은 실행의 비용은 합계에 없으니 실제로 쓴 돈은 Claude Console에서 본다)",
+                    file=sys.stderr)
                 say_totals(rows, base)
             finally:
                 # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
