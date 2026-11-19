@@ -257,6 +257,39 @@ def test_classification_does_not_depend_on_branch_order():
     assert row["subtype"] == "api_error"
 
 
+def test_result_is_settled_only_by_judged_draws():
+    # 34라운드: 10번째 그리기가 답을 기다리는 중이거나 고장 났으면 결과가 정해진 것이 아니다
+    tool, spec = bench.load_problem("order")
+    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 143, "wall_s": 9.0, "signaled": True}
+    pending = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "late", "name": "mcp__cysuml__draw_class_diagram", "input": spec}]}}
+    row = bench.build_row(meta, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL] * 9), pending]], tool, spec, False)
+    assert row["draws"] == 10 and row["subtype"] == "stopped"
+    broken = [INIT, *_draws(spec, [FAIL] * 9 + ["MCP error -32000: Connection closed"])]
+    broken[-1]["message"]["content"][0]["is_error"] = True
+    row = bench.build_row(meta | {"signaled": False, "exit": 0}, [json.dumps(e) for e in [*broken, ENDED]], tool, spec,
+                          False)
+    assert row["subtype"] == "mcp_failed: during run"
+
+
+def test_server_errors_win_over_stop_and_missing_tool():
+    tool, spec = bench.load_problem("order")
+    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 1, "wall_s": 9.0}
+    overload = {"type": "result", "subtype": "error_during_execution", "is_error": True, "api_error_status": 529}
+    row = bench.build_row(meta | {"signaled": True}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), overload]],
+                          tool, spec, False)
+    assert row["subtype"] == "api_error"  # 멈출 때 났어도 서버 쪽 오류다
+    pending = {"type": "system", "subtype": "init", "mcp_servers": [{"name": "cysuml", "status": "pending"}], "tools": []}
+    outage = {"type": "result", "subtype": "success", "is_error": True, "result": "overloaded"}
+    row = bench.build_row(meta, [json.dumps(e) for e in [pending, outage]], tool, spec, False)
+    assert row["subtype"] == "api_error"  # MCP가 붙기 전이어도 API 장애다(시작 실패로 세지 않는다)
+    # 신호와 같은 때 모델 탓 오류로 스스로 끝난 것은 잰 실행이다(중단 글만 끊긴 것으로 본다)
+    too_long = {"type": "result", "subtype": "success", "is_error": True, "api_error_status": 400, "result": "Prompt is too long"}
+    row = bench.build_row(meta | {"signaled": True}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), too_long]],
+                          tool, spec, False)
+    assert row["subtype"] == "success"
+
+
 def test_tool_call_rejected_by_the_sdk_is_an_input_error():
     tool, spec = bench.load_problem("order")
     sdk = "Error executing tool draw_class_diagram: 1 validation error for draw_class_diagramArguments\nfile_name"
