@@ -12,7 +12,8 @@ import json
 import sys
 from pathlib import Path
 
-from run_bench import FIELDS, build_row, is_measured, load_problem, run_dir_for, run_tool, spec_from_prompt
+from run_bench import (FIELDS, build_row, is_measured, load_problem, problem_shape, run_dir_for, run_tool,
+                       spec_from_prompt)
 
 
 class Kept(Exception):
@@ -40,13 +41,23 @@ def rescore_row(tag_dir: Path, r: dict) -> dict:
         timed_out = str(meta["timed_out"]) == "True"
     else:  # timed_out을 남기기 전의 옛 기록은 그때 적은 판정 문구로만 가린다
         timed_out = sub == "timeout" or sub.endswith("(timeout)")
-    return build_row(meta, stream.read_text(encoding="utf-8").split("\n"), tool, spec, timed_out)
+    key = json.dumps([tool, spec], sort_keys=True, ensure_ascii=False)
+    if key not in SHAPES:  # 같은 문제를 쓴 실행이 많아 한 번만 만든다
+        SHAPES[key] = problem_shape(spec, tool)
+    return build_row(meta, stream.read_text(encoding="utf-8").split("\n"), tool, spec, timed_out, SHAPES[key])
+
+
+SHAPES: dict[str, tuple] = {}
 
 
 def main() -> None:
     for tag_dir in map(Path, sys.argv[1:]):
-        with (tag_dir / "results.csv").open(encoding="utf-8") as f:
-            old_rows = list(csv.DictReader(f))
+        try:
+            with (tag_dir / "results.csv").open(encoding="utf-8") as f:
+                old_rows = list(csv.DictReader(f))
+        except OSError as e:  # 한 태그를 못 읽어도 나머지 태그는 계속한다
+            print(f"{tag_dir.name}: results.csv를 읽지 못해 건너뛴다: {e}")
+            continue
         new_rows = []
         for r in old_rows:
             name = f"{tag_dir.name}: {r['model']} {r['effort']} {r['problem']} run{r['run']}"

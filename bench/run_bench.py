@@ -127,11 +127,6 @@ def result_text(content) -> str:
     return next((b.get("text", "").strip() for b in content or [] if isinstance(b, dict) and b.get("type") == "text"), "")
 
 
-# 저장에 실패하면 서버가 이 글을 검사 요약 앞에 붙인다. 검사는 그대로라 판정은 요약으로 하되, 모델은 결과가 합격으로
-# 시작하지 않아 계속 그릴 수 있어 save_errors로 세어 summarize.py가 알린다
-SAVE_FAILED = ("그림을 저장하지 못했다", "입력 파일을 저장하지 못했다")
-
-
 def verdict_of(text: str) -> str:
     """판정 머리로 시작하는 첫 줄로 가른다."""
     return next((v for v in map(verdict, text.splitlines()) if v != "other"), "other")
@@ -260,8 +255,7 @@ def faithful(drawn: dict, spec: dict, tool: str, problem: tuple | None = None) -
         return False
 
 
-PROBLEM_SHAPES: dict[str, tuple] = {}  # main이 미리 읽은 문제별 꼴과 (도구, 문제)
-LOADED: dict[str, tuple] = {}
+PREPARED: dict[str, tuple] = {}  # main이 미리 읽은 문제별 (도구, 문제, 꼴)
 
 
 def problem_shape(spec: dict, tool: str) -> tuple[dict[str, str], tuple[list, list]]:
@@ -303,7 +297,9 @@ def init_event(events: list[dict]) -> dict:
 def mcp_status(events: list[dict]) -> str | None:
     """시작 이벤트에 적힌 cysUML MCP 서버 상태(connected 등). 서버가 안 붙으면 그린 차례가 0인 평범한 불합격처럼 보인다."""
     init = init_event(events)
-    return next((m.get("status") for m in init.get("mcp_servers") or [] if m.get("name") == "cysuml"), None)
+    if not init:
+        return None
+    return next((m.get("status") for m in init.get("mcp_servers") or [] if m.get("name") == "cysuml"), "missing")
 
 
 def spec_from_prompt(prompt: str) -> dict | None:
@@ -321,8 +317,6 @@ def tool_from_prompt(prompt: str) -> str | None:
 
 
 def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
-    """그 실행의 도구. 실제로 준 지시(prompt.txt) → row.json → fallback(results.csv의 tool) 차례로 찾는다(rescore.py와
-    inspect_run.py가 같이 쓴다)."""
     prompt, row = run_dir / "prompt.txt", run_dir / "row.json"
     tool = tool_from_prompt(prompt.read_text(encoding="utf-8")) if prompt.exists() else None
     if tool is None and row.exists():
@@ -430,8 +424,10 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None, probl
     seq, save_errors = [], 0
     for i in ids:
         text = result_text(results[i].get("content")) if i in results else ""
-        save_errors += text.startswith(SAVE_FAILED)
         v = verdict_of(text) if i in results else "missing"
+        # 저장에 실패하면 서버는 오류 결과에 검사 요약을 붙인다. 판정은 요약으로 하되, 모델은 결과가 합격으로 시작하지 않아
+        # 계속 그릴 수 있어 summarize.py가 알리게 센다
+        save_errors += v == "pass" and bool(results[i].get("is_error"))
         if v == "pass" and spec is not None:
             problem = problem or problem_shape(spec, tool)
             if not faithful(inputs.get(i, {}), spec, tool, problem):
@@ -478,17 +474,6 @@ KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG"
 STOP_SIGNALS = tuple(getattr(signal, n) for n in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, n))  # Windows엔 SIGHUP이 없다
 
 
-def _ignored(signum, frame) -> None:
-    pass
-
-
-def ignore_stop_signals(signals) -> None:
-    # SIG_IGN은 그 사이 새로 띄운 claude가 물려받아 SIGTERM을 무시하게 되니, 아무것도 하지 않는 처리기를 건다(새 프로그램을
-    # 띄우면 기본값으로 돌아간다)
-    for s in signals:
-        signal.signal(s, _ignored)
-
-
 def force_exit(signum, frame) -> None:
     """정리 중에 신호가 한 번 더 오면 돌던 claude를 바로 끝내고 나간다(정리가 막혔을 때의 탈출구)."""
     for p in list(_RUNNING):
@@ -527,7 +512,7 @@ def run_one(job: dict, key: str) -> dict:
         raise Stopped("멈춘 뒤라 띄우지 않았다")
     run_dir: Path = job["dir"]
     run_dir.mkdir(parents=True)
-    tool, spec = LOADED.get(job["problem"]) or load_problem(job["problem"])
+    tool, spec, shape = PREPARED.get(job["problem"]) or (*load_problem(job["problem"]), None)
     prompt = prompt_for(job["problem"], tool, spec)
     (run_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
     mcp = {"mcpServers": {"cysuml": {"command": str(ROOT / ".venv" / "bin" / "cysuml")}}}
@@ -580,7 +565,7 @@ def run_one(job: dict, key: str) -> dict:
     meta = {"exit": code, "wall_s": round((timed_out_at or time.time()) - started, 1), "timed_out": code is None,
             "signaled": proc.pid in _SIGNALED}
     (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")  # 해석이 실패해도 rescore.py가 다시 읽게
-    row = build_row(job | meta, stdout.split("\n"), tool, spec, meta["timed_out"], PROBLEM_SHAPES.get(job["problem"]))
+    row = build_row(job | meta, stdout.split("\n"), tool, spec, meta["timed_out"], shape)
     stopped = row["subtype"] == "stopped"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
     if stopped:
@@ -610,8 +595,7 @@ def main() -> None:
     for p in args.problems:  # 합격한 그림을 문제와 견줄 수 없으면 돈을 쓴 실행이 하네스 오류로 끝나니 미리 읽어 본다
         tool, spec = load_problem(p)
         try:
-            PROBLEM_SHAPES[p] = problem_shape(spec, tool)
-            LOADED[p] = tool, spec
+            PREPARED[p] = tool, spec, problem_shape(spec, tool)
         except InputError as e:
             sys.exit(f"문제 {p}를 cysUML이 읽지 못한다: {e}")
 
@@ -629,65 +613,59 @@ def main() -> None:
     rows = []
     base.mkdir(parents=True, exist_ok=True)
     pool = cf.ThreadPoolExecutor(max_workers=args.workers)
+    stop = {"why": None}  # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다
+
+    def on_stop(signum, frame):  # 예외를 던지지 않아 쓰던 줄이 잘리거나 잠금을 쥔 채 끊기지 않는다
+        if stop["why"] is None:
+            stop["why"] = signal.Signals(signum).name
+        else:  # 두 번째 신호: 정리가 막혔어도 바로 끝낸다
+            force_exit(signum, frame)
+
+    previous = {s: signal.getsignal(s) for s in STOP_SIGNALS}
+    # Ctrl-C·kill·터미널 닫기. claude는 새 세션이라 이 신호를 받지 못해 직접 끝낸다. nohup으로 무시하던 신호는 그대로 둔다
+    watched = [s for s in STOP_SIGNALS if previous[s] is not signal.SIG_IGN]
+    for s in watched:
+        signal.signal(s, on_stop)
     # 결과는 실행이 끝날 때마다 한 줄씩 써서, 중간에 멈춰도 끝난 실행은 남는다
     with (base / "results.csv").open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
         w.writeheader()
         f.flush()  # 멈출 때 os._exit로 끝내 버퍼가 버려지니, 끝난 실행이 없어도 머리줄은 남긴다
         futures: dict = {}
-        written = set()
-        writing = {"now": False, "stop": False}
+        recorded = set()
 
-        def on_stop(signum, frame):  # 한 줄을 쓰는 도중의 신호는 다 쓴 뒤로 미룬다(줄이 잘리거나 두 번 쓰이지 않게)
-            if writing["now"]:
-                writing["stop"] = True
-            else:  # 정리에 들어가는 순간부터 또 온 신호는 받지 않는다(정리를 건너뛰지 않게)
-                ignore_stop_signals(watched)
-                raise KeyboardInterrupt
-
-        def record(fut) -> dict:
+        def record(fut) -> None:
             j = futures[fut]
-            writing["now"] = True
             try:
-                try:
-                    row = fut.result()
-                except Exception as e:
-                    row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
-                           "subtype": f"harness_error: {type(e).__name__}: {e}"}
-                w.writerow(row)
-                f.flush()
-                rows.append(row)  # 다 쓴 뒤에 넣는다(쓰다 실패해 정리에서 다시 쓸 때 두 번 들지 않게)
-                written.add(fut)
-                say(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed", "first_pass_draw",
-                                                         "draws", "cost_usd", "duration_s", "subtype")}, ensure_ascii=False))
-            finally:
-                writing["now"] = False
-            # 키·모델 이름이 틀리면(401·403·404) 남은 실행도 모두 같은 오류로 끝나 표에서 빠지니 바로 멈춘다
-            stop_all = config_error(row) and not _STOP.is_set()
-            if stop_all:
-                why = "크레딧이 떨어져" if BILLING.search(row.get("error") or "") else "API 키나 모델 이름이 틀려"
-                say(f"{why} 멈춘다({row.get('api_status')}): {row.get('error')}", file=sys.stderr)
-            if writing["stop"] or stop_all:
-                writing["stop"] = False
-                ignore_stop_signals(watched)
-                raise KeyboardInterrupt
-            return row
+                row = fut.result()
+            except Stopped:  # 멈출 때 띄우지 않았거나 끊긴 실행은 쓰지 않는다
+                recorded.add(fut)
+                return
+            except Exception as e:
+                row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
+                       "subtype": f"harness_error: {type(e).__name__}: {e}"}
+            w.writerow(row)
+            f.flush()
+            rows.append(row)
+            recorded.add(fut)
+            say(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed", "first_pass_draw",
+                                                     "draws", "cost_usd", "duration_s", "subtype")}, ensure_ascii=False))
+            if config_error(row) and stop["why"] is None:  # 남은 실행도 모두 같은 오류로 끝나 표에서 빠지니 바로 멈춘다
+                cause = "크레딧이 떨어졌다" if BILLING.search(row.get("error") or "") else "API 키나 모델 이름이 틀렸다"
+                stop["why"] = f"{cause}({row.get('api_status')}): {row.get('error')}"
 
-        previous = {s: signal.getsignal(s) for s in STOP_SIGNALS}
-        # Ctrl-C·kill·터미널 닫기. claude는 새 세션이라 이 신호를 받지 못해 직접 끝낸다. nohup으로 무시하던 신호는 그대로 둔다
-        watched = [s for s in STOP_SIGNALS if previous[s] is not signal.SIG_IGN]
-        for s in watched:
-            signal.signal(s, on_stop)
         try:
             for j in jobs:
                 futures[pool.submit(run_one, j, key)] = j
-            for fut in cf.as_completed(futures):
-                record(fut)
-            restore_stop_signals(previous)
-        except BaseException as e:  # 신호나 결과를 쓰다 난 오류: 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다
-            try:  # 정리 중에 또 신호나 오류가 나면 돌던 claude를 바로 끝내고 나간다
-                for s in watched:
-                    signal.signal(s, force_exit)
+            pending = set(futures)
+            while pending and stop["why"] is None:
+                done, pending = cf.wait(pending, timeout=0.5, return_when=cf.FIRST_COMPLETED)
+                for fut in done:
+                    record(fut)
+        except Exception as e:  # 결과를 쓰다 난 오류(디스크가 가득 참 등)
+            stop["why"] = stop["why"] or f"오류: {type(e).__name__}: {e}"
+        if stop["why"] is not None:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다
+            try:
                 with _RUNNING_LOCK:
                     _STOP.set()
                     procs = list(_RUNNING)
@@ -702,28 +680,25 @@ def main() -> None:
                     if p.poll() is None:
                         stop_group(p, signal.SIGKILL)
                 cf.wait([fut for fut in futures if not fut.done()], timeout=10)  # 끝낸 실행의 스레드가 기록을 마치기를 기다린다
-                # 끝났는데 아직 쓰지 못한 실행만 남긴다(정리하는 동안 스스로 끝난 실행도 든다, 끊긴 실행은 쓰지 않는다)
-                try:
+                try:  # 끝났는데 아직 쓰지 못한 실행(정리하는 동안 스스로 끝난 실행도 든다)
                     for fut in futures:
-                        if (fut.done() and not fut.cancelled() and fut not in written
-                                and not isinstance(fut.exception(), Stopped)):
+                        if fut.done() and not fut.cancelled() and fut not in recorded:
                             record(fut)
                 except Exception as more:
                     say(f"끝난 실행을 더 쓰지 못했다: {type(more).__name__}: {more}", file=sys.stderr)
-                why = "멈췄다" if isinstance(e, KeyboardInterrupt) else f"오류로 멈췄다({type(e).__name__}: {e})"
-                say(f"{why}: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)",
-                    file=sys.stderr)
+                say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 "
+                    "들지 않는다)", file=sys.stderr)
             except BaseException:
                 force_exit(None, None)
             # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
             # 줄마다 flush했다
             os._exit(1)
+    restore_stop_signals(previous)
     pool.shutdown()
     total = sum(r.get("cost_usd") or 0 for r in rows)
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
     note = f", 비용을 모르는 실행 {unknown_cost}건은 합계에 들지 않았다" if unknown_cost else ""
     say(f"끝: {len(rows)}건, 합계 ${total:.2f}{note}, 결과 {base / 'results.csv'}")
-
 
 if __name__ == "__main__":
     main()

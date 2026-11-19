@@ -138,6 +138,6 @@ uv run python bench/inspect_run.py ~/Documents/cysUML-bench-runs/hard-sonnet-med
 - `--problems`에는 문제 이름이나 묶음 이름(readme·hard·xl·xxl)을 준다.
 - 위 표를 모두 다시 재면 Claude API 요금으로 약 $161이 든다(표의 609번 합계).
 - 기록은 `--out`(기본 `~/Documents/cysUML-bench-runs/`) 아래 `--tag`(기본은 시작한 `월일-시분초`) 폴더에 남는다. 실행마다 문제 글·`stream.jsonl`·그린 그림이 있고, 묶은 `results.csv`가 맨 위에 있다. 이미 기록이 있는(빈 폴더가 아닌) 태그로는 돌지 않는다.
-- `results.csv`는 실행이 끝날 때마다 한 줄씩 쓴다. Ctrl-C(또는 `kill`, 터미널 닫기)로 멈추면 남은 실행은 띄우지 않고 돌던 claude도 끝내며, 끝난 실행까지는 남는다. API 키나 모델 이름이 틀리거나(401·403·404) 크레딧이 떨어지면 바로 멈춘다. `--timeout`을 넘겨 끊긴 실행은 `timeout`으로 적고, 비용은 알 수 없어 합계에 들지 않는다.
+- `results.csv`는 실행이 끝날 때마다 한 줄씩 쓴다. Ctrl-C(또는 `kill`, 터미널 닫기)로 멈추면 남은 실행은 띄우지 않고 돌던 claude도 끝내며, 끝난 실행까지는 남는다. 정리가 오래 걸리면 한 번 더 보내 바로 끝낼 수 있다. API 키나 모델 이름이 틀리거나(401·403·404) 크레딧이 떨어지면 바로 멈춘다. `--timeout`을 넘겨 끊긴 실행은 `timeout`으로 적고, 비용은 알 수 없어 합계에 들지 않는다.
 - 판정 규칙을 고친 뒤에는 `uv run python bench/rescore.py <태그 폴더>`가 남은 `stream.jsonl`을 지금 규칙으로 다시 읽어 같은 폴더에 `rescored.csv`를 쓴다(다시 재지 않으니 돈이 들지 않는다). 문제는 지금 문제 파일이 아니라 그 실행의 `prompt.txt`에 실제로 들어간 것과 견준다. 위 표는 이 `rescored.csv`로 냈다.
 - `summarize.py`는 준 CSV를 모델·effort별로 묶는다. 위 "묶음별" 표처럼 묶음마다 보려면 묶음마다 태그를 나눠 돌리고 그 `results.csv`를 하나씩 준다. 합계 줄의 비용 범위는 묶음별 평균에서 손으로 골랐다.
