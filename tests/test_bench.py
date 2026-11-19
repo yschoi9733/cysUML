@@ -154,6 +154,16 @@ def test_mcp_transport_error_is_not_the_models_failure():
     assert row["verdicts"] == "fail mcp_error" and not bench.is_measured(row["subtype"])
 
 
+def test_mcp_error_then_more_draws_is_measured():
+    # MCP가 잠깐 끊긴 뒤에도 계속 그렸으면 모델을 잰 실행이다
+    tool, spec = bench.load_problem("order")
+    events = [INIT, *_draws(spec, [FAIL, "MCP error -32001: Request timed out", FAIL])]
+    events[4]["message"]["content"][0]["is_error"] = True  # 두 번째 차례의 도구 결과
+    row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 0, "wall_s": 9.0},
+                          [json.dumps(e) for e in [*events, ENDED]], tool, spec, False)
+    assert row["verdicts"] == "fail mcp_error fail" and bench.is_measured(row["subtype"])
+
+
 def test_timeout_before_any_draw_is_not_measured_even_after_text():
     # 말만 하고 한 번도 그리지 않은 채 시간이 다 가면 API가 멈춘 것과 가를 수 없어 뺀다
     tool, spec = bench.load_problem("order")
@@ -179,6 +189,9 @@ def test_config_errors_stop_the_bench():
     assert not bench.config_error({"is_error": True, "api_status": 400, "error": "Prompt is too long"})
     # 문제 이름(billing·BillingService)이 오류 글에 인용돼도 크레딧 부족이 아니다
     assert not bench.config_error({"is_error": True, "api_status": 400, "error": "invalid input near BillingService"})
+    # 403은 오류 글이 모델을 말하면 그 모델만, 아니면 키·조직 전체의 권한 문제다
+    assert bench.config_error({"is_error": True, "api_status": 403, "error": "no access to model claude-x"}) == "model"
+    assert bench.config_error({"is_error": True, "api_status": 403, "error": "permission denied"}) == "key"
 
 
 @pytest.mark.parametrize("ended, draws, stopped", [

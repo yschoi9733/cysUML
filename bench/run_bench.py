@@ -362,13 +362,16 @@ def _api_code(row: dict) -> int | None:
 
 
 def config_error(row: dict) -> str | None:
-    """남은 실행도 같은 오류로 끝날 원인: billing(크레딧 부족)·key(401·403, 키·조직 권한)는 모든 모델, model(404)은 그 모델만."""
+    """남은 실행도 같은 오류로 끝날 원인: billing(크레딧 부족)·key(401, 키·조직 권한의 403)는 모든 모델, model(404, 그
+    모델 권한의 403)은 그 모델만."""
     if not row.get("is_error") or row.get("passed"):
         return None
     if BILLING.search(row.get("error") or ""):
         return "billing"
     code = _api_code(row)
-    return "key" if code in (401, 403) else "model" if code == 404 else None
+    if code == 403:  # 권한 오류는 오류 글이 모델을 말하면 그 모델만의 문제다
+        return "model" if re.search(r"model", row.get("error") or "", re.I) else "key"
+    return "key" if code == 401 else "model" if code == 404 else None
 
 
 def server_side(row: dict) -> bool:
@@ -400,7 +403,9 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
         row["duration_s"] = row["wall_s"]
     no_tool = not row["draws"] and not row["tool_ready"]  # 그림 도구 없이 끝났다
     no_answer = not row["draws"] and timed_out  # 한 번도 그리기 전에 시간이 다 갔다(API가 멈춘 것과 가를 수 없다)
-    mcp_broke = not row["passed"] and "mcp_error" in row["verdicts"].split()  # 그리는 도중 MCP 서버가 끊겼다
+    # 그리는 도중 MCP 서버가 끊겨 그 차례로 끝났다(그 뒤에도 그렸으면 잠깐 끊긴 것이라 잰 실행이다)
+    mcp_broke = (not row["passed"] and row["draws"] < MAX_DRAWS
+                 and (row["verdicts"].split() or [""])[-1] == "mcp_error")
     if no_tool or no_answer or mcp_broke:  # 모델의 불합격이 아니다
         why = ((f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") if no_tool
                else "no_answer" if no_answer else "mcp_failed: during run")
@@ -490,7 +495,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
 
 
 _RUNNING: set[subprocess.Popen] = set()
-_RUNNING_LOCK = threading.Lock()
+_RUNNING_LOCK = threading.RLock()  # force_exit가 이 잠금을 쥔 메인 스레드에서 불려도 막히지 않게
 _STOP = threading.Event()  # 멈춘 뒤에는 새 claude를 띄우지 않는다(_RUNNING_LOCK 안에서 보고 세운다)
 _SIGNALED: set[int] = set()  # _RUNNING_LOCK 안에서 넣는다
 _MEMBERS: dict[int, list[int]] = {}  # 멈출 때 기억한 그룹별 구성원(force_exit도 쓴다)
@@ -506,7 +511,13 @@ STOP_SIGNALS = tuple(getattr(signal, n) for n in ("SIGINT", "SIGTERM", "SIGHUP")
 
 def force_exit(signum, frame) -> None:
     """정리 중에 신호가 한 번 더 오면 돌던 claude와 기억한 그룹 구성원을 바로 끝내고 나간다(정리가 막혔을 때의 탈출구)."""
-    for p in list(_RUNNING):
+    # 막 띄우는 중인 claude도 목록에 든 뒤에 보도록 잠금을 잡고, 그 뒤로는 새로 띄우지 않게 한다
+    locked = _RUNNING_LOCK.acquire(timeout=5)
+    _STOP.set()
+    procs = list(_RUNNING)
+    if locked:
+        _RUNNING_LOCK.release()
+    for p in procs:
         stop_group(p, signal.SIGKILL)
     for pgid, pids in list(_MEMBERS.items()):
         for pid in pids:
@@ -661,6 +672,8 @@ def main() -> None:
         except InputError as e:
             sys.exit(f"문제 {p}를 cysUML이 읽지 못한다: {e}")
 
+    if os.name == "nt":  # 프로세스 그룹·신호로 claude를 끝낸다
+        sys.exit("run_bench.py는 macOS·Linux에서만 돈다")
     if shutil.which("claude") is None:
         sys.exit("claude가 PATH에 없다 — Claude Code를 설치한다")
     if not (ROOT / ".venv" / "bin" / "cysuml").exists():
@@ -676,7 +689,7 @@ def main() -> None:
     base.mkdir(parents=True, exist_ok=True)
     pool = cf.ThreadPoolExecutor(max_workers=args.workers)
     # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다. failed는 결과를 쓰다 난 오류
-    stop = {"why": None, "first": None, "signum": None, "failed": False}
+    stop = {"why": None, "first": None, "signum": None, "failed": False, "skipped": []}
 
     def on_stop(signum, frame):  # 예외를 던지지 않아 쓰던 줄이 잘리거나 잠금을 쥔 채 끊기지 않는다
         now = time.monotonic()
@@ -725,12 +738,14 @@ def main() -> None:
             if stop["why"] is not None:
                 return
             cause = config_error(row)
-            if cause == "model":  # 그 모델만 쓸 수 없다(이름 오타·권한)
-                skipped = [x for x, job in futures.items() if job["model"] == j["model"] and x.cancel()]
+            if cause == "model" and j["model"] not in stop["skipped"]:  # 그 모델만 쓸 수 없다(이름 오타·권한)
+                stop["skipped"].append(j["model"])
+                skipped = [x for x, job in futures.items()
+                           if job["model"] == j["model"] and not x.cancelled() and x.cancel()]
                 say(f"{j['model']}을(를) 쓸 수 없어({row.get('api_status')}) 그 모델의 남은 실행 {len(skipped)}건을 뺀다: "
                     f"{row.get('error')}",
                     file=sys.stderr)
-            elif cause:  # 키·크레딧은 모든 실행에 걸리니 바로 멈춘다
+            elif cause in ("key", "billing"):  # 키·크레딧은 모든 실행에 걸리니 바로 멈춘다(이미 뺀 모델의 404는 여기 오지 않는다)
                 what = "크레딧이 떨어졌다" if cause == "billing" else "API 키가 틀렸다"
                 stop["why"] = f"{what}({row.get('api_status')}): {row.get('error')}"
             elif not any(is_measured(r.get("subtype")) for r in rows):
@@ -784,7 +799,7 @@ def main() -> None:
                         kill_if_member(pid, pgid)
                 cf.wait([fut for fut in futures if not fut.done()], timeout=10)
                 drain()  # 정리하는 동안 스스로 끝난 실행도 든다
-                say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 "
+                say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에 "
                     "들지 않는다)", file=sys.stderr)
             except BaseException:
                 force_exit(None, None)
@@ -801,6 +816,8 @@ def main() -> None:
         sys.exit("결과를 다 쓰지 못했다(위 알림) — results.csv가 모자랄 수 있다")
     if stop["why"] is not None and stop["first"] is None:  # 키·크레딧 오류 등 신호가 아닌 까닭으로 멈췄다
         sys.exit(f"멈춘 까닭: {stop['why']}")
+    if stop["skipped"]:
+        sys.exit(f"쓸 수 없어 뺀 모델이 있다: {stop['skipped']}")
 
 if __name__ == "__main__":
     main()
