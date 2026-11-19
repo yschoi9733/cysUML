@@ -239,16 +239,15 @@ def test_non_object_lines_are_skipped():
 
 
 def test_classification_does_not_depend_on_branch_order():
-    # 고장 판정은 시간 초과보다, API 오류는 끝난 꼴보다 먼저 본다. 멈출 때 끊은 실행은 끝난 꼴과 상관없이 stopped다
+    # 고장 판정은 시간 초과보다, API 오류는 끝난 꼴보다 먼저 본다. 멈출 때 끊어 끝의 결과가 없는 실행은 stopped다
     tool, spec = bench.load_problem("order")
     meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": None, "wall_s": 9.0}
     broken = [INIT, *_draws(spec, [FAIL, "MCP error -32000: Connection closed"])]
     broken[-1]["message"]["content"][0]["is_error"] = True
     row = bench.build_row(meta, [json.dumps(e) for e in broken], tool, spec, True)
     assert row["subtype"] == "mcp_failed: during run (timeout)" and not bench.is_measured(row["subtype"])
-    aborted = {"type": "result", "subtype": "success", "is_error": True, "result": "API Error: Request was aborted."}
-    row = bench.build_row(meta | {"exit": 143, "signaled": True},
-                          [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), aborted]], tool, spec, False)
+    row = bench.build_row(meta | {"exit": -9, "signaled": True}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL])]],
+                          tool, spec, False)
     assert row["subtype"] == "stopped"
     overload = {"type": "result", "subtype": "success", "is_error": True, "api_error_status": 529}
     row = bench.build_row(meta | {"exit": 1}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), overload]],
@@ -259,7 +258,7 @@ def test_classification_does_not_depend_on_branch_order():
 def test_result_is_settled_when_the_ten_draws_are_answered():
     # 10번째 그리기가 답을 기다리는 중이면 결과가 정해진 것이 아니고, 고장으로라도 답을 받았으면 정해졌다
     tool, spec = bench.load_problem("order")
-    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 143, "wall_s": 9.0, "signaled": True}
+    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": -9, "wall_s": 9.0, "signaled": True}
     pending = {"type": "assistant", "message": {"content": [
         {"type": "tool_use", "id": "late", "name": "mcp__cysuml__draw_class_diagram", "input": spec}]}}
     row = bench.build_row(meta, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL] * 9), pending]], tool, spec, False)
@@ -283,20 +282,20 @@ def test_broken_draws_still_count_toward_the_ten_draws():
     assert bench.is_measured(row["subtype"])  # 그리기 10번을 다 써 결과가 정해진 잰 실행이다
 
 
-def test_api_error_wins_over_missing_tool_and_stop_wins_over_api_error():
+def test_api_error_wins_over_missing_tool_and_the_stop_mark():
     tool, spec = bench.load_problem("order")
     meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 1, "wall_s": 9.0}
     pending = {"type": "system", "subtype": "init", "mcp_servers": [{"name": "cysuml", "status": "pending"}], "tools": []}
     outage = {"type": "result", "subtype": "success", "is_error": True, "result": "overloaded"}
     row = bench.build_row(meta, [json.dumps(e) for e in [pending, outage]], tool, spec, False)
     assert row["subtype"] == "api_error"  # MCP가 붙기 전이어도 API 오류다(시작 실패로 세지 않는다)
-    overload = {"type": "result", "subtype": "error_during_execution", "is_error": True, "api_error_status": 529}
+    overload = {"type": "result", "subtype": "success", "is_error": True, "api_error_status": 529}
     row = bench.build_row(meta | {"signaled": True}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), overload]],
                           tool, spec, False)
-    assert row["subtype"] == "stopped"  # 멈출 때 끊은 실행은 끝난 꼴과 상관없이 뺀다
+    assert row["subtype"] == "api_error"  # 끝의 결과를 냈으면 멈춤 표시가 붙어도 그 결과로 가른다
 
 
-def test_budget_end_with_retry_noise_and_quiet_abort():
+def test_budget_end_with_retry_noise_is_measured():
     tool, spec = bench.load_problem("order")
     meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 1, "wall_s": 9.0}
     # 비용 상한으로 끝났으면 오류 목록에 재시도 흔적(overloaded)이 있어도 모델의 불합격이다
@@ -304,11 +303,10 @@ def test_budget_end_with_retry_noise_and_quiet_abort():
               "errors": ["Reached maximum budget", "overloaded (retried)"]}
     row = bench.build_row(meta, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), budget]], tool, spec, False)
     assert row["subtype"] == "error_max_budget_usd" and bench.is_measured(row["subtype"])
-    # 신호를 받고 오류 표시 없이 중단 글을 낸 것도 끊긴 실행이다
-    quiet = {"type": "result", "subtype": "success", "is_error": False, "result": "Request was aborted."}
-    row = bench.build_row(meta | {"signaled": True}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), quiet]],
+    # 멈추기 전에 비용 상한으로 스스로 끝났으면 멈춤 표시가 붙어도 잰 실행이다
+    row = bench.build_row(meta | {"signaled": True}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), budget]],
                           tool, spec, False)
-    assert row["subtype"] == "stopped"
+    assert row["subtype"] == "error_max_budget_usd" and bench.is_measured(row["subtype"])
 
 
 def test_run_that_timed_out_before_the_stop_keeps_the_timeout_rule():
@@ -329,18 +327,18 @@ def test_tool_call_rejected_by_the_sdk_is_an_input_error():
     assert row["verdicts"] == "input_error" and row["input_errors"] == 1
 
 
-@pytest.mark.parametrize("ended, draws, stopped", [
-    (None, 2, True),  # 결과 없이 끊김
-    ("error_during_execution", 2, True),  # 신호를 받고 낸 결과는 스스로 끝난 것이 아니다
-    ("success", 2, True),  # 끊은 사이 스스로 끝났어도 끝난 꼴로는 가를 수 없어 뺀다
-    (None, 10, False),  # 10번을 다 그렸으면 잰 불합격이다
+@pytest.mark.parametrize("ended, draws, subtype", [
+    (None, 2, "stopped"),  # 끝의 결과 없이 끊김
+    ("success", 2, "success"),  # SIGKILL로는 결과를 내지 못하니, 결과가 있으면 멈추기 전에 스스로 끝났다
+    ("error_max_turns", 2, "error_max_turns"),
+    (None, 10, None),  # 10번을 다 그렸으면 결과가 정해진 잰 불합격이다
 ])
-def test_signaled_runs(ended, draws, stopped):
+def test_signaled_runs(ended, draws, subtype):
     tool, spec = bench.load_problem("order")
     events = [INIT, *_draws(spec, [FAIL] * draws)] + ([{"type": "result", "subtype": ended}] if ended else [])
-    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 143, "wall_s": 9.0, "signaled": True}
+    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": -9, "wall_s": 9.0, "signaled": True}
     row = bench.build_row(meta, [json.dumps(e) for e in events], tool, spec, False)
-    assert (row["subtype"] == "stopped") == stopped and bench.is_measured(row["subtype"]) != stopped
+    assert row["subtype"] == subtype and bench.is_measured(row["subtype"]) == (subtype != "stopped")
 
 
 def test_lists_sent_as_json_text_are_read():

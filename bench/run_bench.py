@@ -397,8 +397,9 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
     used_up = len(seq) >= MAX_DRAWS and seq[MAX_DRAWS - 1] != "missing"
     if row["passed"] or used_up:
         why = "timeout" if timed_out else None
-    elif meta.get("signaled") and not timed_out:
-        # 멈출 때 우리가 끊었다(그 사이 스스로 끝났어도 끝난 꼴로는 가를 수 없어 뺀다). 시간 초과로 먼저 끝낸 실행은 아래 규칙을 따른다
+    elif meta.get("signaled") and row["ended"] is None and not timed_out:
+        # 멈출 때 우리가 끊었다. SIGKILL로 끊어 claude는 끝의 결과를 내지 못하니, 결과가 있으면 그 전에 스스로 끝난 것이고
+        # 시간 초과로 먼저 끝낸 실행은 시간 초과 규칙을 따른다
         why = "stopped"
     elif row["is_error"] and row["ended"] == "success":
         # API 오류로 끝났다(MCP가 붙기 전이어도). 서버 탓(인증·크레딧·429·5xx)과 모델 탓(글이 너무 길어진 400 등)을
@@ -580,6 +581,8 @@ def run_one(job: dict, key: str) -> dict:
         except subprocess.TimeoutExpired as e:  # 그룹 밖으로 나간 자손이 출력을 쥐고 있으면 끝내도 닫히지 않는다
             stdout = (e.stdout or b"").decode("utf-8", "replace")  # 그때까지 받은 기록은 남긴다
             stderr = (e.stderr or b"").decode("utf-8", "replace") + "\n끝낸 뒤에도 출력이 닫히지 않아 그때까지 받은 기록만 남겼다"
+            for pipe in (proc.stdout, proc.stderr):  # 일꾼마다 파이프가 쌓이지 않게 닫는다
+                pipe.close()
             try:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
@@ -650,7 +653,7 @@ def main() -> None:
     rows = []
     base.mkdir(parents=True, exist_ok=True)
     pool = cf.ThreadPoolExecutor(max_workers=args.workers)
-    # 멈출 까닭. 신호 처리기와 결과 쓰기가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다. failed는 결과를 쓰다 난 오류
+    # 멈출 까닭. 신호 처리기와 결과 쓰기가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다. failed는 results.csv를 닫지 못한 것
     stop = {"why": None, "failed": False}
 
     def on_stop(signum, frame):
@@ -699,7 +702,7 @@ def main() -> None:
                 for fut in done:
                     record(fut)
         except Exception as e:  # 결과를 쓰다 난 오류(디스크가 가득 참 등)
-            stop["why"], stop["failed"] = stop["why"] or f"오류: {type(e).__name__}: {e}", True
+            stop["why"] = stop["why"] or f"오류: {type(e).__name__}: {e}"
 
         if stop["why"] is not None:  # 남은 실행은 띄우지 않고, 돌던 claude는 그룹째(MCP 서버까지) 바로 끝낸다
             try:
