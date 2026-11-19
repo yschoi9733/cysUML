@@ -195,7 +195,7 @@ def _diagram(data: dict, tool: str) -> B.Diagram:
     items, rels = listed(data.get(s.list_field)), listed(data.get("relations"))
     if isinstance(items, list):
         items = [{"left": 0, "top": 0, **e} if isinstance(e, dict) else e for e in items]
-    if isinstance(rels, list):
+    if isinstance(rels, list):  # 자기 자신으로 가는 관계는 꺾는 점이 둘 있어야 읽힌다(from·to는 요소의 열쇠 하나로만 가리킨다)
         rels = [{"via": [[0, 0], [1, 1]], **r} if isinstance(r, dict) and r.get("from") == r.get("to") else r
                 for r in rels]
     with _PARSE_LOCK:  # parse는 글자 폭을 재려고 공유 글꼴 객체를 쓴다(서버도 그리기를 한 번에 하나씩 한다)
@@ -249,24 +249,28 @@ def _shape(d: B.Diagram, known: dict[str, str]) -> tuple[list, list]:
     return elements, relations
 
 
-def faithful(drawn: dict, spec: dict, tool: str, problem: tuple | None = None) -> bool:
+def faithful(drawn: dict, spec: dict, tool: str) -> bool:
     """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸·id는 보지 않는다). cysUML이 읽지 못하는
-    입력은 문제와 같다고 볼 수 없다. problem은 미리 만든 problem_shape(spec, tool)이다."""
-    known, want = problem or problem_shape(spec, tool)
+    입력은 문제와 같다고 볼 수 없다."""
+    known, want = problem_shape(spec, tool)
     try:
         return _shape(_diagram(drawn, tool), known) == want
     except InputError:
         return False
 
 
-PREPARED: dict[str, tuple] = {}  # main이 미리 읽은 문제별 (도구, 문제, 꼴)
+PREPARED: dict[str, tuple] = {}  # main이 미리 읽은 문제별 (도구, 문제)
+_SHAPES: dict[str, tuple] = {}
 
 
 def problem_shape(spec: dict, tool: str) -> tuple[dict[str, str], tuple[list, list]]:
-    """문제의 이름 열쇠와 견줄 꼴. cysUML이 못 읽는 문제는 InputError."""
-    d = _diagram(spec, tool)
-    known = _known_names(d)
-    return known, _shape(d, known)
+    """문제의 이름 열쇠와 견줄 꼴(같은 문제는 한 번만 만든다). cysUML이 못 읽는 문제는 InputError."""
+    k = json.dumps([tool, spec], sort_keys=True, ensure_ascii=False)
+    if k not in _SHAPES:
+        d = _diagram(spec, tool)
+        known = _known_names(d)
+        _SHAPES[k] = known, _shape(d, known)
+    return _SHAPES[k]
 
 
 def read_events(lines) -> list[dict]:
@@ -345,11 +349,14 @@ def _api_code(row: dict) -> int | None:
         return int(m.group(1)) if m else None
 
 
-def config_error(row: dict) -> bool:
-    """키·모델 이름이 틀렸거나(401·403·404) 크레딧이 떨어져, 남은 실행도 모두 같은 오류로 끝날 실행(init 전에 끝났어도)."""
+def config_error(row: dict) -> str | None:
+    """남은 실행도 같은 오류로 끝날 원인: billing(크레딧 부족)·key(401)는 모든 모델, model(404·403)은 그 모델만."""
     if not row.get("is_error") or row.get("passed"):
-        return False
-    return _api_code(row) in (401, 403, 404) or bool(BILLING.search(row.get("error") or ""))
+        return None
+    if BILLING.search(row.get("error") or ""):
+        return "billing"
+    code = _api_code(row)
+    return "key" if code == 401 else "model" if code in (403, 404) else None
 
 
 def server_side(row: dict) -> bool:
@@ -357,7 +364,7 @@ def server_side(row: dict) -> bool:
     if not row["is_error"]:
         return False
     code = _api_code(row)
-    return (config_error(row) or code == 429 or (code is not None and code >= 500)
+    return (config_error(row) is not None or code == 429 or (code is not None and code >= 500)
             or (code is None and bool(OUTAGE.search(row["error"] or ""))))
 
 
@@ -370,11 +377,11 @@ class Stopped(Exception):
     """Ctrl-C로 멈출 때 띄우지 않았거나 끝낸 실행. CSV에 쓰지 않는다."""
 
 
-def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool, problem: tuple | None = None) -> dict:
+def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict:
     """실행 한 줄(run_one과 rescore.py가 같이 쓴다)."""
     row = {k: meta.get(k) for k in ("model", "effort", "problem", "run")} | {"tool": tool, "exit": meta.get("exit"),
                                                                           "wall_s": meta.get("wall_s")}
-    row.update(parse_stream(lines, tool, spec, problem))
+    row.update(parse_stream(lines, tool, spec))
     timed_out = timed_out and row["ended"] is None  # 끝의 결과를 내고 종료만 못 했으면 그 결과(시간·비용)를 쓴다
     row["timed_out"] = timed_out
     if timed_out:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
@@ -417,7 +424,7 @@ def counts_as_pass(first_pass: int | None) -> bool:
     return first_pass is not None and first_pass <= MAX_DRAWS
 
 
-def parse_stream(lines, tool: str | None = None, spec: dict | None = None, problem: tuple | None = None) -> dict:
+def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> dict:
     """spec(문제)을 주면, 검사에 합격했어도 문제를 바꿔 그린 차례(요소·관계를 빼거나 더하거나 바꿈)는 changed로 적고
     합격으로 치지 않는다."""
     events = read_events(lines)
@@ -435,8 +442,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None, probl
         # 계속 그릴 수 있어 summarize.py가 알리게 센다
         save_errors += v == "pass" and bool(results[i].get("is_error"))
         if v == "pass" and spec is not None:
-            problem = problem or problem_shape(spec, tool)
-            if not faithful(inputs.get(i, {}), spec, tool, problem):
+            if not faithful(inputs.get(i, {}), spec, tool):
                 v = "changed"
         seq.append(v)
     first_pass = next((n for n, v in enumerate(seq, 1) if v == "pass"), None)
@@ -457,10 +463,11 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None, probl
         "ended": result.get("subtype"),  # build_row가 subtype을 바꿔도 남는다
         "answered": any(e.get("type") == "assistant" for e in events),
         # 그 문제의 그리기 도구를 쓸 수 있었는지(init의 도구 목록). MCP 상태가 pending이어도 도구가 있으면 모델이 판단한 것이다
-        "tool_ready": bool(tool) and DRAW_PREFIX + tool.removeprefix("draw_") in (init_event(events).get("tools") or []),
+        "tool_ready": mcp_status(events) == "connected"
+        or (bool(tool) and DRAW_PREFIX + tool.removeprefix("draw_") in (init_event(events).get("tools") or [])),
         "is_error": result.get("is_error"),
         "api_status": result.get("api_error_status"),
-        "error": (str(result.get("result") or result.get("errors") or "")[:200] or None) if result.get("is_error") else None,
+        "error": (str(result.get("result") or result.get("errors") or "") or None) if result.get("is_error") else None,
         "input_tokens": usage.get("input_tokens"),
         "cache_read_tokens": usage.get("cache_read_input_tokens"),
         "cache_write_tokens": usage.get("cache_creation_input_tokens"),
@@ -502,6 +509,21 @@ def say(text: str, file=None) -> None:
         pass
 
 
+def group_members(pgid: int) -> list[int]:
+    out = subprocess.run(["pgrep", "-g", str(pgid)], capture_output=True, text=True).stdout
+    return [int(x) for x in out.split()]
+
+
+def kill_if_member(pid: int, pgid: int) -> None:
+    """pid가 아직 그 그룹에 있을 때만 SIGKILL한다. 그룹에 구성원이 남아 있는 동안 그 그룹 번호는 다시 쓰이지 않아, pid가 다른
+    프로세스에 갔다면 그 그룹이 아니다."""
+    try:
+        if os.getpgid(pid) == pgid:
+            os.kill(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def stop_group(proc: subprocess.Popen, sig: int) -> None:
     if proc.returncode is not None:  # 이미 거둔 프로세스의 pid(=그룹 번호)는 다른 프로세스가 받았을 수 있다
         return
@@ -520,7 +542,7 @@ def run_one(job: dict, key: str) -> dict:
         raise Stopped("멈춘 뒤라 띄우지 않았다")
     run_dir: Path = job["dir"]
     run_dir.mkdir(parents=True)
-    tool, spec, shape = PREPARED.get(job["problem"]) or (*load_problem(job["problem"]), None)
+    tool, spec = PREPARED[job["problem"]]
     prompt = prompt_for(job["problem"], tool, spec)
     (run_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
     mcp = {"mcpServers": {"cysuml": {"command": str(ROOT / ".venv" / "bin" / "cysuml")}}}
@@ -573,7 +595,7 @@ def run_one(job: dict, key: str) -> dict:
     meta = {"exit": code, "wall_s": round((timed_out_at or time.time()) - started, 1), "timed_out": code is None,
             "signaled": proc.pid in _SIGNALED}
     (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")  # 해석이 실패해도 rescore.py가 다시 읽게
-    row = build_row(job | meta, stdout.split("\n"), tool, spec, meta["timed_out"], shape)
+    row = build_row(job | meta, stdout.split("\n"), tool, spec, meta["timed_out"])
     stopped = row["subtype"] == "stopped"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
     if stopped:
@@ -603,7 +625,8 @@ def main() -> None:
     for p in args.problems:  # 합격한 그림을 문제와 견줄 수 없으면 돈을 쓴 실행이 하네스 오류로 끝나니 미리 읽어 본다
         tool, spec = load_problem(p)
         try:
-            PREPARED[p] = tool, spec, problem_shape(spec, tool)
+            problem_shape(spec, tool)
+            PREPARED[p] = tool, spec
         except InputError as e:
             sys.exit(f"문제 {p}를 cysUML이 읽지 못한다: {e}")
 
@@ -621,13 +644,13 @@ def main() -> None:
     rows = []
     base.mkdir(parents=True, exist_ok=True)
     pool = cf.ThreadPoolExecutor(max_workers=args.workers)
-    stop = {"why": None}  # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다
+    stop = {"why": None, "signals": 0}  # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다
 
     def on_stop(signum, frame):  # 예외를 던지지 않아 쓰던 줄이 잘리거나 잠금을 쥔 채 끊기지 않는다
-        if stop["why"] is None:
-            stop["why"] = signal.Signals(signum).name
-        else:  # 두 번째 신호: 정리가 막혔어도 바로 끝낸다
+        stop["signals"] += 1
+        if stop["signals"] > 1:  # 두 번째 신호: 정리가 막혔어도 바로 끝낸다
             force_exit(signum, frame)
+        stop["why"] = stop["why"] or signal.Signals(signum).name
 
     previous = {s: signal.getsignal(s) for s in STOP_SIGNALS}
     # Ctrl-C·kill·터미널 닫기. claude는 새 세션이라 이 신호를 받지 못해 직접 끝낸다. nohup으로 무시하던 신호는 그대로 둔다
@@ -663,14 +686,15 @@ def main() -> None:
                                                      "draws", "cost_usd", "duration_s", "subtype")}, ensure_ascii=False))
             if stop["why"] is not None:
                 return
-            code, billing = _api_code(row), bool(BILLING.search(row.get("error") or ""))
-            if config_error(row) and code in (403, 404) and not billing:  # 그 모델만 쓸 수 없다(이름 오타·권한)
+            cause = config_error(row)
+            if cause == "model":  # 그 모델만 쓸 수 없다(이름 오타·권한)
                 skipped = [x for x, job in futures.items() if job["model"] == j["model"] and x.cancel()]
-                say(f"{j['model']}을(를) 쓸 수 없어({code}) 그 모델의 남은 실행 {len(skipped)}건을 뺀다: {row.get('error')}",
+                say(f"{j['model']}을(를) 쓸 수 없어({row.get('api_status')}) 그 모델의 남은 실행 {len(skipped)}건을 뺀다: "
+                    f"{row.get('error')}",
                     file=sys.stderr)
-            elif config_error(row):  # 키·크레딧은 모든 실행에 걸리니 바로 멈춘다
-                cause = "크레딧이 떨어졌다" if billing else "API 키가 틀렸다"
-                stop["why"] = f"{cause}({row.get('api_status')}): {row.get('error')}"
+            elif cause:  # 키·크레딧은 모든 실행에 걸리니 바로 멈춘다
+                what = "크레딧이 떨어졌다" if cause == "billing" else "API 키가 틀렸다"
+                stop["why"] = f"{what}({row.get('api_status')}): {row.get('error')}"
             elif not any(is_measured(r.get("subtype")) for r in rows):
                 started_badly = [r for r in rows if (r.get("subtype") or "").startswith(("no_init", "mcp_failed"))]
                 if len(started_badly) >= 3:  # 잰 실행 없이 시작 실패만 나면 설정·환경 문제다
@@ -691,16 +715,22 @@ def main() -> None:
                 with _RUNNING_LOCK:
                     _STOP.set()
                     procs = list(_RUNNING)
-                    _SIGNALED.update(p.pid for p in procs if p.returncode is None)  # 이미 스스로 끝나 거둔 실행은 빼고
-                for p in procs:
+                    live = [p for p in procs if p.poll() is None]  # 이미 스스로 끝난 실행은 신호를 보낸 실행이 아니다
+                    _SIGNALED.update(p.pid for p in live)
+                # 그룹 구성원(MCP 서버 등)을 지금 기억해, claude가 먼저 끝나도 남은 구성원까지 끝낸다
+                members = {p.pid: group_members(p.pid) for p in live}
+                for p in live:
                     stop_group(p, signal.SIGTERM)
                 pool.shutdown(wait=False, cancel_futures=True)
                 deadline = time.time() + 10  # SIGTERM을 무시하는 그룹은 10초 뒤 SIGKILL로 끝낸다
                 while time.time() < deadline and any(p.poll() is None for p in procs):
                     time.sleep(0.2)
-                for p in procs:  # SIGTERM은 그룹째 보내 MCP 서버도 받았다. SIGKILL은 아직 거두지 않은 claude의 그룹에만
+                for p in procs:  # SIGKILL은 아직 거두지 않은 claude의 그룹과, 아직 그 그룹에 남은 구성원에만
                     if p.poll() is None:
                         stop_group(p, signal.SIGKILL)
+                for pgid, pids in members.items():
+                    for pid in pids:
+                        kill_if_member(pid, pgid)
                 cf.wait([fut for fut in futures if not fut.done()], timeout=10)  # 끝낸 실행의 스레드가 기록을 마치기를 기다린다
                 for fut in futures:  # 끝났는데 아직 쓰지 못한 실행(정리하는 동안 스스로 끝난 실행도 든다)
                     if fut.done() and fut not in recorded:

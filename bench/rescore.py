@@ -12,8 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-from run_bench import (FIELDS, build_row, is_measured, load_problem, problem_shape, run_dir_for, run_tool,
-                       spec_from_prompt)
+from run_bench import FIELDS, build_row, is_measured, load_problem, run_dir_for, run_tool, spec_from_prompt
 
 
 class Kept(Exception):
@@ -41,13 +40,7 @@ def rescore_row(tag_dir: Path, r: dict) -> dict:
         timed_out = str(meta["timed_out"]) == "True"
     else:  # timed_out을 남기기 전의 옛 기록은 그때 적은 판정 문구로만 가린다
         timed_out = sub == "timeout" or sub.endswith("(timeout)")
-    key = json.dumps([tool, spec], sort_keys=True, ensure_ascii=False)
-    if key not in SHAPES:  # 같은 문제를 쓴 실행이 많아 한 번만 만든다
-        SHAPES[key] = problem_shape(spec, tool)
-    return build_row(meta, stream.read_text(encoding="utf-8").split("\n"), tool, spec, timed_out, SHAPES[key])
-
-
-SHAPES: dict[str, tuple] = {}
+    return build_row(meta, stream.read_text(encoding="utf-8").split("\n"), tool, spec, timed_out)
 
 
 def main() -> None:

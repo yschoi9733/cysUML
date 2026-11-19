@@ -431,8 +431,8 @@ that makes 609. Most diagrams ran three times per model and effort, so small dif
 
 Measured with cysUML 0.2.1 and Claude Code on 2026-11-18, at Claude API prices; other clients or subscription plans may
 cost differently. Only Claude models were measured. The runs did not block effort set in the shell or in settings files
-and did not log the effort used; for every model, run times rise with each effort level, so the `--effort` flag appears
-to have applied. The method, the low- and medium-effort tables, run times, and the
+(the shell had `CLAUDE_EFFORT=xhigh`, and the settings set Opus 5.5 to xhigh and Fable 5.2 to high) and did not log the
+effort used; for every model, run times rise with each effort level, so the `--effort` flag appears to have applied. The method, the low- and medium-effort tables, run times, and the
 commands to measure again are in
 [`bench/RESULTS.md`](https://github.com/yschoi9733/cysUML/blob/main/bench/RESULTS.md) (in Korean).
 
@@ -610,7 +610,7 @@ Claude 모델 넷에 자리를 지운 그림 26개(7종, 요소 2\~36개)를 주
   medium($0.73)의 두 배가 넘는다.
 
 2026-11-18에 cysUML 0.2.1과 Claude Code로, Claude API 요금 기준으로 쟀다. 다른 클라이언트나 구독 요금제에서는 비용이 다를
-수 있다. Claude 모델만 쟀다. 잴 때 셸·설정 파일의 effort 설정을 막지 않았고 실제로 쓰인 effort도 기록되지 않았지만, 모든
+수 있다. Claude 모델만 쟀다. 잴 때 셸·설정 파일의 effort 설정(셸의 `CLAUDE_EFFORT=xhigh`, 설정의 Opus 5.5 xhigh·Fable 5.2 high)을 막지 않았고 실제로 쓰인 effort도 기록되지 않았지만, 모든
 모델에서 effort가 오를수록 실행 시간이 늘어 `--effort` 플래그가 적용된 것으로 본다. 방법, effort low·medium 표, 시간, 다시 재는 명령은
 [`bench/RESULTS.md`](https://github.com/yschoi9733/cysUML/blob/main/bench/RESULTS.md)에 있다.
 
