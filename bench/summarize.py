@@ -9,7 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean
 
-from run_bench import MAX_DRAWS, counts_as_pass, is_measured
+from run_bench import MAX_DRAWS, NATURAL_ENDS, counts_as_pass, is_measured
 
 
 def num(v):
@@ -110,7 +110,9 @@ def main() -> None:
         if num(r.get("save_errors")):  # 모델은 결과가 합격으로 시작하지 않아 합격 뒤에도 더 그렸을 수 있다
             print(f"- 확인 필요: 그림을 저장하지 못한 차례 {r['save_errors']}번: {r['model']} {r['effort']} {r['problem']} "
                   f"run{r.get('run')}")
-        if r.get("subtype") != "success" or str(r.get("is_error")) == "True":  # 오류로 끝났는데 subtype이 success인 것도
+        # 스스로 끝난 불합격(상한 초과 등)·시간 초과는 잰 실행이다. 그 밖의 끝과, 오류인데 success로 끝난 것만 알린다
+        odd = r.get("subtype") not in (*NATURAL_ENDS, "timeout")
+        if odd or (r.get("subtype") == "success" and str(r.get("is_error")) == "True"):
             error = f" ({r['error']})" if r.get("error") else ""
             print(f"- 확인 필요: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}{error}")
         if num(r.get("first_pass_draw")) is not None and first_pass(r) is None:

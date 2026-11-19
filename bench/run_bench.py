@@ -263,6 +263,18 @@ PREPARED: dict[str, tuple] = {}  # main이 미리 읽은 문제별 (도구, 문�
 _SHAPES: dict[str, tuple] = {}
 
 
+def blind_spots(spec: dict, tool: str) -> list[str]:
+    """이름 없는 요소 가운데 이름 있는 요소에 닿지 않고 종류도 겹치는 것(이웃으로만 가리는 대조의 한계에 걸릴 수 있다)."""
+    d = _diagram(spec, tool)
+    named = {e.key for e in d.boxes if e.name}
+    near = {e.key: set() for e in d.boxes}
+    for r in d.relations:
+        near[r.source].add(r.target)
+        near[r.target].add(r.source)
+    kinds = Counter(e.kind for e in d.boxes if not e.name)
+    return [e.key for e in d.boxes if not e.name and not near[e.key] & named and kinds[e.kind] > 1]
+
+
 def problem_shape(spec: dict, tool: str) -> tuple[dict[str, str], tuple[list, list]]:
     """문제의 이름 열쇠와 견줄 꼴(같은 문제는 한 번만 만든다). cysUML이 못 읽는 문제는 InputError."""
     k = json.dumps([tool, spec], sort_keys=True, ensure_ascii=False)
@@ -497,7 +509,10 @@ def force_exit(signum, frame) -> None:
     for pgid, pids in list(_MEMBERS.items()):
         for pid in pids:
             kill_if_member(pid, pgid)
-    say("정리를 기다리지 않고 바로 끝냈다(돌던 claude는 끝냈다)", file=sys.stderr)
+    try:  # print는 신호가 끊은 출력과 겹치면 RuntimeError를 낸다
+        os.write(2, "정리를 기다리지 않고 바로 끝냈다(돌던 claude는 끝냈다)\n".encode("utf-8"))
+    except OSError:
+        pass
     os._exit(1)
 
 
@@ -510,7 +525,7 @@ def restore_stop_signals(previous: dict) -> None:
 def say(text: str, file=None) -> None:
     try:
         print(text, file=file or sys.stdout, flush=True)
-    except OSError:  # 터미널이 닫혔어도 정리는 이어 간다
+    except (OSError, RuntimeError):  # 터미널이 닫혔거나 신호가 끊은 출력과 겹쳐도 정리는 이어 간다
         pass
 
 
@@ -519,7 +534,8 @@ def group_members(pgid: int) -> list[int]:
         out = subprocess.run(["pgrep", "-g", str(pgid)], capture_output=True, text=True).stdout
     except FileNotFoundError:  # pgrep이 없으면 그룹째 보내는 SIGTERM에만 기댄다
         return []
-    return [int(x) for x in out.split()]
+    # 그룹을 이끄는 claude는 stop_group이 맡는다(거둔 뒤의 그 pid는 그룹 번호와 같아 재사용되면 가를 수 없다)
+    return [int(x) for x in out.split() if int(x) != pgid]
 
 
 def kill_if_member(pid: int, pgid: int) -> None:
@@ -635,6 +651,9 @@ def main() -> None:
         try:
             problem_shape(spec, tool)
             PREPARED[p] = tool, spec
+            if spots := blind_spots(spec, tool):
+                say(f"알림: 문제 {p}의 이름 없는 요소 {spots}는 이름 있는 요소에 닿지 않고 종류도 겹친다 — 대칭으로 바꿔 이은 "
+                    "그림을 대조가 못 가를 수 있다(RESULTS.md 한계)", file=sys.stderr)
         except InputError as e:
             sys.exit(f"문제 {p}를 cysUML이 읽지 못한다: {e}")
 
@@ -652,15 +671,19 @@ def main() -> None:
     rows = []
     base.mkdir(parents=True, exist_ok=True)
     pool = cf.ThreadPoolExecutor(max_workers=args.workers)
-    stop = {"why": None, "first": None}  # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다
+    # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다. failed는 결과를 쓰다 난 오류
+    stop = {"why": None, "first": None, "signum": None, "failed": False}
 
     def on_stop(signum, frame):  # 예외를 던지지 않아 쓰던 줄이 잘리거나 잠금을 쥔 채 끊기지 않는다
         now = time.monotonic()
-        # uv run은 받은 신호를 python에도 넘기고 셸은 앞그룹 전체에 보내, 한 번의 Ctrl-C·터미널 닫기가 두 번 온다. 그래서
-        # 2초 안에 다시 온 것은 같은 신호로 보고, 그 뒤에 또 오면 정리가 막혔어도 바로 끝낸다
-        if stop["first"] is not None and now - stop["first"] > 2:
+        if stop["why"] is not None and stop["first"] is None:  # 키·크레딧 오류 등으로 이미 멈추는 중이면 첫 신호가 "한 번 더"다
             force_exit(signum, frame)
-        stop["first"] = stop["first"] or now
+        # uv run은 받은 신호를 python에도 그대로 넘기고 셸은 앞그룹 전체에 보내, 한 번의 Ctrl-C·터미널 닫기가 같은 신호로 두 번
+        # 온다. 그래서 2초 안에 다시 온 같은 신호는 하나로 보고, 그 밖의 신호가 또 오면 정리가 막혔어도 바로 끝낸다
+        if stop["first"] is not None and (now - stop["first"] > 2 or signum != stop["signum"]):
+            force_exit(signum, frame)
+        if stop["first"] is None:
+            stop["first"], stop["signum"] = now, signum
         stop["why"] = stop["why"] or signal.Signals(signum).name
 
     previous = {s: signal.getsignal(s) for s in STOP_SIGNALS}
@@ -720,8 +743,19 @@ def main() -> None:
                 for fut in done:
                     record(fut)
         except Exception as e:  # 결과를 쓰다 난 오류(디스크가 가득 참 등)
-            stop["why"] = stop["why"] or f"오류: {type(e).__name__}: {e}"
+            stop["why"], stop["failed"] = stop["why"] or f"오류: {type(e).__name__}: {e}", True
+
+        def drain() -> None:  # 끝났는데 아직 쓰지 못한 실행을 실행마다 따로 쓴다(하나가 실패해도 나머지는 쓴다)
+            for fut in futures:
+                if fut.done() and fut not in recorded:
+                    try:
+                        record(fut)
+                    except Exception as more:
+                        stop["failed"] = True
+                        say(f"끝난 실행 하나를 쓰지 못했다: {type(more).__name__}: {more}", file=sys.stderr)
+
         if stop["why"] is not None and all(fut.done() for fut in futures):  # 멈출 때 남은 실행이 없었다
+            drain()
             say(f"알림: {stop['why']}", file=sys.stderr)
         elif stop["why"] is not None:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다
             try:
@@ -745,12 +779,7 @@ def main() -> None:
                     for pid in pids:
                         kill_if_member(pid, pgid)
                 cf.wait([fut for fut in futures if not fut.done()], timeout=10)
-                for fut in futures:  # 끝났는데 아직 쓰지 못한 실행(정리하는 동안 스스로 끝난 실행도 든다)
-                    if fut.done() and fut not in recorded:
-                        try:
-                            record(fut)
-                        except Exception as more:
-                            say(f"끝난 실행 하나를 쓰지 못했다: {type(more).__name__}: {more}", file=sys.stderr)
+                drain()  # 정리하는 동안 스스로 끝난 실행도 든다
                 say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 "
                     "들지 않는다)", file=sys.stderr)
             except BaseException:
@@ -764,6 +793,8 @@ def main() -> None:
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
     note = f", 비용을 모르는 실행 {unknown_cost}건은 합계에 들지 않았다" if unknown_cost else ""
     say(f"끝: {len(rows)}건, 합계 ${total:.2f}{note}, 결과 {base / 'results.csv'}")
+    if stop["failed"]:
+        sys.exit("결과를 다 쓰지 못했다(위 알림) — results.csv가 모자랄 수 있다")
 
 if __name__ == "__main__":
     main()
