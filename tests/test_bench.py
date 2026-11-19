@@ -272,14 +272,15 @@ def test_result_is_settled_only_by_judged_draws():
     assert row["subtype"] == "mcp_failed: during run"
 
 
-def test_broken_draws_do_not_use_up_the_ten_draws():
-    # MCP가 끊긴 차례는 모델의 그림 횟수로 치지 않는다: 그 뒤 판정 10번째에 합격하면 합격이다
+def test_broken_draws_still_count_toward_the_ten_draws():
+    # 프롬프트의 "10번 뒤에는 멈춘다"는 고장 난 호출까지 센다: 고장 하나 뒤 11번째 호출에서 합격하면 지시를 넘긴 것이다
     tool, spec = bench.load_problem("order")
     events = [INIT, *_draws(spec, ["MCP error -32001: Request timed out"] + [FAIL] * 9 + [PASS])]
     events[2]["message"]["content"][0]["is_error"] = True
     row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 0, "wall_s": 9.0},
                           [json.dumps(e) for e in [*events, ENDED]], tool, spec, False)
-    assert row["draws"] == 11 and row["first_pass_draw"] == 10 and row["passed"]
+    assert row["draws"] == 11 and row["first_pass_draw"] == 11 and not row["passed"]
+    assert bench.is_measured(row["subtype"])  # 판정 10번을 받았으니 결과가 정해진 잰 실행이다
 
 
 def test_key_and_model_errors_are_read_from_the_cli_text_too():

@@ -503,9 +503,8 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
             if not faithful(inputs.get(i, {}), spec, tool):
                 v = "changed"
         seq.append(v)
-    # 몇 번째 판정에서 처음 합격했나(MCP·도구가 고장 나거나 답이 없던 차례는 모델의 그림 횟수로 치지 않는다)
-    judged = [v for v in seq if v not in UNJUDGED]
-    first_pass = next((n for n, v in enumerate(judged, 1) if v == "pass"), None)
+    # 몇 번째 그리기에서 처음 합격했나(프롬프트의 10번은 고장 난 호출까지 센 그리기 횟수다)
+    first_pass = next((n for n, v in enumerate(seq, 1) if v == "pass"), None)
     usage = result.get("usage") or {}
     mcp, init_tools = mcp_status(events), init_event(events).get("tools") or []
     return {
@@ -683,12 +682,7 @@ def run_one(job: dict, key: str) -> dict:
     meta = {"exit": code, "wall_s": round((timed_out_at or time.time()) - started, 1), "timed_out": code is None,
             "signaled": proc.pid in _SIGNALED}
     (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")  # 해석이 실패해도 rescore.py가 다시 읽게
-    try:
-        row = build_row(job | meta, stdout.split("\n"), tool, spec, meta["timed_out"])
-    except Exception:
-        if meta["signaled"]:  # 멈추며 끊은 실행은 기록이 잘려 해석이 깨질 수 있다(CSV에 쓰지 않는다)
-            raise Stopped("멈출 때 끝냈다") from None
-        raise
+    row = build_row(job | meta, stdout.split("\n"), tool, spec, meta["timed_out"])
     stopped = row["subtype"] == "stopped"
     (run_dir / "row.json").write_text(json.dumps(row, ensure_ascii=False, indent=1), encoding="utf-8")
     if stopped:
@@ -801,12 +795,12 @@ def main() -> None:
                 stop["skipped"].append(j["model"])
                 skipped = [x for x, job in futures.items()
                            if job["model"] == j["model"] and not x.cancelled() and x.cancel()]
-                say(f"{j['model']}을(를) 쓸 수 없어({row.get('api_status')}) 그 모델의 남은 실행 {len(skipped)}건을 뺀다: "
+                say(f"{j['model']}을(를) 쓸 수 없어({_api_code(row)}) 그 모델의 남은 실행 {len(skipped)}건을 뺀다: "
                     f"{row.get('error')}",
                     file=sys.stderr)
             elif cause in ("key", "billing"):  # 키·크레딧은 모든 실행에 걸리니 바로 멈춘다(이미 뺀 모델의 404는 여기 오지 않는다)
                 what = "크레딧이 떨어졌다" if cause == "billing" else "API 키가 틀렸거나 키·조직에 권한이 없다"
-                stop["why"] = f"{what}({row.get('api_status')}): {row.get('error')}"
+                stop["why"] = f"{what}({_api_code(row)}): {row.get('error')}"
             elif not any(is_measured(r.get("subtype")) for r in rows):
                 started_badly = [r for r in rows if (r.get("subtype") or "").startswith(("no_init", "mcp_failed"))
                                  and "during run" not in r["subtype"]]  # 그리다가 끊긴 것은 시작은 했다
@@ -854,8 +848,9 @@ def main() -> None:
                 kill_groups(procs)
                 waiting = [fut for fut in futures if not fut.done()]
                 if waiting:
-                    say(f"끝난 실행의 기록을 기다린다(최대 30초, {len(waiting)}건)", file=sys.stderr)
-                    cf.wait(waiting, timeout=30)
+                    # 시간 초과로 끝낸 실행은 출력이 닫히기를 60초까지 기다리니 그보다 길게 기다린다
+                    say(f"끝난 실행의 기록을 기다린다(최대 75초, {len(waiting)}건)", file=sys.stderr)
+                    cf.wait(waiting, timeout=75)
                 drain()  # 정리하는 동안 스스로 끝난 실행도 든다
                 say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에 "
                     "들지 않는다)", file=sys.stderr)
