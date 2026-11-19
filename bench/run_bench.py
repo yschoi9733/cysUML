@@ -362,13 +362,13 @@ def _api_code(row: dict) -> int | None:
 
 
 def config_error(row: dict) -> str | None:
-    """남은 실행도 같은 오류로 끝날 원인: billing(크레딧 부족)·key(401)는 모든 모델, model(404·403)은 그 모델만."""
+    """남은 실행도 같은 오류로 끝날 원인: billing(크레딧 부족)·key(401·403, 키·조직 권한)는 모든 모델, model(404)은 그 모델만."""
     if not row.get("is_error") or row.get("passed"):
         return None
     if BILLING.search(row.get("error") or ""):
         return "billing"
     code = _api_code(row)
-    return "key" if code == 401 else "model" if code in (403, 404) else None
+    return "key" if code in (401, 403) else "model" if code == 404 else None
 
 
 def server_side(row: dict) -> bool:
@@ -399,9 +399,11 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
     if timed_out:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
         row["duration_s"] = row["wall_s"]
     no_tool = not row["draws"] and not row["tool_ready"]  # 그림 도구 없이 끝났다
-    no_answer = not row["draws"] and timed_out and not row["answered"]  # 첫 요청부터 멈춘 채 시간이 다 갔다
-    if no_tool or no_answer:  # 모델의 불합격이 아니다
-        why = (f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") if no_tool else "no_answer"
+    no_answer = not row["draws"] and timed_out  # 한 번도 그리기 전에 시간이 다 갔다(API가 멈춘 것과 가를 수 없다)
+    mcp_broke = not row["passed"] and "mcp_error" in row["verdicts"].split()  # 그리는 도중 MCP 서버가 끊겼다
+    if no_tool or no_answer or mcp_broke:  # 모델의 불합격이 아니다
+        why = ((f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") if no_tool
+               else "no_answer" if no_answer else "mcp_failed: during run")
         row["subtype"] = why + (" (timeout)" if timed_out else "")
     elif timed_out:
         row["subtype"] = "timeout"
@@ -448,8 +450,9 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
     for i in ids:
         text = result_text(results[i].get("content")) if i in results else ""
         v = verdict_of(text) if i in results else "missing"
-        if v == "other" and results[i].get("is_error"):  # MCP SDK가 인자 검증에서 거절한 것 등
-            v = "input_error"
+        if v == "other" and results[i].get("is_error"):
+            # MCP 서버가 죽거나 요청 시간이 넘은 것은 mcp_error(모델 탓이 아니다), 그 밖은 SDK가 인자를 거절한 것 등
+            v = "mcp_error" if text.startswith("MCP error") else "input_error"
         # 저장에 실패하면 서버는 오류 결과에 검사 요약을 붙인다. 판정은 요약으로 하되, 모델은 결과가 합격으로 시작하지 않아
         # 계속 그릴 수 있어 summarize.py가 알리게 센다
         save_errors += v == "pass" and bool(results[i].get("is_error"))
@@ -474,7 +477,6 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "duration_s": round(result["duration_ms"] / 1000, 1) if result.get("duration_ms") is not None else None,
         "subtype": result.get("subtype"),
         "ended": result.get("subtype"),  # build_row가 subtype을 바꿔도 남는다
-        "answered": any(e.get("type") == "assistant" for e in events),
         # 그 문제의 그리기 도구를 쓸 수 있었는지(init의 도구 목록). MCP 상태가 pending이어도 도구가 있으면 모델이 판단한 것이다
         "tool_ready": mcp == "connected" or (bool(tool) and DRAW_PREFIX + tool.removeprefix("draw_") in init_tools),
         "is_error": result.get("is_error"),
@@ -517,9 +519,9 @@ def force_exit(signum, frame) -> None:
 
 
 def restore_stop_signals(previous: dict) -> None:
-    for s, handler in previous.items():
-        if handler is not None:
-            signal.signal(s, handler)
+    for s, handler in previous.items():  # 파이썬 밖에서 걸린 처리기(None)는 기본값으로 둔다
+        signal.signal(s, handler if handler is not None
+                      else signal.default_int_handler if s == signal.SIGINT else signal.SIG_DFL)
 
 
 def say(text: str, file=None) -> None:
@@ -640,6 +642,8 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     ap.add_argument("--tag", default=dt.datetime.now().strftime("%m%d-%H%M%S"))
     args = ap.parse_args()
+    if args.workers < 1 or args.runs < 1:
+        ap.error("--workers와 --runs는 1 이상이다")
     args.problems = list(dict.fromkeys(p for name in args.problems for p in SETS.get(name, [name])))
     args.models = list(dict.fromkeys(args.models))  # 겹치면 같은 실행 폴더를 두 실행이 함께 쓴다
     args.efforts = list(dict.fromkeys(args.efforts))
@@ -713,9 +717,9 @@ def main() -> None:
                 row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
                        "subtype": f"harness_error: {type(e).__name__}: {e}"}
             w.writerow(row)
-            f.flush()
+            recorded.add(fut)  # 버퍼에 들어간 뒤라, flush가 실패해 drain이 다시 불러도 두 번 쓰지 않는다
             rows.append(row)
-            recorded.add(fut)
+            f.flush()
             say(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed", "first_pass_draw",
                                                      "draws", "cost_usd", "duration_s", "subtype")}, ensure_ascii=False))
             if stop["why"] is not None:
@@ -795,6 +799,8 @@ def main() -> None:
     say(f"끝: {len(rows)}건, 합계 ${total:.2f}{note}, 결과 {base / 'results.csv'}")
     if stop["failed"]:
         sys.exit("결과를 다 쓰지 못했다(위 알림) — results.csv가 모자랄 수 있다")
+    if stop["why"] is not None and stop["first"] is None:  # 키·크레딧 오류 등 신호가 아닌 까닭으로 멈췄다
+        sys.exit(f"멈춘 까닭: {stop['why']}")
 
 if __name__ == "__main__":
     main()

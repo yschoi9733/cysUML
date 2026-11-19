@@ -144,6 +144,25 @@ def test_tool_listed_at_init_means_the_model_could_draw():
     assert row["subtype"] == "error_max_turns" and bench.is_measured(row["subtype"])
 
 
+def test_mcp_transport_error_is_not_the_models_failure():
+    # 그리는 도중 MCP 서버가 끊긴 실행은 모델을 잰 것이 아니다
+    tool, spec = bench.load_problem("order")
+    events = [INIT, *_draws(spec, [FAIL, "MCP error -32000: Connection closed"])]
+    events[-1]["message"]["content"][0]["is_error"] = True
+    row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 0, "wall_s": 9.0},
+                          [json.dumps(e) for e in [*events, ENDED]], tool, spec, False)
+    assert row["verdicts"] == "fail mcp_error" and not bench.is_measured(row["subtype"])
+
+
+def test_timeout_before_any_draw_is_not_measured_even_after_text():
+    # 말만 하고 한 번도 그리지 않은 채 시간이 다 가면 API가 멈춘 것과 가를 수 없어 뺀다
+    tool, spec = bench.load_problem("order")
+    talk = {"type": "assistant", "message": {"content": [{"type": "text", "text": "생각 중"}]}}
+    row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": None, "wall_s": 9.0},
+                          [json.dumps(e) for e in [INIT, talk]], tool, spec, True)
+    assert row["subtype"] == "no_answer (timeout)"
+
+
 def test_tool_call_rejected_by_the_sdk_is_an_input_error():
     tool, spec = bench.load_problem("order")
     events = [INIT, *_draws(spec, ["Error executing tool draw_class_diagram: 1 validation error"])]

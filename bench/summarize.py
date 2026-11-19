@@ -79,7 +79,7 @@ def main() -> None:
         times = [num(r.get("duration_s")) for r in rs]
         print(f"| {model} | {effort} | {len(rs)} | {len(passes)}/{len(rs)} | {passes.count(1)}/{len(rs)} | "
               f"{avg(passes, '{:.1f}')} | {avg(costs, '${:.3f}')} | {avg(times, '{:.0f}초')} | "
-              f"${sum(c for c in costs if c is not None):.2f} |")
+              f"${cost(rs):.2f} |")
 
     print()
     problems = sorted({r["problem"] for r in rows})
