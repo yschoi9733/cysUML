@@ -40,10 +40,7 @@ def rescore_row(tag_dir: Path, r: dict) -> dict:
         timed_out = str(meta["timed_out"]) == "True"
     else:  # timed_out을 남기기 전의 옛 기록은 그때 적은 판정 문구로만 가린다
         timed_out = sub == "timeout" or sub.endswith("(timeout)")
-    row = build_row(meta, stream.read_text(encoding="utf-8").split("\n"), tool, spec, timed_out)
-    if row["subtype"] == "stopped":  # run_bench는 멈출 때 끊긴 실행을 CSV에 쓰지 않는다
-        raise Kept("멈출 때 끊긴 실행이다")
-    return row
+    return build_row(meta, stream.read_text(encoding="utf-8").split("\n"), tool, spec, timed_out)
 
 
 def main() -> None:

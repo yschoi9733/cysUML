@@ -13,6 +13,7 @@ import csv
 import datetime as dt
 import hashlib
 import importlib
+import itertools
 import json
 import os
 import re
@@ -151,17 +152,28 @@ def tool_module(tool: str):
     return importlib.import_module("cysuml." + tool.removeprefix("draw_").replace("_", ""))
 
 
-def _name_forms(lines: tuple[str, ...]) -> tuple[str, str]:
-    """이름 줄을 이은 두 꼴: 줄 사이를 띄어쓰기 하나로(spaced), 띄우지 않고(joined). 이어진 공백은 하나로 줄인다."""
-    return " ".join(" ".join(lines).split()), " ".join("".join(lines).split())
+def _name_forms(lines: tuple[str, ...]) -> list[str]:
+    """이름 줄을 잇는 꼴들: 줄 바꿈 자리마다 띄어쓰기 하나로 잇거나 붙여 잇는다(이어진 공백은 하나로). 첫째는 모두 띄운
+    꼴이다. 줄이 아주 많으면 모두 띄운 꼴과 모두 붙인 꼴만 본다."""
+    if not lines:
+        return [""]
+    breaks = len(lines) - 1
+    combos = itertools.product((" ", ""), repeat=breaks) if breaks <= 6 else [(" ",) * breaks, ("",) * breaks]
+    forms = []
+    for seps in combos:
+        form = " ".join((lines[0] + "".join(sep + line for sep, line in zip(seps, lines[1:]))).split())
+        if form not in forms:
+            forms.append(form)
+    return forms
 
 
 def _known_names(d: B.Diagram) -> dict[str, str]:
-    """문제의 이름마다 견줄 열쇠. 여러 줄 이름은 띄우지 않고 이은 꼴로도 찾는다(긴 한 단어를 줄로 나눈 것일 수 있다)."""
+    """문제의 이름마다 견줄 열쇠. 여러 줄 이름은 줄 바꿈 자리를 붙여 이은 꼴로도 찾는다(긴 한 단어를 줄로 나눈 것일 수 있다)."""
     forms = [_name_forms(x.name) for x in (*d.boxes, *d.relations) if x.name]
-    known = {spaced: spaced for spaced, _ in forms}
-    for spaced, joined in forms:
-        known.setdefault(joined, spaced)
+    known = {f[0]: f[0] for f in forms}
+    for f in forms:
+        for other in f[1:]:
+            known.setdefault(other, f[0])
     return known
 
 
@@ -169,8 +181,8 @@ def _name_key(lines: tuple[str, ...], known: dict[str, str]) -> str:
     """이름 줄을 견줄 꼴로. 줄 바꿈 자리는 문제·그림 어느 쪽에서든 띄어쓰기로도, 붙여 쓴 것으로도 본다(줄을 어디서 나눴든
     같은 이름이다). 'Order Service'와 'OrderService'처럼 띄어쓰기를 더하거나 뺀 것은 다른 이름이다(이어진 공백은 하나로,
     앞뒤 공백은 없는 것으로 본다)."""
-    spaced, joined = _name_forms(lines)
-    return known.get(spaced) or known.get(joined) or spaced
+    forms = _name_forms(lines)
+    return next((known[f] for f in forms if f in known), forms[0])
 
 
 def _digest(x) -> str:
@@ -202,12 +214,10 @@ def _diagram(data: dict, tool: str) -> B.Diagram:
         return tool_module(tool).parse({s.list_field: items, "relations": rels})
 
 
-def _shape(d: B.Diagram, known: dict[str, str]) -> tuple[list, list]:
-    """cysUML이 읽은 그림을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 자리(left·top·크기·name_side·via)와 열쇠(id)는 보지 않는다.
-    이름이 하나뿐인 요소는 이름으로 가리키고, 이름 없는 점·마름모와 이름이 겹치는 요소는 이웃(들고 나는 관계, 담긴 곳, 담은
-    요소)으로 더 갈라지지 않을 때까지 다듬은 꼬리표로 가리킨다 — id를 어떻게 바꿔 써도 같은 그림이면 같은 꼴, 흐름을 바꿔
-    이으면 다른 꼴이 된다. 양 끝 모양이 고정되지 않은 관계(연관)는 양 끝을 바꾸고 다중도·navigable도 맞바꿔 적어도 같은 그림이라
-    두 방향 중 한쪽으로 맞춘다."""
+def _refine(d: B.Diagram, known: dict[str, str]):
+    """대조가 쓰는 꼬리표를 만든다. 이름이 하나뿐인 요소는 이름으로 가리키고(anchored), 이름 없는 점·마름모와 이름이 겹치는
+    요소는 이웃(들고 나는 관계, 담긴 곳, 담은 요소)으로 더 갈라지지 않을 때까지 다듬은 꼬리표로 가리킨다. 양 끝 모양이
+    고정되지 않은 관계(연관)는 양 끝을 바꾸고 다중도·navigable도 맞바꿔 적어도 같은 그림이라 두 방향을 함께 본다."""
     s = d.spec
     boxes = d.boxes
     index = {e.key: i for i, e in enumerate(boxes)}
@@ -241,13 +251,18 @@ def _shape(d: B.Diagram, known: dict[str, str]) -> tuple[list, list]:
         if len(set(new)) == len(set(labels)):  # 더 갈라지지 않는다
             break
         labels = new
+    return labels, anchored, own, parent, rels
 
+
+def _shape(d: B.Diagram, known: dict[str, str]) -> tuple[list, list]:
+    """cysUML이 읽은 그림을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 자리(left·top·크기·name_side·via)와 열쇠(id)는 보지 않고,
+    요소는 _refine의 꼬리표로 가리킨다 — id를 어떻게 바꿔 써도 같은 그림이면 같은 꼴, 흐름을 바꿔 이으면 다른 꼴이 된다."""
+    labels, _, own, parent, rels = _refine(d, known)
     elements = sorted(_digest([labels[i], own[i], labels[parent[i]] if parent[i] is not None else None])
-                      for i in range(len(boxes)))
+                      for i in range(len(d.boxes)))
     relations = sorted(min(_digest([fwd, labels[a], labels[b]]), _digest([rev, labels[b], labels[a]])) if rev
                        else _digest([fwd, labels[a], labels[b]]) for fwd, rev, a, b in rels)
     return elements, relations
-
 
 def faithful(drawn: dict, spec: dict, tool: str) -> bool:
     """그린 입력이 문제의 요소·관계를 빠짐없이, 더하거나 바꾸지 않고 담았는지(자리 칸·id는 보지 않는다). cysUML이 읽지 못하는
@@ -264,19 +279,12 @@ _SHAPES: dict[str, tuple] = {}
 
 
 def blind_spots(spec: dict, tool: str) -> list[str]:
-    """이름으로 가리킬 수 없는 요소(이름이 없거나 겹침) 가운데 그런 요소에만 닿고 종류도 겹치는 것(이웃으로만 가리는 대조의
-    한계에 걸릴 수 있다)."""
+    """이름으로 가리킬 수 없는 요소 가운데 대조가 매긴 꼬리표(_refine)가 다른 요소와 겹치는 것. 겹치면 대조가 그 요소들을
+    서로 가르지 못해, 대칭으로 바꿔 이은 그림을 놓칠 수 있다(서로 바꿔도 같은 그림인 요소도 함께 걸린다)."""
     d = _diagram(spec, tool)
-    counts = Counter(_name_forms(e.name)[0] for e in d.boxes if e.name)
-    named = {e.key for e in d.boxes if e.name and counts[_name_forms(e.name)[0]] == 1}  # _shape가 이름으로 가리키는 요소
-    near = {e.key: set() for e in d.boxes}
-    links = [(r.source, r.target) for r in d.relations] + [(e.key, e.parent) for e in d.boxes if e.parent]
-    for a, b in links:
-        near[a].add(b)
-        near[b].add(a)
-    loose = [e for e in d.boxes if e.key not in named]
-    kinds = Counter(e.kind for e in loose)
-    return [e.key for e in loose if not near[e.key] & named and kinds[e.kind] > 1]
+    labels, anchored = _refine(d, _known_names(d))[:2]
+    counts = Counter(labels)
+    return [e.key for e, label, fixed in zip(d.boxes, labels, anchored) if not fixed and counts[label] > 1]
 
 
 def problem_shape(spec: dict, tool: str) -> tuple[dict[str, str], tuple[list, list]]:
@@ -408,32 +416,26 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
     row["timed_out"] = timed_out
     if timed_out:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
         row["duration_s"] = row["wall_s"]
-    no_tool = not row["draws"] and not row["tool_ready"]  # 그림 도구 없이 끝났다
-    no_answer = not row["draws"] and timed_out  # 한 번도 그리기 전에 시간이 다 갔다(API가 멈춘 것과 가를 수 없다)
-    # 그리는 도중 MCP 서버가 끊기거나 도구가 예외를 내 그 차례로 끝났다(그 뒤에도 그렸으면 잠깐 그런 것이라 잰 실행이다)
     last = (row["verdicts"].split() or [""])[-1]
-    # 답 없는 차례(missing)는 claude가 스스로 끝내지 않았을 때만 도구가 멈춘 것이다(비용 상한에 걸려 끝나도 생긴다)
-    hung = last == "missing" and row["ended"] not in NATURAL_ENDS
-    broke = not row["passed"] and row["draws"] < MAX_DRAWS and (last in ("mcp_error", "tool_error") or hung)
-    if no_tool or no_answer or broke:  # 모델의 불합격이 아니다
-        why = ((f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") if no_tool
-               else "no_answer" if no_answer else "mcp_failed: during run" if last == "mcp_error" else "tool_error")
-        row["subtype"] = why + (" (timeout)" if timed_out else "")
-    elif timed_out:
-        row["subtype"] = "timeout"
-    elif not row["passed"] and row["draws"] < MAX_DRAWS and server_side(row):
-        # 서버 쪽 오류로 10번을 다 그리기 전에 끊긴 실행만 결과를 알 수 없어 뺀다. 합격했거나 10번을 다 그린 실행, 모델 탓인
-        # 오류로 끝난 실행은 잰 그대로 둔다
-        row["subtype"] = "api_error"
-    elif row["ended"] in (None, "error_during_execution") and not row["passed"] and row["draws"] < MAX_DRAWS:
-        # 끝의 결과 없이 끝났거나 claude 안의 오류로 끝났다(크래시, stderr로만 낸 오류, 밖에서 온 시그널) — 종료 코드는
-        # 0일 수도 있다
-        row["subtype"] = "no_result"
-    if (meta.get("signaled") and row["ended"] not in NATURAL_ENDS and not timed_out and not row["passed"]
-            and row["draws"] < MAX_DRAWS):
-        # 멈추며 신호를 보낸 실행이 스스로 끝(NATURAL_ENDS)도, 합격이나 10번 그림도 내기 전이면 끊긴 것이다. 신호를 받고
-        # 결과 이벤트를 내며 끝나도 그 subtype은 스스로 끝난 것이 아니다
-        row["subtype"] = "stopped"
+    if row["passed"] or row["draws"] >= MAX_DRAWS:  # 결과가 정해졌다(합격이나 10번 다 그림): 잰 실행이다
+        why = "timeout" if timed_out else None
+    # 그 밖은 결과가 정해지기 전에 끝났다. 누가 끝냈는지를 차례로 본다
+    elif meta.get("signaled") and row["ended"] not in NATURAL_ENDS and not timed_out:
+        why = "stopped"  # 멈추며 우리가 신호로 끊었다(신호를 받고 낸 결과 이벤트는 스스로 끝난 것이 아니다)
+    elif not row["draws"] and not row["tool_ready"]:  # 그림 도구 없이 끝났다
+        why = (f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") + (" (timeout)" if timed_out else "")
+    elif timed_out:  # 그리기 전이면 API가 멈춘 것과 가를 수 없어 빼고, 한 번이라도 그렸으면 모델의 불합격으로 센다
+        why = "timeout" if row["draws"] else "no_answer (timeout)"
+    elif last == "mcp_error":  # 그리는 도중 MCP 서버가 끊겨 그 차례로 끝났다
+        why = "mcp_failed: during run"
+    elif last == "tool_error":  # cysUML 도구가 예외를 내 그 차례로 끝났다
+        why = "tool_error"
+    elif row["ended"] in NATURAL_ENDS:  # claude가 스스로 끝냈다: 서버 쪽 API 오류가 아니면 모델이 끝낸 것이다
+        why = "api_error" if server_side(row) else None
+    else:  # 끝의 결과 없이, 또는 claude 안의 오류로 끝났다(크래시) — 종료 코드는 0일 수도 있다
+        why = "no_result"
+    if why is not None:
+        row["subtype"] = why
     return row
 
 
@@ -684,8 +686,8 @@ def main() -> None:
             problem_shape(spec, tool)
             PREPARED[p] = tool, spec
             if spots := blind_spots(spec, tool):
-                say(f"알림: 문제 {p}의 이름 없는 요소 {spots}는 이름 있는 요소에 닿지 않고 종류도 겹친다 — 대칭으로 바꿔 이은 "
-                    "그림을 대조가 못 가를 수 있다(RESULTS.md 한계)", file=sys.stderr)
+                say(f"알림: 문제 {p}의 요소 {spots}는 대조가 서로 가르지 못한다 — 대칭으로 바꿔 이은 그림을 놓칠 수 있다"
+                    "(RESULTS.md 한계)", file=sys.stderr)
         except InputError as e:
             sys.exit(f"문제 {p}를 cysUML이 읽지 못한다: {e}")
 

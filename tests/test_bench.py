@@ -187,13 +187,14 @@ def test_tool_exception_and_internal_crash_are_not_the_models_failure():
     assert row["subtype"] == "no_result"
 
 
-def test_tool_that_never_answered_before_timeout_is_not_measured():
+def test_timeout_after_a_draw_is_the_models_failure_even_mid_tool_call():
+    # 한 번이라도 그린 뒤의 시간 초과는 모델의 불합격이다(도구 호출 중에 끊겼어도 — 큰 그림은 그리는 데도 시간이 든다)
     tool, spec = bench.load_problem("order")
     unanswered = {"type": "assistant", "message": {"content": [
         {"type": "tool_use", "id": "late", "name": "mcp__cysuml__draw_class_diagram", "input": spec}]}}
     row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": None, "wall_s": 9.0},
                           [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), unanswered]], tool, spec, True)
-    assert row["verdicts"] == "fail missing" and row["subtype"] == "tool_error (timeout)"
+    assert row["verdicts"] == "fail missing" and row["subtype"] == "timeout" and bench.is_measured(row["subtype"])
 
 
 def test_budget_cut_during_a_tool_call_is_the_models_failure():
@@ -207,14 +208,27 @@ def test_budget_cut_during_a_tool_call_is_the_models_failure():
     assert row["verdicts"] == "fail missing" and row["subtype"] == "error_max_budget_usd"
 
 
-def test_blind_spots_follow_the_comparison_anchors():
-    # 이름이 겹치는 요소는 대조가 이름으로 가리키지 못하니, 그런 요소에만 닿은 이름 없는 요소는 경고한다
-    spec = {"elements": [{"kind": "initial", "id": "s"}, {"kind": "action", "id": "a1", "name": "Item"},
-                         {"kind": "action", "id": "a2", "name": "Item"}, {"kind": "merge", "id": "m1"},
-                         {"kind": "merge", "id": "m2"}, {"kind": "final", "id": "f"}],
-            "relations": [{"from": "s", "to": "a1"}, {"from": "a1", "to": "m1"}, {"from": "m1", "to": "a2"},
-                          {"from": "a2", "to": "m2"}, {"from": "m2", "to": "f"}]}
-    assert set(bench.blind_spots(spec, "draw_activity_diagram")) >= {"m1", "m2"}
+def test_blind_spots_are_elements_the_comparison_cannot_tell_apart():
+    # 이름 있는 행동 A에서 저마다 흐름을 받는 이름 없는 합류 6개의 고리: 모두 이름 있는 요소에 닿지만 꼬리표가 겹친다
+    ring = {"elements": [{"kind": "initial", "id": "s"}, {"kind": "action", "name": "A"}]
+            + [{"kind": "merge", "id": f"m{i}"} for i in range(6)],
+            "relations": [{"from": "s", "to": "A"}] + [{"from": "A", "to": f"m{i}"} for i in range(6)]
+            + [{"from": f"m{i}", "to": f"m{(i + 1) % 6}"} for i in range(6)]}
+    assert set(bench.blind_spots(ring, "draw_activity_diagram")) == {f"m{i}" for i in range(6)}
+    # 이름이 겹쳐도 비대칭 사슬은 꼬리표가 모두 갈려 경고하지 않는다
+    chain = {"elements": [{"kind": "initial", "id": "s"}, {"kind": "action", "id": "a1", "name": "Item"},
+                          {"kind": "action", "id": "a2", "name": "Item"}, {"kind": "merge", "id": "m1"},
+                          {"kind": "final", "id": "f"}],
+             "relations": [{"from": "s", "to": "a1"}, {"from": "a1", "to": "m1"}, {"from": "m1", "to": "a2"},
+                           {"from": "a2", "to": "f"}]}
+    assert bench.blind_spots(chain, "draw_activity_diagram") == []
+
+
+@pytest.mark.parametrize("pid", PROBLEM_IDS)
+def test_every_problem_is_fully_told_apart(pid):
+    # RESULTS.md 한계 절의 근거: 지금 문제는 대조가 모든 요소를 서로 다른 꼬리표로 가른다
+    tool, spec = bench.load_problem(pid)
+    assert bench.blind_spots(spec, tool) == []
 
 
 def test_non_object_lines_are_skipped():
