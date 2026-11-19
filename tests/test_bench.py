@@ -345,3 +345,12 @@ def test_lists_sent_as_json_text_are_read():
     tool, spec = bench.load_problem("order")
     as_text = {key: json.dumps(value) for key, value in spec.items()}
     assert bench.faithful(as_text, spec, tool)
+
+
+def test_call_rejected_by_claude_code_is_the_models_input_error():
+    tool, spec = bench.load_problem("order")
+    events = [INIT, *_draws(spec, ["<tool_use_error>InputValidationError: classes: expected array</tool_use_error>"])]
+    events[-1]["message"]["content"][0]["is_error"] = True
+    row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 0, "wall_s": 9.0},
+                          [json.dumps(e) for e in [*events, ENDED]], tool, spec, False)
+    assert row["verdicts"] == "input_error" and row["subtype"] == "success" and bench.is_measured(row["subtype"])

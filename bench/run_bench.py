@@ -35,6 +35,7 @@ EXAMPLES = ROOT / "docs" / "images"
 DEFAULT_OUT = Path.home() / "Documents" / "cysUML-bench-runs"
 LAYOUT_KEYS = {"left", "top", "via", "width", "height", "name_side"}
 MAX_DRAWS = 10
+EFFORTS = ["low", "medium", "high", "xhigh", "max"]  # claude --effort가 받는 값(낮은 것부터)
 DRAW_PREFIX = "mcp__cysuml__draw_"
 FIELDS = ["model", "effort", "problem", "run", "tool", "passed", "first_pass_draw", "draws", "verdicts", "changed",
           "input_errors", "save_errors", "mcp", "api_status", "error",
@@ -59,6 +60,8 @@ SETS = {"readme": list(PROBLEMS)}
 WRITTEN: dict = {}
 for _f in sorted(Path(__file__).parent.glob("problems_*.json")):
     _set = json.loads(_f.read_text(encoding="utf-8"))
+    if _f.stem.removeprefix("problems_") in SETS:
+        raise SystemExit(f"{_f.name}의 묶음 이름이 이미 있는 묶음과 겹친다")
     SETS[_f.stem.removeprefix("problems_")] = list(_set)
     if set(_set) & (set(WRITTEN) | set(PROBLEMS)):
         raise SystemExit(f"{_f.name}의 문제 이름이 다른 문제와 겹친다: {sorted(set(_set) & (set(WRITTEN) | set(PROBLEMS)))}")
@@ -368,6 +371,7 @@ def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
 # 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함,
 # 모델이 한 번도 답하지 않은 채 시간이 다 감, API 오류, 끝의 결과 없이 끝남(크래시 등), 하네스 오류, 멈출 때 끊김
 SDK_VALIDATION = re.compile(r"validation errors? for \w+Arguments")  # MCP SDK가 인자를 거절한 글(pydantic)
+CLIENT_REJECT = "<tool_use_error>"  # Claude Code가 보내기 전에 거절한 호출(입력 꼴 검사·취소된 병렬 호출 등)
 NOT_MEASURED = ("mcp_failed", "no_init", "no_answer", "api_error", "no_result", "tool_error", "harness_error", "stopped")
 NATURAL_ENDS = ("success", "error_max_budget_usd", "error_max_turns")  # claude가 스스로 끝낸 결과 이벤트의 subtype
 
@@ -449,10 +453,10 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         text = result_text(results[i].get("content")) if i in results else ""
         v = verdict_of(text) if i in results else "missing"
         if v == "other" and results[i].get("is_error"):
-            # MCP 서버가 죽거나 요청 시간이 넘었다(mcp_error), SDK가 인자를 거절했다(input_error, 모델 탓), 도구가 예외를
-            # 냈다(tool_error, cysUML 탓)
-            v = ("mcp_error" if text.startswith("MCP error") else "input_error" if SDK_VALIDATION.search(text)
-                 else "tool_error")
+            # MCP 서버가 죽거나 요청 시간이 넘었다(mcp_error), SDK나 Claude Code가 호출을 거절했다(input_error, 모델 탓),
+            # 도구가 예외를 냈다(tool_error, cysUML 탓)
+            v = ("mcp_error" if text.startswith("MCP error") else "input_error"
+                 if SDK_VALIDATION.search(text) or text.startswith(CLIENT_REJECT) else "tool_error")
         # 저장에 실패하면 서버는 오류 결과에 검사 요약을 붙인다. 판정은 요약으로 하되, 모델은 결과가 합격으로 시작하지 않아
         # 계속 그릴 수 있어 summarize.py가 알리게 센다
         save_errors += v == "pass" and bool(results[i].get("is_error"))
@@ -587,6 +591,7 @@ def run_one(job: dict, key: str) -> dict:
                 pass
         code = None
     finally:
+        stop_group(proc, signal.SIGKILL)  # 기다리다 예외가 났어도 claude를 남기지 않는다(이미 거뒀으면 하지 않는다)
         with _RUNNING_LOCK:
             _RUNNING.discard(proc)
     (run_dir / "stream.jsonl").write_text(stdout, encoding="utf-8")
@@ -606,7 +611,7 @@ def run_one(job: dict, key: str) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", nargs="+", required=True)
-    ap.add_argument("--efforts", nargs="+", default=["high"], choices=["low", "medium", "high", "xhigh", "max"])
+    ap.add_argument("--efforts", nargs="+", default=["high"], choices=EFFORTS)
     ap.add_argument("--problems", nargs="+", default=["readme"], help="문제 이름이나 묶음(readme·hard·xl·xxl)")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--workers", type=int, default=3)

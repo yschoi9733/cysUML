@@ -9,7 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean
 
-from run_bench import MAX_DRAWS, NATURAL_ENDS, counts_as_pass, is_measured
+from run_bench import EFFORTS, MAX_DRAWS, NATURAL_ENDS, counts_as_pass, is_measured
 
 
 def num(v):
@@ -17,6 +17,10 @@ def num(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def effort_rank(effort: str) -> tuple:
+    return (EFFORTS.index(effort) if effort in EFFORTS else len(EFFORTS), effort)
 
 
 def first_pass(r) -> int | None:
@@ -73,7 +77,7 @@ def main() -> None:
 
     print("| 모델 | effort | 실행 | 합격 | 첫 그림 합격 | 합격까지 평균 그림 수 | 평균 비용 | 평균 시간 | 합계 비용 |")
     print("|---|---|---|---|---|---|---|---|---|")
-    for (model, effort), rs in sorted(groups.items()):
+    for (model, effort), rs in sorted(groups.items(), key=lambda kv: (kv[0][0], effort_rank(kv[0][1]))):
         passes = [p for p in (first_pass(r) for r in rs) if p is not None]
         costs = [num(r.get("cost_usd")) for r in rs]
         times = [num(r.get("duration_s")) for r in rs]
@@ -83,7 +87,7 @@ def main() -> None:
 
     print()
     problems = sorted({r["problem"] for r in rows})
-    models = sorted(groups)
+    models = sorted(groups, key=lambda k: (k[0], effort_rank(k[1])))
     print("| 문제 | " + " | ".join(f"{m.replace('claude-', '')} {e}" for m, e in models) + " |")
     print("|---|" + "---|" * len(models))
     for p in problems:
@@ -115,7 +119,8 @@ def main() -> None:
         odd = r.get("subtype") not in (*NATURAL_ENDS, "timeout")
         if odd or (r.get("subtype") == "success" and str(r.get("is_error")) == "True"):
             error = f" ({r['error']})" if r.get("error") else ""
-            print(f"- 확인 필요: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}{error}")
+            print(f"- 확인 필요: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → "
+                  f"{r.get('subtype') or '끝의 결과 이벤트 없음'}{error}")
         if num(r.get("first_pass_draw")) is not None and first_pass(r) is None:
             print(f"- {MAX_DRAWS}번을 넘겨 합격해 불합격으로 셌다: {r['model']} {r['effort']} {r['problem']} run{r.get('run')}")
 
