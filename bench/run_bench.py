@@ -341,8 +341,8 @@ def server_side(row: dict) -> bool:
 
 
 def config_error(row: dict) -> bool:
-    """키·모델 이름이 틀려(401·403·404) 남은 실행도 모두 같은 오류로 끝날 실행."""
-    if row.get("subtype") != "api_error":
+    """키·모델 이름이 틀려(401·403·404) 남은 실행도 모두 같은 오류로 끝날 실행(init 전에 끝났어도)."""
+    if not row.get("is_error") or row.get("passed"):
         return False
     status = _api_status(row)
     if status is not None:
@@ -418,7 +418,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         save_errors += text.startswith(SAVE_FAILED)
         v = verdict_of(text) if i in results else "missing"
         if v == "pass" and spec is not None:
-            problem = problem or problem_shape(spec, tool)  # 한 실행 안에서 문제는 그대로라 한 번만 만든다
+            problem = problem or problem_shape(spec, tool)
         if v == "pass" and spec is not None and not faithful(inputs.get(i, {}), spec, tool, problem):
             v = "changed"
         seq.append(v)
@@ -459,12 +459,19 @@ KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG"
             "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR"}
 
 
-STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+STOP_SIGNALS = tuple(getattr(signal, n) for n in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, n))  # Windows엔 SIGHUP이 없다
 
 
 def ignore_stop_signals() -> None:
     for s in STOP_SIGNALS:
         signal.signal(s, signal.SIG_IGN)
+
+
+def force_exit(signum, frame) -> None:
+    """정리 중에 신호가 한 번 더 오면 돌던 claude를 바로 끝내고 나간다(정리가 막혔을 때의 탈출구)."""
+    for p in list(_RUNNING):
+        stop_group(p, signal.SIGKILL)
+    os._exit(1)
 
 
 def restore_stop_signals() -> None:
@@ -643,15 +650,14 @@ def main() -> None:
 
         for s in STOP_SIGNALS:  # Ctrl-C·kill·터미널 닫기. claude는 새 세션이라 이 신호를 받지 못해 직접 끝낸다
             signal.signal(s, on_stop)
-        try:  # 띄우기부터 정리까지 어디서 Ctrl-C가 와도 아래에서 멈춘다
+        try:
             for j in jobs:
                 futures[pool.submit(run_one, j, key)] = j
             for fut in cf.as_completed(futures):
                 record(fut)
-            pool.shutdown()
-            restore_stop_signals()
-        except KeyboardInterrupt:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다(SIGINT가 파이썬에만 왔을 수 있다)
-            ignore_stop_signals()  # 정리(길어야 10초) 중에 또 온 신호는 받지 않는다
+        except BaseException as e:  # 신호나 결과를 쓰다 난 오류: 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다
+            for s in STOP_SIGNALS:
+                signal.signal(s, force_exit)
             with _RUNNING_LOCK:
                 _STOP.set()
                 procs = list(_RUNNING)
@@ -667,14 +673,21 @@ def main() -> None:
                     stop_group(p, signal.SIGKILL)
             cf.wait([fut for fut in futures if not fut.done()], timeout=10)  # 끝낸 실행의 스레드가 기록을 마치기를 기다린다
             # 끝났는데 아직 쓰지 못한 실행만 남긴다(정리하는 동안 스스로 끝난 실행도 든다, 끊긴 실행은 쓰지 않는다)
-            for fut in futures:
-                if fut.done() and not fut.cancelled() and fut not in written and not isinstance(fut.exception(), Stopped):
-                    record(fut)
-            say(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)",
+            try:
+                for fut in futures:
+                    if (fut.done() and not fut.cancelled() and fut not in written
+                            and not isinstance(fut.exception(), Stopped)):
+                        record(fut)
+            except Exception as more:
+                say(f"끝난 실행을 더 쓰지 못했다: {type(more).__name__}: {more}", file=sys.stderr)
+            why = "멈췄다" if isinstance(e, KeyboardInterrupt) else f"오류로 멈췄다({type(e).__name__}: {e})"
+            say(f"{why}: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)",
                 file=sys.stderr)
             # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
             # 줄마다 flush했다
             os._exit(1)
+    restore_stop_signals()
+    pool.shutdown()
     total = sum(r.get("cost_usd") or 0 for r in rows)
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
     note = f", 비용을 모르는 실행 {unknown_cost}건은 합계에 들지 않았다" if unknown_cost else ""

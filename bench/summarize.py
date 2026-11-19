@@ -24,6 +24,15 @@ def first_pass(r) -> int | None:
     return int(n) if n is not None and counts_as_pass(int(n)) else None
 
 
+def cell(r) -> str:
+    n = first_pass(r)
+    return f"✅{n}" if n else f"❌({r.get('draws') or 0})"
+
+
+def cost(rs) -> float:
+    return sum(num(r.get("cost_usd")) or 0 for r in rs)
+
+
 def avg(values, fmt: str) -> str:
     vals = [v for v in values if v is not None]
     if not vals:
@@ -54,12 +63,8 @@ for path in args.paths:
 for tag, problem in sorted(set(drops) - used):
     print(f"- 알림: --drop {tag}:{problem}에 맞는 줄이 없었다(태그나 문제 이름을 확인한다)")
 # 모델을 잰 것이 아닌 실행(MCP 서버가 안 붙음, claude가 시작하지 못함, 하네스 오류)은 표에서 빼고 아래에 따로 적는다
-def measured(r) -> bool:
-    return is_measured(r.get("subtype"))
-
-
-skipped = [r for r in rows if not measured(r)]
-rows = [r for r in rows if measured(r)]
+skipped = [r for r in rows if not is_measured(r.get("subtype"))]
+rows = [r for r in rows if is_measured(r.get("subtype"))]
 
 groups = defaultdict(list)
 for r in rows:
@@ -84,13 +89,9 @@ for p in problems:
     cells = []
     for key in models:
         rs = [r for r in groups[key] if r["problem"] == p]
-        cells.append(", ".join(f"✅{first_pass(r)}" if first_pass(r) else f"❌({r.get('draws') or 0})" for r in rs))
+        cells.append(", ".join(cell(r) for r in rs))
     print(f"| {p} | " + " | ".join(cells) + " |")
 print()
-def cost(rs) -> float:
-    return sum(num(r.get("cost_usd")) or 0 for r in rs)
-
-
 print(f"전체 {len(rows)}건, 합계 ${cost(rows):.2f}"
       + (f"(표에서 뺀 {len(skipped)}건까지 쓴 돈은 ${cost(rows + skipped):.2f})" if skipped else ""))
 no_cost = sum(1 for r in rows if num(r.get("cost_usd")) is None)
