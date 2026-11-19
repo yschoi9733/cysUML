@@ -87,6 +87,59 @@ def test_names(given, drawn, same):
     assert bench.faithful(one(drawn), one(given), NODES) == same
 
 
+INIT = {"type": "system", "subtype": "init", "mcp_servers": [{"name": "cysuml", "status": "connected"}]}
+
+
+def _draws(spec, verdicts):
+    events = []
+    for n, text in enumerate(verdicts):
+        events.append({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": f"t{n}", "name": "mcp__cysuml__draw_class_diagram", "input": spec}]}})
+        events.append({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": f"t{n}", "content": text}]}})
+    return events
+
+
+FAIL, PASS = "불합격 — 1건", "합격 — 끝"
+ENDED = {"type": "result", "subtype": "success"}
+
+
+@pytest.mark.parametrize("events, exit, timed_out, subtype, measured", [
+    ([INIT, lambda s: _draws(s, [FAIL, PASS]), ENDED], 0, False, "success", True),
+    ([INIT, lambda s: _draws(s, [FAIL]), {"type": "result", "subtype": "error_max_budget_usd", "is_error": True}],
+     1, False, "error_max_budget_usd", True),
+    # 서버 쪽 오류로 10번 전에 끊김(상태 칸, 오류 글, 크레딧 부족)은 잰 것이 아니다
+    ([INIT, {"type": "result", "subtype": "success", "is_error": True, "api_error_status": 529}], 1, False, "api_error",
+     False),
+    ([INIT, {"type": "result", "subtype": "success", "is_error": True, "result": "API Error: 401 bad key"}], 1, False,
+     "api_error", False),
+    ([INIT, {"type": "result", "subtype": "success", "is_error": True, "api_error_status": 400,
+             "result": "Your credit balance is too low"}], 1, False, "api_error", False),
+    # 모델 탓인 400은 잰 불합격이다
+    ([INIT, lambda s: _draws(s, [FAIL]), {"type": "result", "subtype": "success", "is_error": True,
+                                          "api_error_status": 400, "result": "Prompt is too long"}],
+     1, False, "success", True),
+    ([], 1, False, "no_init", False),
+    ([INIT], None, True, "no_answer (timeout)", False),
+    ([INIT, lambda s: _draws(s, [FAIL])], None, True, "timeout", True),
+    ([INIT, lambda s: _draws(s, [FAIL])], 0, False, "no_result", False),
+])
+def test_run_classification(events, exit, timed_out, subtype, measured):
+    # 실행 기록(stream-json 이벤트)에서 실행을 어떻게 가르는지: 잰 실행인지, 표에서 뺄 실행인지
+    tool, spec = bench.load_problem("order")
+    flat = [x for e in events for x in (e(spec) if callable(e) else [e])]
+    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": exit, "wall_s": 9.0}
+    row = bench.build_row(meta, [json.dumps(x) for x in flat], tool, spec, timed_out)
+    assert row["subtype"] == subtype and bench.is_measured(row["subtype"]) == measured
+
+
+def test_config_errors_stop_the_bench():
+    assert bench.config_error({"is_error": True, "api_status": 401, "error": ""})
+    assert bench.config_error({"is_error": True, "api_status": 400, "error": "Your credit balance is too low"})
+    assert not bench.config_error({"is_error": True, "api_status": 529, "error": ""})
+    assert not bench.config_error({"is_error": True, "api_status": 400, "error": "Prompt is too long"})
+
+
 def test_lists_sent_as_json_text_are_read():
     tool, spec = bench.load_problem("order")
     as_text = {key: json.dumps(value) for key, value in spec.items()}
