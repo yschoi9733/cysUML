@@ -1,0 +1,129 @@
+"""run_bench.py의 results.csv(여러 개 가능)를 모델·effort별 표와 문제별 표(마크다운)로 묶는다.
+
+쓰는 법: uv run python bench/summarize.py ~/Documents/cysUML-bench-runs/<태그>/results.csv [...] [--drop 태그:문제 ...]
+--drop은 결과 폴더 이름이 그 태그인 results.csv에서 그 문제의 줄을 뺀다(문제를 고치기 전에 잰 결과를 뺄 때).
+"""
+import argparse
+import csv
+from collections import defaultdict
+from pathlib import Path
+from statistics import mean
+
+from run_bench import EFFORTS, MAX_DRAWS, NATURAL_ENDS, counts_as_pass, is_measured
+
+
+def num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def effort_rank(effort: str) -> tuple:
+    return (EFFORTS.index(effort) if effort in EFFORTS else len(EFFORTS), effort)
+
+
+def first_pass(r) -> int | None:
+    n = num(r.get("first_pass_draw"))
+    return int(n) if n is not None and counts_as_pass(int(n)) else None
+
+
+def cell(r) -> str:
+    n = first_pass(r)
+    return f"✅{n}" if n else f"❌({r.get('draws') or 0})"
+
+
+def cost(rs) -> float:
+    return sum(num(r.get("cost_usd")) or 0 for r in rs)
+
+
+def avg(values, fmt: str) -> str:
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return "-"
+    return fmt.format(mean(vals)) + (f"({len(vals)}번)" if len(vals) < len(values) else "")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("paths", nargs="+", type=Path)
+    ap.add_argument("--drop", action="append", default=[], metavar="태그:문제")
+    args = ap.parse_args()
+    drops = []
+    for d in args.drop:
+        tag, sep, problem = d.partition(":")
+        if not sep:
+            ap.error(f"--drop은 태그:문제 꼴이다: {d}")
+        drops.append((tag, problem))
+
+    rows, used = [], set()
+    for path in args.paths:
+        tag = path.resolve().parent.name
+        with path.open(encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                if (tag, r["problem"]) in drops:
+                    used.add((tag, r["problem"]))
+                else:
+                    rows.append(r)
+    for tag, problem in sorted(set(drops) - used):
+        print(f"- 알림: --drop {tag}:{problem}에 맞는 줄이 없었다(태그나 문제 이름을 확인한다)")
+    # 모델을 잰 것이 아닌 실행(MCP 서버가 안 붙음, claude가 시작하지 못함, 하네스 오류)은 표에서 빼고 아래에 따로 적는다
+    skipped = [r for r in rows if not is_measured(r.get("subtype"))]
+    rows = [r for r in rows if is_measured(r.get("subtype"))]
+
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r["model"], r["effort"])].append(r)
+
+    print("| 모델 | effort | 실행 | 합격 | 첫 그림 합격 | 합격까지 평균 그림 수 | 평균 비용 | 평균 시간 | 합계 비용 |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for (model, effort), rs in sorted(groups.items(), key=lambda kv: (kv[0][0], effort_rank(kv[0][1]))):
+        passes = [p for p in (first_pass(r) for r in rs) if p is not None]
+        costs = [num(r.get("cost_usd")) for r in rs]
+        times = [num(r.get("duration_s")) for r in rs]
+        print(f"| {model} | {effort} | {len(rs)} | {len(passes)}/{len(rs)} | {passes.count(1)}/{len(rs)} | "
+              f"{avg(passes, '{:.1f}')} | {avg(costs, '${:.3f}')} | {avg(times, '{:.0f}초')} | "
+              f"${cost(rs):.2f} |")
+
+    print()
+    problems = sorted({r["problem"] for r in rows})
+    models = sorted(groups, key=lambda k: (k[0], effort_rank(k[1])))
+    print("| 문제 | " + " | ".join(f"{m.replace('claude-', '')} {e}" for m, e in models) + " |")
+    print("|---|" + "---|" * len(models))
+    for p in problems:
+        cells = []
+        for key in models:
+            rs = sorted((r for r in groups[key] if r["problem"] == p), key=lambda r: int(r.get("run") or 0))
+            cells.append(", ".join(cell(r) for r in rs))
+        print(f"| {p} | " + " | ".join(cells) + " |")
+    print()
+    print(f"전체 {len(rows)}건, 합계 ${cost(rows):.2f}"
+          + (f"(표에서 뺀 {len(skipped)}건까지 쓴 돈은 ${cost(rows + skipped):.2f})" if skipped else ""))
+    no_cost = sum(1 for r in rows if num(r.get("cost_usd")) is None)
+    no_time = sum(1 for r in rows if num(r.get("duration_s")) is None)
+    if no_cost:
+        print(f"- 비용이 빈 실행 {no_cost}건은 비용 평균과 합계에서 뺐다(칸에 몇 번으로 낸 평균인지 붙였다)")
+    if no_time:
+        print(f"- 시간이 빈 실행 {no_time}건은 시간 평균에서 뺐다")
+    for r in skipped:
+        print(f"- 모델을 잰 것이 아니라 표에서 뺐다: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → {r.get('subtype')}"
+              + (f" ({str(r['error'])[:120]})" if r.get("error") else ""))
+    for r in rows:
+        if "other" in (r.get("verdicts") or "").split():  # cysUML 검사 결과 문구가 바뀌면 여기서 드러난다
+            print(f"- 확인 필요: 검사 결과의 판정을 읽지 못한 그림이 있다: {r['model']} {r['effort']} {r['problem']} "
+                  f"run{r.get('run')} → {r.get('verdicts')}")
+        if num(r.get("save_errors")):  # 모델은 결과가 합격으로 시작하지 않아 합격 뒤에도 더 그렸을 수 있다
+            print(f"- 확인 필요: 그림을 저장하지 못한 차례 {r['save_errors']}번: {r['model']} {r['effort']} {r['problem']} "
+                  f"run{r.get('run')}")
+        # 스스로 끝난 불합격(상한 초과 등)·시간 초과는 잰 실행이다. 그 밖의 끝과, 오류인데 success로 끝난 것만 알린다
+        odd = r.get("subtype") not in (*NATURAL_ENDS, "timeout")
+        if odd or (r.get("subtype") == "success" and str(r.get("is_error")) == "True"):
+            error = f" ({r['error']})" if r.get("error") else ""
+            print(f"- 확인 필요: {r['model']} {r['effort']} {r['problem']} run{r.get('run')} → "
+                  f"{r.get('subtype') or '끝의 결과 이벤트 없음'}{error}")
+        if num(r.get("first_pass_draw")) is not None and first_pass(r) is None:
+            print(f"- {MAX_DRAWS}번을 넘겨 합격해 불합격으로 셌다: {r['model']} {r['effort']} {r['problem']} run{r.get('run')}")
+
+
+if __name__ == "__main__":
+    main()
