@@ -254,10 +254,10 @@ def _refine(d: B.Diagram, known: dict[str, str]):
     return labels, anchored, own, parent, rels
 
 
-def _shape(d: B.Diagram, known: dict[str, str]) -> tuple[list, list]:
+def _shape(d: B.Diagram, known: dict[str, str], refined: tuple | None = None) -> tuple[list, list]:
     """cysUML이 읽은 그림을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 자리(left·top·크기·name_side·via)와 열쇠(id)는 보지 않고,
     요소는 _refine의 꼬리표로 가리킨다 — id를 어떻게 바꿔 써도 같은 그림이면 같은 꼴, 흐름을 바꿔 이으면 다른 꼴이 된다."""
-    labels, _, own, parent, rels = _refine(d, known)
+    labels, _, own, parent, rels = refined or _refine(d, known)
     elements = sorted(_digest([labels[i], own[i], labels[parent[i]] if parent[i] is not None else None])
                       for i in range(len(d.boxes)))
     relations = sorted(min(_digest([fwd, labels[a], labels[b]]), _digest([rev, labels[b], labels[a]])) if rev
@@ -281,19 +281,25 @@ _SHAPES: dict[str, tuple] = {}
 def blind_spots(spec: dict, tool: str) -> list[str]:
     """이름으로 가리킬 수 없는 요소 가운데 대조가 매긴 꼬리표(_refine)가 다른 요소와 겹치는 것. 겹치면 대조가 그 요소들을
     서로 가르지 못해, 대칭으로 바꿔 이은 그림을 놓칠 수 있다(서로 바꿔도 같은 그림인 요소도 함께 걸린다)."""
-    d = _diagram(spec, tool)
-    labels, anchored = _refine(d, _known_names(d))[:2]
+    d, _, refined = _problem_parts(spec, tool)
+    labels, anchored = refined[:2]
     counts = Counter(labels)
     return [e.key for e, label, fixed in zip(d.boxes, labels, anchored) if not fixed and counts[label] > 1]
 
 
 def problem_shape(spec: dict, tool: str) -> tuple[dict[str, str], tuple[list, list]]:
     """문제의 이름 열쇠와 견줄 꼴(같은 문제는 한 번만 만든다). cysUML이 못 읽는 문제는 InputError."""
+    d, known, refined = _problem_parts(spec, tool)
+    return known, _shape(d, known, refined)
+
+
+def _problem_parts(spec: dict, tool: str) -> tuple:
+    """문제를 한 번만 읽어 (그림, 이름 열쇠, 꼬리표)를 둔다(problem_shape와 blind_spots가 같이 쓴다)."""
     k = json.dumps([tool, spec], sort_keys=True, ensure_ascii=False)
     if k not in _SHAPES:
         d = _diagram(spec, tool)
         known = _known_names(d)
-        _SHAPES[k] = known, _shape(d, known)
+        _SHAPES[k] = d, known, _refine(d, known)
     return _SHAPES[k]
 
 
@@ -420,18 +426,21 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
     if row["passed"] or row["draws"] >= MAX_DRAWS:  # 결과가 정해졌다(합격이나 10번 다 그림): 잰 실행이다
         why = "timeout" if timed_out else None
     # 그 밖은 결과가 정해지기 전에 끝났다. 누가 끝냈는지를 차례로 본다
-    elif meta.get("signaled") and row["ended"] not in NATURAL_ENDS and not timed_out:
-        why = "stopped"  # 멈추며 우리가 신호로 끊었다(신호를 받고 낸 결과 이벤트는 스스로 끝난 것이 아니다)
+    elif meta.get("signaled") and not timed_out and (
+            row["ended"] not in NATURAL_ENDS or (row["ended"] == "success" and row["is_error"] and not server_side(row))):
+        # 멈추며 우리가 신호로 끊었다. 신호를 받고 낸 결과 이벤트(중단 오류를 담은 success 포함 — 서버 쪽 API 오류는 신호와
+        # 상관없이 난 것이라 아래에서 api_error로 가른다)는 스스로 끝난 것이 아니다
+        why = "stopped"
     elif not row["draws"] and not row["tool_ready"]:  # 그림 도구 없이 끝났다
         why = (f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") + (" (timeout)" if timed_out else "")
+    elif last in ("mcp_error", "tool_error"):  # 그리는 도중 MCP 서버가 끊기거나 cysUML 도구가 예외를 내 그 차례로 끝났다
+        why = ("mcp_failed: during run" if last == "mcp_error" else "tool_error") + (" (timeout)" if timed_out else "")
     elif timed_out:  # 그리기 전이면 API가 멈춘 것과 가를 수 없어 빼고, 한 번이라도 그렸으면 모델의 불합격으로 센다
         why = "timeout" if row["draws"] else "no_answer (timeout)"
-    elif last == "mcp_error":  # 그리는 도중 MCP 서버가 끊겨 그 차례로 끝났다
-        why = "mcp_failed: during run"
-    elif last == "tool_error":  # cysUML 도구가 예외를 내 그 차례로 끝났다
-        why = "tool_error"
-    elif row["ended"] in NATURAL_ENDS:  # claude가 스스로 끝냈다: 서버 쪽 API 오류가 아니면 모델이 끝낸 것이다
-        why = "api_error" if server_side(row) else None
+    elif server_side(row):  # 서버 쪽 API 오류로 끝났다(결과 이벤트의 subtype과 상관없이)
+        why = "api_error"
+    elif row["ended"] in NATURAL_ENDS:  # claude가 스스로 끝냈다: 모델이 끝낸 것이다
+        why = None
     else:  # 끝의 결과 없이, 또는 claude 안의 오류로 끝났다(크래시) — 종료 코드는 0일 수도 있다
         why = "no_result"
     if why is not None:

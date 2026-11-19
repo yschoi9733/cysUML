@@ -239,6 +239,24 @@ def test_non_object_lines_are_skipped():
     assert row["passed"] and row["subtype"] == "success"
 
 
+def test_classification_does_not_depend_on_branch_order():
+    # 33라운드 회귀: 고장 판정은 시간 초과보다, 서버 쪽 오류는 끝난 꼴보다 먼저 본다. 신호를 받고 낸 중단 오류도 끊긴 실행이다
+    tool, spec = bench.load_problem("order")
+    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": None, "wall_s": 9.0}
+    broken = [INIT, *_draws(spec, [FAIL, "MCP error -32000: Connection closed"])]
+    broken[-1]["message"]["content"][0]["is_error"] = True
+    row = bench.build_row(meta, [json.dumps(e) for e in broken], tool, spec, True)
+    assert row["subtype"] == "mcp_failed: during run (timeout)" and not bench.is_measured(row["subtype"])
+    aborted = {"type": "result", "subtype": "success", "is_error": True, "result": "API Error: Request was aborted."}
+    row = bench.build_row(meta | {"exit": 143, "signaled": True},
+                          [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), aborted]], tool, spec, False)
+    assert row["subtype"] == "stopped"
+    overload = {"type": "result", "subtype": "error_during_execution", "is_error": True, "api_error_status": 529}
+    row = bench.build_row(meta | {"exit": 1}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), overload]],
+                          tool, spec, False)
+    assert row["subtype"] == "api_error"
+
+
 def test_tool_call_rejected_by_the_sdk_is_an_input_error():
     tool, spec = bench.load_problem("order")
     sdk = "Error executing tool draw_class_diagram: 1 validation error for draw_class_diagramArguments\nfile_name"
