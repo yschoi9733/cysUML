@@ -308,6 +308,21 @@ def test_server_errors_win_over_stop_and_missing_tool():
     assert row["subtype"] == "success"
 
 
+def test_budget_end_with_retry_noise_and_quiet_abort():
+    tool, spec = bench.load_problem("order")
+    meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 1, "wall_s": 9.0}
+    # 비용 상한으로 끝났으면 오류 목록에 재시도 흔적(overloaded)이 있어도 모델의 불합격이다
+    budget = {"type": "result", "subtype": "error_max_budget_usd", "is_error": True,
+              "errors": ["Reached maximum budget", "overloaded (retried)"]}
+    row = bench.build_row(meta, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), budget]], tool, spec, False)
+    assert row["subtype"] == "error_max_budget_usd" and bench.is_measured(row["subtype"])
+    # 신호를 받고 오류 표시 없이 중단 글을 낸 것도 끊긴 실행이다
+    quiet = {"type": "result", "subtype": "success", "is_error": False, "result": "Request was aborted."}
+    row = bench.build_row(meta | {"signaled": True}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), quiet]],
+                          tool, spec, False)
+    assert row["subtype"] == "stopped"
+
+
 def test_tool_call_rejected_by_the_sdk_is_an_input_error():
     tool, spec = bench.load_problem("order")
     sdk = "Error executing tool draw_class_diagram: 1 validation error for draw_class_diagramArguments\nfile_name"

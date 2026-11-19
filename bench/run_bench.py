@@ -129,7 +129,6 @@ def result_text(content) -> str:
 
 
 def verdict_of(text: str) -> str:
-    """판정 머리로 시작하는 첫 줄로 가른다."""
     return next((v for v in map(verdict, text.splitlines()) if v != "other"), "other")
 
 
@@ -403,8 +402,8 @@ def config_error(row: dict) -> str | None:
 
 def server_side(row: dict) -> bool:
     """서버 쪽 API 오류(설정 오류·429·5xx·연결)로 끝났는지. 그 밖의 400(글이 너무 길어짐 등)은 모델 탓이라 넣지 않는다."""
-    if not row["is_error"]:
-        return False
+    if not row["is_error"] or row.get("ended") in ("error_max_budget_usd", "error_max_turns"):
+        return False  # 상한으로 스스로 끝난 실행은 오류 목록에 재시도 흔적이 있어도 모델이 끝낸 것이다
     code = _api_code(row)
     return (config_error(row) is not None or code == 429 or (code is not None and code >= 500)
             or (code is None and bool(OUTAGE.search(row["error"] or ""))))
@@ -436,9 +435,8 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
     used_up = len(seq) >= MAX_DRAWS and seq[MAX_DRAWS - 1] != "missing"
     if row["passed"] or used_up:
         why = "timeout" if timed_out else None
-    # 그 밖은 결과가 정해지기 전에 끝났다. 누가 끝냈는지를 차례로 본다
     elif meta.get("signaled") and not timed_out and not server and (
-            row["ended"] not in NATURAL_ENDS or bool(ABORTED.search(row["error"] or ""))):
+            row["ended"] not in NATURAL_ENDS or row["aborted"]):
         # 멈추며 우리가 신호로 끊었다. 신호를 받고 낸 결과 이벤트(중단 글을 담은 success 포함)는 스스로 끝난 것이 아니다.
         # 서버 쪽 API 오류는 신호와 상관없이 난 것이라 아래에서 api_error로 가른다
         why = "stopped"
@@ -522,6 +520,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "is_error": result.get("is_error"),
         "api_status": result.get("api_error_status"),
         "error": (str(result.get("result") or result.get("errors") or "") or None) if result.get("is_error") else None,
+        "aborted": bool(ABORTED.search(str(result.get("result") or ""))),  # 신호를 받고 낸 중단 글(오류 표시가 없어도)
         "input_tokens": usage.get("input_tokens"),
         "cache_read_tokens": usage.get("cache_read_input_tokens"),
         "cache_write_tokens": usage.get("cache_creation_input_tokens"),
@@ -581,6 +580,15 @@ def _parent_name() -> str:
                               text=True).stdout.strip()
     except FileNotFoundError:
         return ""
+
+
+def say_totals(rows: list, base: Path, stop: dict) -> None:
+    total = sum(r.get("cost_usd") or 0 for r in rows)
+    unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
+    note = f", 비용을 모르는 실행 {unknown_cost}건은 합계에 들지 않았다" if unknown_cost else ""
+    say(f"끝: {len(rows)}건, 합계 ${total:.2f}{note}, 결과 {base / 'results.csv'}")
+    if stop["skipped"]:
+        say(f"쓸 수 없어 뺀 모델: {stop['skipped']}", file=sys.stderr)
 
 
 def say(text: str, file=None) -> None:
@@ -726,7 +734,7 @@ def main() -> None:
         except InputError as e:
             sys.exit(f"문제 {p}를 cysUML이 읽지 못한다: {e}")
 
-    if os.name == "nt":  # 프로세스 그룹·신호로 claude를 끝낸다
+    if os.name == "nt":
         sys.exit("run_bench.py는 macOS·Linux에서만 돈다")
     if shutil.which("claude") is None:
         sys.exit("claude가 PATH에 없다 — Claude Code를 설치한다")
@@ -751,8 +759,9 @@ def main() -> None:
             force_exit(signum, frame)
         if stop["first"] is not None:
             # uv run은 받은 신호를 python에도 그대로 넘기고 셸은 앞그룹 전체에 보내, 한 번의 Ctrl-C·터미널 닫기가 같은 신호로
-            # 두 번 온다. 부모가 uv면 첫 신호와 같은 신호 하나는 그 사본으로 보고, 그 밖에 또 오면 정리가 막혔어도 바로 끝낸다
-            if stop["spare"] and signum == stop["signum"]:
+            # 두 번 온다(거의 동시에). 부모가 uv면 첫 신호 뒤 1초 안에 온 같은 신호 하나는 그 사본으로 보고(사본이 안 올 때도
+            # 있어 늦게 온 것은 사람이 다시 보낸 것이다), 그 밖에 또 오면 정리가 막혔어도 바로 끝낸다
+            if stop["spare"] and signum == stop["signum"] and time.monotonic() - stop["first"] < 1:
                 stop["spare"] = False
                 return
             force_exit(signum, frame)
@@ -861,6 +870,7 @@ def main() -> None:
                 drain()  # 정리하는 동안 스스로 끝난 실행도 든다
                 say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에 "
                     "들지 않는다)", file=sys.stderr)
+                say_totals(rows, base, stop)
             except BaseException:
                 force_exit(None, None)
             # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
@@ -874,16 +884,13 @@ def main() -> None:
             say(f"results.csv를 닫지 못했다: {e}", file=sys.stderr)
     restore_stop_signals(previous)
     pool.shutdown()
-    total = sum(r.get("cost_usd") or 0 for r in rows)
-    unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
-    note = f", 비용을 모르는 실행 {unknown_cost}건은 합계에 들지 않았다" if unknown_cost else ""
-    say(f"끝: {len(rows)}건, 합계 ${total:.2f}{note}, 결과 {base / 'results.csv'}")
+    say_totals(rows, base, stop)
     if stop["failed"]:
         sys.exit("결과를 다 쓰지 못했다(위 알림) — results.csv가 모자랄 수 있다")
     if stop["why"] is not None and stop["first"] is None:  # 키·크레딧 오류 등 신호가 아닌 까닭으로 멈췄다
         sys.exit(f"멈춘 까닭: {stop['why']}")
     if stop["skipped"]:
-        sys.exit(f"쓸 수 없어 뺀 모델이 있다: {stop['skipped']}")
+        sys.exit("쓸 수 없어 뺀 모델이 있다(위 알림)")
 
 if __name__ == "__main__":
     main()
