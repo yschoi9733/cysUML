@@ -258,7 +258,7 @@ def test_classification_does_not_depend_on_branch_order():
 
 
 def test_result_is_settled_when_the_ten_draws_are_answered():
-    # 10번째 그리기가 답을 기다리는 중이거나 고장 났으면 결과가 정해진 것이 아니다
+    # 10번째 그리기가 답을 기다리는 중이면 결과가 정해진 것이 아니고, 고장으로라도 답을 받았으면 정해졌다
     tool, spec = bench.load_problem("order")
     meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 143, "wall_s": 9.0, "signaled": True}
     pending = {"type": "assistant", "message": {"content": [
@@ -281,7 +281,7 @@ def test_broken_draws_still_count_toward_the_ten_draws():
     row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 0, "wall_s": 9.0},
                           [json.dumps(e) for e in [*events, ENDED]], tool, spec, False)
     assert row["draws"] == 11 and row["first_pass_draw"] == 11 and not row["passed"]
-    assert bench.is_measured(row["subtype"])  # 판정 10번을 받았으니 결과가 정해진 잰 실행이다
+    assert bench.is_measured(row["subtype"])  # 그리기 10번을 다 써 결과가 정해진 잰 실행이다
 
 
 def test_key_and_model_errors_are_read_from_the_cli_text_too():

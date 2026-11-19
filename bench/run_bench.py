@@ -370,7 +370,6 @@ def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
 # 모델이 한 번도 답하지 않은 채 시간이 다 감, 서버 쪽 API 오류, 끝의 결과 없이 끝남(크래시 등), 하네스 오류, 멈출 때 끊김
 SDK_VALIDATION = re.compile(r"validation errors? for \w+Arguments")  # MCP SDK가 인자를 거절한 글(pydantic)
 NOT_MEASURED = ("mcp_failed", "no_init", "no_answer", "api_error", "no_result", "tool_error", "harness_error", "stopped")
-UNJUDGED = ("missing", "mcp_error", "tool_error")  # 검사 판정을 받지 못한 차례
 NATURAL_ENDS = ("success", "error_max_budget_usd", "error_max_turns")  # claude가 스스로 끝낸 결과 이벤트의 subtype
 BILLING = re.compile(r"credit balance", re.I)  # 크레딧이 떨어지면 400 "Your credit balance is too low"로 온다
 ABORTED = re.compile(r"\babort", re.I)  # 신호를 받은 claude가 결과에 담는 중단 글(Request was aborted)
@@ -417,7 +416,7 @@ def is_measured(subtype) -> bool:
 
 
 class Stopped(Exception):
-    """Ctrl-C로 멈출 때 띄우지 않았거나 끝낸 실행. CSV에 쓰지 않는다(기록이 잘려 해석하지 못한 것은 harness_error로 남는다)."""
+    """Ctrl-C로 멈출 때 띄우지 않았거나 끝낸 실행. CSV에 쓰지 않는다."""
 
 
 def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict:
@@ -557,8 +556,8 @@ def kill_groups(procs) -> None:
 def force_exit(signum, frame) -> None:
     """정리 중에 신호가 한 번 더 오면 돌던 claude와 기억한 그룹 구성원을 바로 끝내고 나간다(정리가 막혔을 때의 탈출구)."""
     # 막 띄우는 중인 claude도 목록에 든 뒤에 보도록 잠금을 잡고, 그 뒤로는 새로 띄우지 않게 한다
-    locked = _RUNNING_LOCK.acquire(timeout=5)
-    _STOP.set()
+    _STOP.set()  # 잠금을 기다리는 동안 새 claude를 띄우지 않게 먼저 세운다
+    locked = _RUNNING_LOCK.acquire(timeout=30)
     procs = list(_RUNNING)
     if locked:
         _RUNNING_LOCK.release()
@@ -574,6 +573,14 @@ def restore_stop_signals(previous: dict) -> None:
     for s, handler in previous.items():  # 파이썬 밖에서 걸린 처리기(None)는 기본값으로 둔다
         signal.signal(s, handler if handler is not None
                       else signal.default_int_handler if s == signal.SIGINT else signal.SIG_DFL)
+
+
+def _parent_name() -> str:
+    try:
+        return subprocess.run(["ps", "-o", "comm=", "-p", str(os.getppid())], capture_output=True,
+                              text=True).stdout.strip()
+    except FileNotFoundError:
+        return ""
 
 
 def say(text: str, file=None) -> None:
@@ -736,19 +743,20 @@ def main() -> None:
     base.mkdir(parents=True, exist_ok=True)
     pool = cf.ThreadPoolExecutor(max_workers=args.workers)
     # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다. failed는 결과를 쓰다 난 오류
-    stop = {"why": None, "first": None, "signum": None, "failed": False, "skipped": [], "forbidden": set()}
+    under_uv = os.path.basename(_parent_name()) == "uv"
+    stop = {"why": None, "first": None, "signum": None, "spare": False, "failed": False, "skipped": [], "forbidden": set()}
 
     def on_stop(signum, frame):  # 예외를 던지지 않아 쓰던 줄이 잘리거나 잠금을 쥔 채 끊기지 않는다
-        now = time.monotonic()
         if stop["why"] is not None and stop["first"] is None:  # 키·크레딧 오류 등으로 이미 멈추는 중이면 첫 신호가 "한 번 더"다
             force_exit(signum, frame)
-        # uv run은 받은 신호를 python에도 그대로 넘기고 셸은 앞그룹 전체에 보내, 한 번의 Ctrl-C·터미널 닫기가 같은 신호로 두 번
-        # 온다(거의 동시에). 그래서 0.3초 안에 다시 온 같은 신호는 하나로 보고, 그 밖의 신호가 또 오면 정리가 막혔어도 바로
-        # 끝낸다(사람이 빠르게 두 번 누른 것도 대개 0.3초를 넘는다)
-        if stop["first"] is not None and (now - stop["first"] > 0.3 or signum != stop["signum"]):
+        if stop["first"] is not None:
+            # uv run은 받은 신호를 python에도 그대로 넘기고 셸은 앞그룹 전체에 보내, 한 번의 Ctrl-C·터미널 닫기가 같은 신호로
+            # 두 번 온다. 부모가 uv면 첫 신호와 같은 신호 하나는 그 사본으로 보고, 그 밖에 또 오면 정리가 막혔어도 바로 끝낸다
+            if stop["spare"] and signum == stop["signum"]:
+                stop["spare"] = False
+                return
             force_exit(signum, frame)
-        if stop["first"] is None:
-            stop["first"], stop["signum"] = now, signum
+        stop["first"], stop["signum"], stop["spare"] = time.monotonic(), signum, under_uv
         stop["why"] = stop["why"] or signal.Signals(signum).name
 
     previous = {s: signal.getsignal(s) for s in STOP_SIGNALS}
@@ -778,8 +786,8 @@ def main() -> None:
             except Exception as e:
                 row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
                        "subtype": f"harness_error: {type(e).__name__}: {e}"}
+            recorded.add(fut)  # 쓰기 전에 표시한다 — 쓰다 실패해 drain이 다시 불러도 줄을 겹쳐 쓰지 않는다(실패는 failed로 알린다)
             w.writerow(row)
-            recorded.add(fut)  # 버퍼에 들어간 뒤라, flush가 실패해 drain이 다시 불러도 두 번 쓰지 않는다
             rows.append(row)
             f.flush()
             say(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed", "first_pass_draw",
@@ -852,7 +860,7 @@ def main() -> None:
                     cf.wait(waiting, timeout=75)
                 drain()  # 정리하는 동안 스스로 끝난 실행도 든다
                 say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에 "
-                    "들지 않는다 — 기록이 잘려 읽지 못한 것은 harness_error로 남는다)", file=sys.stderr)
+                    "들지 않는다)", file=sys.stderr)
             except BaseException:
                 force_exit(None, None)
             # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
