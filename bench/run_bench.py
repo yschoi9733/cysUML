@@ -168,8 +168,8 @@ def _known_names(d: B.Diagram) -> dict[str, str]:
 
 
 def _name_key(lines: tuple[str, ...], known: dict[str, str]) -> str:
-    """이름 줄을 견줄 꼴로. 줄 사이를 띄어 잇거나 붙여 이은 꼴이 문제 이름(known)과 같으면 그 이름으로 본다 — 줄을 어디서
-    나눴든 같은 이름이다. 'Order Service'와 'OrderService'처럼 띄어쓰기를 더하거나 뺀 것은 다른 이름이다(이어진 공백은 하나로,
+    """이름 줄을 견줄 꼴로. 줄 바꿈 자리는 문제·그림 어느 쪽에서든 띄어쓰기로도, 붙여 쓴 것으로도 본다(줄을 어디서 나눴든
+    같은 이름이다). 'Order Service'와 'OrderService'처럼 띄어쓰기를 더하거나 뺀 것은 다른 이름이다(이어진 공백은 하나로,
     앞뒤 공백은 없는 것으로 본다)."""
     spaced, joined = _name_forms(lines)
     return known.get(spaced) or known.get(joined) or spaced
@@ -260,6 +260,9 @@ def faithful(drawn: dict, spec: dict, tool: str, problem: tuple | None = None) -
         return False
 
 
+PROBLEM_SHAPES: dict[str, tuple] = {}  # main이 미리 만든 문제별 꼴(run_one이 실행마다 다시 만들지 않게)
+
+
 def problem_shape(spec: dict, tool: str) -> tuple[dict[str, str], tuple[list, list]]:
     """문제의 이름 열쇠와 견줄 꼴. cysUML이 못 읽는 문제는 InputError."""
     d = _diagram(spec, tool)
@@ -292,9 +295,13 @@ def draw_uses(events: list[dict], tool: str | None = None) -> list[tuple[str, di
     return uses
 
 
+def init_event(events: list[dict]) -> dict:
+    return next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), {})
+
+
 def mcp_status(events: list[dict]) -> str | None:
     """시작 이벤트에 적힌 cysUML MCP 서버 상태(connected 등). 서버가 안 붙으면 그린 차례가 0인 평범한 불합격처럼 보인다."""
-    init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), {})
+    init = init_event(events)
     return next((m.get("status") for m in init.get("mcp_servers") or [] if m.get("name") == "cysuml"), None)
 
 
@@ -366,11 +373,12 @@ class Stopped(Exception):
     """Ctrl-C로 멈출 때 띄우지 않았거나 끝낸 실행. CSV에 쓰지 않는다."""
 
 
-def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict:
+def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool, problem: tuple | None = None) -> dict:
     """실행 한 줄(run_one과 rescore.py가 같이 쓴다)."""
     row = {k: meta.get(k) for k in ("model", "effort", "problem", "run")} | {"tool": tool, "exit": meta.get("exit"),
                                                                           "wall_s": meta.get("wall_s")}
-    row.update(parse_stream(lines, tool, spec))
+    row.update(parse_stream(lines, tool, spec, problem))
+    timed_out = timed_out and row["ended"] is None  # 끝의 결과를 내고 종료만 못 했으면 그 결과(시간·비용)를 쓴다
     row["timed_out"] = timed_out
     if timed_out:  # 비용은 끝의 결과가 없어 알 수 없고, 시간은 실제로 기다린 시간으로 채운다
         row["duration_s"] = row["wall_s"]
@@ -404,7 +412,7 @@ def counts_as_pass(first_pass: int | None) -> bool:
     return first_pass is not None and first_pass <= MAX_DRAWS
 
 
-def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> dict:
+def parse_stream(lines, tool: str | None = None, spec: dict | None = None, problem: tuple | None = None) -> dict:
     """spec(문제)을 주면, 검사에 합격했어도 문제를 바꿔 그린 차례(요소·관계를 빼거나 더하거나 바꿈)는 changed로 적고
     합격으로 치지 않는다."""
     events = read_events(lines)
@@ -412,7 +420,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
     ids, inputs = [i for i, _ in uses], dict(uses)
     results = draw_results(events, ids)
     result = next((e for e in reversed(events) if e.get("type") == "result"), {})
-    seq, problem, save_errors = [], None, 0
+    seq, save_errors = [], 0
     for i in ids:
         text = result_text(results[i].get("content")) if i in results else ""
         save_errors += text.startswith(SAVE_FAILED)
@@ -463,7 +471,7 @@ STOP_SIGNALS = tuple(getattr(signal, n) for n in ("SIGINT", "SIGTERM", "SIGHUP")
 
 
 def ignore_stop_signals() -> None:
-    for s in STOP_SIGNALS:
+    for s in STOP_SIGNALS:  # 원래 무시하던 신호에 SIG_IGN을 다시 걸어도 같다
         signal.signal(s, signal.SIG_IGN)
 
 
@@ -474,9 +482,10 @@ def force_exit(signum, frame) -> None:
     os._exit(1)
 
 
-def restore_stop_signals() -> None:
-    for s in STOP_SIGNALS:
-        signal.signal(s, signal.default_int_handler if s == signal.SIGINT else signal.SIG_DFL)
+def restore_stop_signals(previous: dict) -> None:
+    for s, handler in previous.items():
+        if handler is not None:
+            signal.signal(s, handler)
 
 
 def say(text: str, file=None) -> None:
@@ -543,6 +552,10 @@ def run_one(job: dict, key: str) -> dict:
         except subprocess.TimeoutExpired as e:  # 그룹 밖으로 나간 자손이 출력을 쥐고 있으면 끝내도 닫히지 않는다
             stdout = (e.stdout or b"").decode("utf-8", "replace")  # 그때까지 받은 기록은 남긴다
             stderr = (e.stderr or b"").decode("utf-8", "replace") + "\n끝낸 뒤에도 출력이 닫히지 않아 그때까지 받은 기록만 남겼다"
+            try:
+                proc.wait(timeout=10)  # 출력과 상관없이 끝낸 claude는 거둔다
+            except subprocess.TimeoutExpired:
+                pass
         code = None
     finally:
         with _RUNNING_LOCK:
@@ -552,7 +565,7 @@ def run_one(job: dict, key: str) -> dict:
         (run_dir / "stderr.txt").write_text(stderr, encoding="utf-8")
     meta = {"exit": code, "wall_s": round((timed_out_at or time.time()) - started, 1), "timed_out": code is None}
     (run_dir / "run.json").write_text(json.dumps(meta), encoding="utf-8")  # 해석이 실패해도 rescore.py가 다시 읽게
-    row = build_row(job | meta, stdout.splitlines(), tool, spec, meta["timed_out"])
+    row = build_row(job | meta, stdout.split("\n"), tool, spec, meta["timed_out"], PROBLEM_SHAPES.get(job["problem"]))
     # 멈추며 시그널을 보낸 실행이 스스로 끝(NATURAL_ENDS)도, 합격이나 10번 그림도 내기 전이면 끊긴 것이다. 시그널을 받고
     # 결과 이벤트를 내며 끝나도 그 subtype은 스스로 끝난 것이 아니다
     stopped = (proc.pid in _SIGNALED and row["ended"] not in NATURAL_ENDS and not row["timed_out"] and not row["passed"]
@@ -587,7 +600,7 @@ def main() -> None:
     for p in args.problems:  # 합격한 그림을 문제와 견줄 수 없으면 돈을 쓴 실행이 하네스 오류로 끝나니 미리 읽어 본다
         tool, spec = load_problem(p)
         try:
-            problem_shape(spec, tool)
+            PROBLEM_SHAPES[p] = problem_shape(spec, tool)
         except InputError as e:
             sys.exit(f"문제 {p}를 cysUML이 읽지 못한다: {e}")
 
@@ -648,7 +661,10 @@ def main() -> None:
                 raise KeyboardInterrupt
             return row
 
-        for s in STOP_SIGNALS:  # Ctrl-C·kill·터미널 닫기. claude는 새 세션이라 이 신호를 받지 못해 직접 끝낸다
+        previous = {s: signal.getsignal(s) for s in STOP_SIGNALS}
+        # Ctrl-C·kill·터미널 닫기. claude는 새 세션이라 이 신호를 받지 못해 직접 끝낸다. nohup으로 무시하던 신호는 그대로 둔다
+        watched = [s for s in STOP_SIGNALS if previous[s] is not signal.SIG_IGN]
+        for s in watched:
             signal.signal(s, on_stop)
         try:
             for j in jobs:
@@ -656,7 +672,7 @@ def main() -> None:
             for fut in cf.as_completed(futures):
                 record(fut)
         except BaseException as e:  # 신호나 결과를 쓰다 난 오류: 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다
-            for s in STOP_SIGNALS:
+            for s in watched:
                 signal.signal(s, force_exit)
             with _RUNNING_LOCK:
                 _STOP.set()
@@ -686,7 +702,7 @@ def main() -> None:
             # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
             # 줄마다 flush했다
             os._exit(1)
-    restore_stop_signals()
+    restore_stop_signals(previous)
     pool.shutdown()
     total = sum(r.get("cost_usd") or 0 for r in rows)
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)

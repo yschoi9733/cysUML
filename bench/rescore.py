@@ -32,7 +32,7 @@ def rescore_row(tag_dir: Path, r: dict) -> dict:
     text = prompt.read_text(encoding="utf-8") if prompt.exists() else ""
     tool = run_tool(run_dir, r.get("tool"))
     spec = spec_from_prompt(text) if text else None
-    if tool is None or spec is None:
+    if not tool or spec is None:
         print(f"  {r['model']} {r['effort']} {r['problem']} run{r['run']}: 준 문제를 못 찾아 지금 문제 파일과 견준다")
         now_tool, now_spec = load_problem(r["problem"])
         tool, spec = tool or now_tool, spec or now_spec
@@ -40,31 +40,36 @@ def rescore_row(tag_dir: Path, r: dict) -> dict:
         timed_out = str(meta["timed_out"]) == "True"
     else:  # timed_out을 남기기 전의 옛 기록은 그때 적은 판정 문구로만 가린다
         timed_out = sub == "timeout" or sub.endswith("(timeout)")
-    return build_row(meta, stream.read_text(encoding="utf-8").splitlines(), tool, spec, timed_out)
+    return build_row(meta, stream.read_text(encoding="utf-8").split("\n"), tool, spec, timed_out)
 
 
-for tag_dir in map(Path, sys.argv[1:]):
-    with (tag_dir / "results.csv").open(encoding="utf-8") as f:
-        old_rows = list(csv.DictReader(f))
-    new_rows = []
-    for r in old_rows:
-        name = f"{tag_dir.name}: {r['model']} {r['effort']} {r['problem']} run{r['run']}"
-        try:
-            row = rescore_row(tag_dir, r)
-        except Exception as e:  # 한 실행을 다시 읽지 못해도 나머지는 계속한다
-            reason = str(e) if isinstance(e, Kept) else f"{type(e).__name__}: {e}"
-            print(f"{name} 원래 줄을 둔다: {reason}")
-            new_rows.append(r)
-            continue
-        new_rows.append(row)
-        was, now = is_measured(r.get("subtype")), is_measured(row["subtype"])
-        if was != now:  # 표에 드는 실행 수가 바뀐다
-            print(f"{name} {'표에 들어옴' if now else '표에서 빠짐'}: {r.get('subtype') or '-'}→{row['subtype'] or '-'}")
-        if str(row["passed"]) != r.get("passed") or str(row["first_pass_draw"] or "") != (r.get("first_pass_draw") or ""):
-            print(f"{name} 합격 {r.get('passed')}→{row['passed']}, 첫 합격 차례 {r.get('first_pass_draw') or '-'}"
-                  f"→{row['first_pass_draw'] or '-'}, 판정 {row['verdicts']}")
-    with (tag_dir / "rescored.csv").open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
-        w.writeheader()
-        w.writerows(new_rows)
-    print(f"{tag_dir.name}: {len(new_rows)}건 → {tag_dir / 'rescored.csv'}")
+def main() -> None:
+    for tag_dir in map(Path, sys.argv[1:]):
+        with (tag_dir / "results.csv").open(encoding="utf-8") as f:
+            old_rows = list(csv.DictReader(f))
+        new_rows = []
+        for r in old_rows:
+            name = f"{tag_dir.name}: {r['model']} {r['effort']} {r['problem']} run{r['run']}"
+            try:
+                row = rescore_row(tag_dir, r)
+            except Exception as e:  # 한 실행을 다시 읽지 못해도 나머지는 계속한다
+                reason = str(e) if isinstance(e, Kept) else f"{type(e).__name__}: {e}"
+                print(f"{name} 원래 줄을 둔다: {reason}")
+                new_rows.append(r)
+                continue
+            new_rows.append(row)
+            was, now = is_measured(r.get("subtype")), is_measured(row["subtype"])
+            if was != now:  # 표에 드는 실행 수가 바뀐다
+                print(f"{name} {'표에 들어옴' if now else '표에서 빠짐'}: {r.get('subtype') or '-'}→{row['subtype'] or '-'}")
+            if str(row["passed"]) != r.get("passed") or str(row["first_pass_draw"] or "") != (r.get("first_pass_draw") or ""):
+                print(f"{name} 합격 {r.get('passed')}→{row['passed']}, 첫 합격 차례 {r.get('first_pass_draw') or '-'}"
+                      f"→{row['first_pass_draw'] or '-'}, 판정 {row['verdicts']}")
+        with (tag_dir / "rescored.csv").open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(new_rows)
+        print(f"{tag_dir.name}: {len(new_rows)}건 → {tag_dir / 'rescored.csv'}")
+
+
+if __name__ == "__main__":
+    main()

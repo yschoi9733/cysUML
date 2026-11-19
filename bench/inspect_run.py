@@ -6,18 +6,18 @@ cysUML 그리기 도구 호출을 모두 센다).
 import sys
 from pathlib import Path
 
-from run_bench import draw_results, draw_uses, read_events, result_text, run_tool
+from run_bench import draw_results, draw_uses, init_event, read_events, result_text, run_tool
 
 stream = Path(sys.argv[1])
-events = read_events(stream.read_text(encoding="utf-8").splitlines())
+events = read_events(stream.read_text(encoding="utf-8").split("\n"))
 tool = run_tool(stream.parent)
 if tool is None:
     print("알림: 이 실행의 도구를 알 수 없어 cysUML 그리기 도구 호출을 모두 그린 차례로 센다(results.csv의 draws와 다를 수 있다)")
 
-for e in events:
-    if e.get("type") == "system" and e.get("subtype") == "init":
-        print("init:", {k: e.get(k) for k in ("apiKeySource", "model", "permissionMode")},
-              "mcp:", e.get("mcp_servers"), "tools:", e.get("tools"))
+init = init_event(events)
+if init:
+    print("init:", {k: init.get(k) for k in ("apiKeySource", "model", "permissionMode")},
+          "mcp:", init.get("mcp_servers"), "tools:", init.get("tools"))
 ids = [i for i, _ in draw_uses(events, tool)]
 results = draw_results(events, ids)
 for n, i in enumerate(ids, 1):
