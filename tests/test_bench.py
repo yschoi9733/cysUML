@@ -109,17 +109,16 @@ ENDED = {"type": "result", "subtype": "success"}
     ([INIT, lambda s: _draws(s, [FAIL, PASS]), ENDED], 0, False, "success", True),
     ([INIT, lambda s: _draws(s, [FAIL]), {"type": "result", "subtype": "error_max_budget_usd", "is_error": True}],
      1, False, "error_max_budget_usd", True),
-    # 서버 쪽 오류로 10번 전에 끊김(상태 칸, 오류 글, 크레딧 부족)은 잰 것이 아니다
+    # API 오류로 10번 전에 끊기면 상태 번호와 상관없이 잰 것이 아니다(모델 탓인 400도)
     ([INIT, {"type": "result", "subtype": "success", "is_error": True, "api_error_status": 529}], 1, False, "api_error",
      False),
     ([INIT, {"type": "result", "subtype": "success", "is_error": True, "result": "API Error: 401 bad key"}], 1, False,
      "api_error", False),
     ([INIT, {"type": "result", "subtype": "success", "is_error": True, "api_error_status": 400,
              "result": "Your credit balance is too low"}], 1, False, "api_error", False),
-    # 모델 탓인 400은 잰 불합격이다
     ([INIT, lambda s: _draws(s, [FAIL]), {"type": "result", "subtype": "success", "is_error": True,
                                           "api_error_status": 400, "result": "Prompt is too long"}],
-     1, False, "success", True),
+     1, False, "api_error", False),
     ([], 1, False, "no_init", False),
     ([INIT], None, True, "no_answer (timeout)", False),
     ([INIT, lambda s: _draws(s, [FAIL])], None, True, "timeout", True),
@@ -240,7 +239,7 @@ def test_non_object_lines_are_skipped():
 
 
 def test_classification_does_not_depend_on_branch_order():
-    # 고장 판정은 시간 초과보다, 서버 쪽 오류는 끝난 꼴보다 먼저 본다. 신호를 받고 낸 중단 오류도 끊긴 실행이다
+    # 고장 판정은 시간 초과보다, API 오류는 끝난 꼴보다 먼저 본다. 멈출 때 끊은 실행은 끝난 꼴과 상관없이 stopped다
     tool, spec = bench.load_problem("order")
     meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": None, "wall_s": 9.0}
     broken = [INIT, *_draws(spec, [FAIL, "MCP error -32000: Connection closed"])]
@@ -251,7 +250,7 @@ def test_classification_does_not_depend_on_branch_order():
     row = bench.build_row(meta | {"exit": 143, "signaled": True},
                           [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), aborted]], tool, spec, False)
     assert row["subtype"] == "stopped"
-    overload = {"type": "result", "subtype": "error_during_execution", "is_error": True, "api_error_status": 529}
+    overload = {"type": "result", "subtype": "success", "is_error": True, "api_error_status": 529}
     row = bench.build_row(meta | {"exit": 1}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), overload]],
                           tool, spec, False)
     assert row["subtype"] == "api_error"
@@ -284,28 +283,17 @@ def test_broken_draws_still_count_toward_the_ten_draws():
     assert bench.is_measured(row["subtype"])  # 그리기 10번을 다 써 결과가 정해진 잰 실행이다
 
 
-def test_key_and_model_errors_are_read_from_the_cli_text_too():
-    assert bench.config_error({"is_error": True, "api_status": None, "error": "Invalid API key · Fix external API key"}) == "key"
-    assert bench.config_error({"is_error": True, "api_status": None,
-                               "error": "There's an issue with the selected model (claude-x)."}) == "model"
-
-
-def test_server_errors_win_over_stop_and_missing_tool():
+def test_api_error_wins_over_missing_tool_and_stop_wins_over_api_error():
     tool, spec = bench.load_problem("order")
     meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 1, "wall_s": 9.0}
-    overload = {"type": "result", "subtype": "error_during_execution", "is_error": True, "api_error_status": 529}
-    row = bench.build_row(meta | {"signaled": True}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), overload]],
-                          tool, spec, False)
-    assert row["subtype"] == "api_error"  # 멈출 때 났어도 서버 쪽 오류다
     pending = {"type": "system", "subtype": "init", "mcp_servers": [{"name": "cysuml", "status": "pending"}], "tools": []}
     outage = {"type": "result", "subtype": "success", "is_error": True, "result": "overloaded"}
     row = bench.build_row(meta, [json.dumps(e) for e in [pending, outage]], tool, spec, False)
-    assert row["subtype"] == "api_error"  # MCP가 붙기 전이어도 API 장애다(시작 실패로 세지 않는다)
-    # 신호와 같은 때 모델 탓 오류로 스스로 끝난 것은 잰 실행이다(중단 글만 끊긴 것으로 본다)
-    too_long = {"type": "result", "subtype": "success", "is_error": True, "api_error_status": 400, "result": "Prompt is too long"}
-    row = bench.build_row(meta | {"signaled": True}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), too_long]],
+    assert row["subtype"] == "api_error"  # MCP가 붙기 전이어도 API 오류다(시작 실패로 세지 않는다)
+    overload = {"type": "result", "subtype": "error_during_execution", "is_error": True, "api_error_status": 529}
+    row = bench.build_row(meta | {"signaled": True}, [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), overload]],
                           tool, spec, False)
-    assert row["subtype"] == "success"
+    assert row["subtype"] == "stopped"  # 멈출 때 끊은 실행은 끝난 꼴과 상관없이 뺀다
 
 
 def test_budget_end_with_retry_noise_and_quiet_abort():
@@ -333,21 +321,10 @@ def test_tool_call_rejected_by_the_sdk_is_an_input_error():
     assert row["verdicts"] == "input_error" and row["input_errors"] == 1
 
 
-def test_config_errors_stop_the_bench():
-    assert bench.config_error({"is_error": True, "api_status": 401, "error": ""})
-    assert bench.config_error({"is_error": True, "api_status": 400, "error": "Your credit balance is too low"})
-    assert not bench.config_error({"is_error": True, "api_status": 529, "error": ""})
-    assert not bench.config_error({"is_error": True, "api_status": 400, "error": "Prompt is too long"})
-    # 문제 이름(billing·BillingService)이 오류 글에 인용돼도 크레딧 부족이 아니다
-    assert not bench.config_error({"is_error": True, "api_status": 400, "error": "invalid input near BillingService"})
-    # 403은 그 모델만인지 키·조직 전체인지 오류만으로 가를 수 없다(record가 두 모델째에서 전체를 멈춘다)
-    assert bench.config_error({"is_error": True, "api_status": 403, "error": "permission to use the model"}) == "forbidden"
-
-
 @pytest.mark.parametrize("ended, draws, stopped", [
     (None, 2, True),  # 결과 없이 끊김
     ("error_during_execution", 2, True),  # 신호를 받고 낸 결과는 스스로 끝난 것이 아니다
-    ("success", 2, False),  # 신호 전에 스스로 끝났다(모델이 포기함)
+    ("success", 2, True),  # 끊은 사이 스스로 끝났어도 끝난 꼴로는 가를 수 없어 뺀다
     (None, 10, False),  # 10번을 다 그렸으면 잰 불합격이다
 ])
 def test_signaled_runs(ended, draws, stopped):

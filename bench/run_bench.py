@@ -366,47 +366,10 @@ def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
 
 
 # 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함,
-# 모델이 한 번도 답하지 않은 채 시간이 다 감, 서버 쪽 API 오류, 끝의 결과 없이 끝남(크래시 등), 하네스 오류, 멈출 때 끊김
+# 모델이 한 번도 답하지 않은 채 시간이 다 감, API 오류, 끝의 결과 없이 끝남(크래시 등), 하네스 오류, 멈출 때 끊김
 SDK_VALIDATION = re.compile(r"validation errors? for \w+Arguments")  # MCP SDK가 인자를 거절한 글(pydantic)
 NOT_MEASURED = ("mcp_failed", "no_init", "no_answer", "api_error", "no_result", "tool_error", "harness_error", "stopped")
 NATURAL_ENDS = ("success", "error_max_budget_usd", "error_max_turns")  # claude가 스스로 끝낸 결과 이벤트의 subtype
-BILLING = re.compile(r"credit balance", re.I)  # 크레딧이 떨어지면 400 "Your credit balance is too low"로 온다
-ABORTED = re.compile(r"\babort", re.I)  # 신호를 받은 claude가 결과에 담는 중단 글(Request was aborted)
-OUTAGE = re.compile(r"Connection error|Request timed out|overloaded", re.I)  # 상태 번호 없이 오는 서버 쪽 오류 글
-
-
-def _api_code(row: dict) -> int | None:
-    """API 오류의 상태 번호. api_error_status가 없으면 오류 글의 'API Error: NNN'이나 알려진 안내 글에서 읽는다."""
-    try:
-        return int(row["api_status"])
-    except (TypeError, ValueError, KeyError):
-        error = row.get("error") or ""
-        m = re.search(r"API Error: (\d{3})", error)
-        if m:
-            return int(m.group(1))
-        # 상태 번호 없이 CLI가 바꿔 쓴 안내 글만 올 때
-        return 401 if re.search(r"invalid api key", error, re.I) else 404 if re.search(
-            r"issue with the selected model", error, re.I) else None
-
-
-def config_error(row: dict) -> str | None:
-    """남은 실행도 같은 오류로 끝날 원인: billing(크레딧 부족)·key(401)는 모든 모델, model(404)은 그 모델만,
-    forbidden(403)은 그 모델만인지 키·조직 전체인지 오류만으로 가를 수 없어 record가 겪은 대로 정한다."""
-    if not row.get("is_error") or row.get("passed"):
-        return None
-    if BILLING.search(row.get("error") or ""):
-        return "billing"
-    code = _api_code(row)
-    return "key" if code == 401 else "model" if code == 404 else "forbidden" if code == 403 else None
-
-
-def server_side(row: dict) -> bool:
-    """서버 쪽 API 오류(설정 오류·429·5xx·연결)로 끝났는지. 그 밖의 400(글이 너무 길어짐 등)은 모델 탓이라 넣지 않는다."""
-    if not row["is_error"] or row.get("ended") in ("error_max_budget_usd", "error_max_turns"):
-        return False  # 상한으로 스스로 끝난 실행은 오류 목록에 재시도 흔적이 있어도 모델이 끝낸 것이다
-    code = _api_code(row)
-    return (config_error(row) is not None or code == 429 or (code is not None and code >= 500)
-            or (code is None and bool(OUTAGE.search(row["error"] or ""))))
 
 
 def is_measured(subtype) -> bool:
@@ -429,18 +392,16 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
         row["duration_s"] = row["wall_s"]
     seq = row["verdicts"].split()
     last = (seq or [""])[-1]
-    server = server_side(row)
     # 결과가 정해졌다: 합격했거나, 지시한 10번을 다 그려 10번째까지 답을 받았다(고장 난 호출도 그린 횟수에 든다 — 첫 합격
     # 차례와 같은 셈). 10번째가 답을 기다리던 중이면 아직 정해지지 않았다
     used_up = len(seq) >= MAX_DRAWS and seq[MAX_DRAWS - 1] != "missing"
     if row["passed"] or used_up:
         why = "timeout" if timed_out else None
-    elif meta.get("signaled") and not timed_out and not server and (
-            row["ended"] not in NATURAL_ENDS or row["aborted"]):
-        # 멈추며 우리가 신호로 끊었다. 신호를 받고 낸 결과 이벤트(중단 글을 담은 success 포함)는 스스로 끝난 것이 아니다.
-        # 서버 쪽 API 오류는 신호와 상관없이 난 것이라 아래에서 api_error로 가른다
+    elif meta.get("signaled"):  # 멈출 때 우리가 끊었다(그 사이 스스로 끝났어도 끝난 꼴로는 가를 수 없어 뺀다)
         why = "stopped"
-    elif server:  # 서버 쪽 API 오류로 끝났다(결과 이벤트의 subtype과 상관없이, MCP가 붙기 전이어도)
+    elif row["is_error"] and row["ended"] == "success":
+        # API 오류로 끝났다(MCP가 붙기 전이어도). 서버 탓(인증·크레딧·429·5xx)과 모델 탓(글이 너무 길어진 400 등)을
+        # 상태 번호로 가르지 않고 모두 빼며, 오류 글은 error 칸에 남긴다
         why = "api_error"
     elif not row["draws"] and not row["tool_ready"]:  # 그림 도구 없이 끝났다
         why = (f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") + (" (timeout)" if timed_out else "")
@@ -520,7 +481,6 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "is_error": result.get("is_error"),
         "api_status": result.get("api_error_status"),
         "error": (str(result.get("result") or result.get("errors") or "") or None) if result.get("is_error") else None,
-        "aborted": bool(ABORTED.search(str(result.get("result") or ""))),  # 신호를 받고 낸 중단 글(오류 표시가 없어도)
         "input_tokens": usage.get("input_tokens"),
         "cache_read_tokens": usage.get("cache_read_input_tokens"),
         "cache_write_tokens": usage.get("cache_creation_input_tokens"),
@@ -529,10 +489,9 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
 
 
 _RUNNING: set[subprocess.Popen] = set()
-_RUNNING_LOCK = threading.RLock()  # force_exit가 이 잠금을 쥔 메인 스레드에서 불려도 막히지 않게
+_RUNNING_LOCK = threading.Lock()
 _STOP = threading.Event()  # 멈춘 뒤에는 새 claude를 띄우지 않는다(_RUNNING_LOCK 안에서 보고 세운다)
 _SIGNALED: set[int] = set()  # _RUNNING_LOCK 안에서 넣는다
-_MEMBERS: dict[int, list[int]] = {}  # 멈출 때 기억한 그룹별 구성원(force_exit도 쓴다)
 # claude에 넘기는 환경 변수. 셸에 있는 Claude Code 설정(effort·생각 토큰·캐시·제공자 전환 등)이 측정에 섞이지 않게
 # 이것만 넘긴다(프록시·인증서 변수는 API에 닿는 데 필요할 수 있어 넘긴다)
 KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG",
@@ -543,83 +502,23 @@ KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG"
 STOP_SIGNALS = tuple(getattr(signal, n) for n in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, n))  # Windows엔 SIGHUP이 없다
 
 
-def kill_groups(procs) -> None:
-    """SIGKILL을 아직 거두지 않은 claude의 그룹과, 멈출 때 기억한 구성원 가운데 아직 그 그룹에 남은 것에만 보낸다."""
-    for p in procs:
-        stop_group(p, signal.SIGKILL)
-    for pgid, pids in list(_MEMBERS.items()):
-        for pid in pids:
-            kill_if_member(pid, pgid)
-
-
-def force_exit(signum, frame) -> None:
-    """정리 중에 신호가 한 번 더 오면 돌던 claude와 기억한 그룹 구성원을 바로 끝내고 나간다(정리가 막혔을 때의 탈출구)."""
-    # 막 띄우는 중인 claude도 목록에 든 뒤에 보도록 잠금을 잡고, 그 뒤로는 새로 띄우지 않게 한다
-    _STOP.set()  # 잠금을 기다리는 동안 새 claude를 띄우지 않게 먼저 세운다
-    locked = _RUNNING_LOCK.acquire(timeout=30)
-    procs = list(_RUNNING)
-    if locked:
-        _RUNNING_LOCK.release()
-    kill_groups(procs)
-    try:  # print는 신호가 끊은 출력과 겹치면 RuntimeError를 낸다
-        os.write(2, "정리를 기다리지 않고 바로 끝냈다(돌던 claude는 끝냈다)\n".encode("utf-8"))
-    except OSError:
-        pass
-    os._exit(1)
-
-
 def restore_stop_signals(previous: dict) -> None:
     for s, handler in previous.items():  # 파이썬 밖에서 걸린 처리기(None)는 기본값으로 둔다
         signal.signal(s, handler if handler is not None
                       else signal.default_int_handler if s == signal.SIGINT else signal.SIG_DFL)
 
 
-def _parent_name() -> str:
-    try:
-        return subprocess.run(["ps", "-o", "comm=", "-p", str(os.getppid())], capture_output=True,
-                              text=True).stdout.strip()
-    except FileNotFoundError:
-        return ""
-
-
-def say_totals(rows: list, base: Path, stop: dict) -> None:
+def say_totals(rows: list, base: Path) -> None:
     total = sum(r.get("cost_usd") or 0 for r in rows)
     unknown_cost = sum(1 for r in rows if r.get("cost_usd") is None)
     note = f", 비용을 모르는 실행 {unknown_cost}건은 합계에 들지 않았다" if unknown_cost else ""
     say(f"끝: {len(rows)}건, 합계 ${total:.2f}{note}, 결과 {base / 'results.csv'}")
-    if stop["skipped"]:
-        say(f"쓸 수 없어 뺀 모델: {stop['skipped']}", file=sys.stderr)
 
 
 def say(text: str, file=None) -> None:
     try:
         print(text, file=file or sys.stdout, flush=True)
     except (OSError, RuntimeError):  # 터미널이 닫혔거나 신호가 끊은 출력과 겹쳐도 정리는 이어 간다
-        pass
-
-
-def group_members(pgids) -> dict[int, list[int]]:
-    """그룹마다 구성원 pid(ps 한 번으로 읽는다). 그룹을 이끄는 claude는 stop_group이 맡는다(거둔 뒤의 그 pid는 그룹 번호와
-    같아 재사용되면 가를 수 없다)."""
-    members = {g: [] for g in pgids}
-    try:
-        out = subprocess.run(["ps", "-A", "-o", "pid=,pgid="], capture_output=True, text=True).stdout
-    except FileNotFoundError:  # ps가 없으면 그룹째 보내는 SIGTERM에만 기댄다
-        return members
-    for line in out.splitlines():
-        pid, pgid = (int(x) for x in line.split())
-        if pgid in members and pid != pgid:
-            members[pgid].append(pid)
-    return members
-
-
-def kill_if_member(pid: int, pgid: int) -> None:
-    """pid가 아직 그 그룹에 있을 때만 SIGKILL한다. 그룹에 구성원이 남아 있는 동안 그 그룹 번호는 다시 쓰이지 않아, pid가 다른
-    프로세스에 갔다면 그 그룹이 아니다."""
-    try:
-        if os.getpgid(pid) == pgid:
-            os.kill(pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
         pass
 
 
@@ -750,22 +649,12 @@ def main() -> None:
     rows = []
     base.mkdir(parents=True, exist_ok=True)
     pool = cf.ThreadPoolExecutor(max_workers=args.workers)
-    # 멈출 까닭. 신호 처리기와 record가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다. failed는 결과를 쓰다 난 오류
-    under_uv = os.path.basename(_parent_name()) == "uv"
-    stop = {"why": None, "first": None, "signum": None, "spare": False, "failed": False, "skipped": [], "forbidden": set()}
+    # 멈출 까닭. 신호 처리기와 결과 쓰기가 적고, 메인 루프가 정해진 자리에서 보고 멈춘다. failed는 결과를 쓰다 난 오류
+    stop = {"why": None, "failed": False}
 
-    def on_stop(signum, frame):  # 예외를 던지지 않아 쓰던 줄이 잘리거나 잠금을 쥔 채 끊기지 않는다
-        if stop["why"] is not None and stop["first"] is None:  # 키·크레딧 오류 등으로 이미 멈추는 중이면 첫 신호가 "한 번 더"다
-            force_exit(signum, frame)
-        if stop["first"] is not None:
-            # uv run은 받은 신호를 python에도 그대로 넘기고 셸은 앞그룹 전체에 보내, 한 번의 Ctrl-C·터미널 닫기가 같은 신호로
-            # 두 번 온다(거의 동시에). 부모가 uv면 첫 신호 뒤 1초 안에 온 같은 신호 하나는 그 사본으로 보고(사본이 안 올 때도
-            # 있어 늦게 온 것은 사람이 다시 보낸 것이다), 그 밖에 또 오면 정리가 막혔어도 바로 끝낸다
-            if stop["spare"] and signum == stop["signum"] and time.monotonic() - stop["first"] < 1:
-                stop["spare"] = False
-                return
-            force_exit(signum, frame)
-        stop["first"], stop["signum"], stop["spare"] = time.monotonic(), signum, under_uv
+    def on_stop(signum, frame):
+        # 예외를 던지지 않아 쓰던 줄이 잘리지 않는다. 두 번째 신호부터는 무시한다(uv run은 같은 신호를 한 번 더 넘기고,
+        # 정리는 돌던 claude부터 끝내니 기다리기 싫으면 kill -9로 끝내도 된다)
         stop["why"] = stop["why"] or signal.Signals(signum).name
 
     previous = {s: signal.getsignal(s) for s in STOP_SIGNALS}
@@ -784,44 +673,21 @@ def main() -> None:
 
         def record(fut) -> None:
             j = futures[fut]
-            if fut.cancelled():  # 쓸 수 없는 모델이라 띄우기 전에 뺀 실행
-                recorded.add(fut)
+            recorded.add(fut)  # 쓰기 전에 표시한다 — 쓰다 실패해 다시 불러도 줄을 겹쳐 쓰지 않는다
+            if fut.cancelled():  # 멈출 때 띄우기 전에 뺀 실행
                 return
             try:
                 row = fut.result()
             except Stopped:
-                recorded.add(fut)
                 return
             except Exception as e:
                 row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
                        "subtype": f"harness_error: {type(e).__name__}: {e}"}
-            recorded.add(fut)  # 쓰기 전에 표시한다 — 쓰다 실패해 drain이 다시 불러도 줄을 겹쳐 쓰지 않는다(실패는 failed로 알린다)
             w.writerow(row)
             rows.append(row)
             f.flush()
             say(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed", "first_pass_draw",
                                                      "draws", "cost_usd", "duration_s", "subtype")}, ensure_ascii=False))
-            if stop["why"] is not None:
-                return
-            cause = config_error(row)
-            if cause == "forbidden":  # 403이 두 모델째에서도 나면 키·조직 전체의 권한 문제다
-                stop["forbidden"].add(j["model"])
-                cause = "key" if len(stop["forbidden"]) > 1 else "model"
-            if cause == "model" and j["model"] not in stop["skipped"]:  # 그 모델만 쓸 수 없다(이름 오타·권한)
-                stop["skipped"].append(j["model"])
-                skipped = [x for x, job in futures.items()
-                           if job["model"] == j["model"] and not x.cancelled() and x.cancel()]
-                say(f"{j['model']}을(를) 쓸 수 없어({_api_code(row)}) 그 모델의 남은 실행 {len(skipped)}건을 뺀다: "
-                    f"{row.get('error')}",
-                    file=sys.stderr)
-            elif cause in ("key", "billing"):  # 키·크레딧은 모든 실행에 걸리니 바로 멈춘다(이미 뺀 모델의 404는 여기 오지 않는다)
-                what = "크레딧이 떨어졌다" if cause == "billing" else "API 키가 틀렸거나 키·조직에 권한이 없다"
-                stop["why"] = f"{what}({_api_code(row)}): {row.get('error')}"
-            elif not any(is_measured(r.get("subtype")) for r in rows):
-                started_badly = [r for r in rows if (r.get("subtype") or "").startswith(("no_init", "mcp_failed"))
-                                 and "during run" not in r["subtype"]]  # 그리다가 끊긴 것은 시작은 했다
-                if len(started_badly) >= 3:  # 잰 실행 없이 시작 실패만 나면 설정·환경 문제다
-                    stop["why"] = f"claude가 시작하지 못하거나 MCP가 붙지 않는다({len(started_badly)}번): {row.get('subtype')}"
 
         try:
             for j in jobs:
@@ -834,48 +700,34 @@ def main() -> None:
         except Exception as e:  # 결과를 쓰다 난 오류(디스크가 가득 참 등)
             stop["why"], stop["failed"] = stop["why"] or f"오류: {type(e).__name__}: {e}", True
 
-        def drain() -> None:  # 끝났는데 아직 쓰지 못한 실행을 실행마다 따로 쓴다(하나가 실패해도 나머지는 쓴다)
-            for fut in futures:
-                if fut.done() and fut not in recorded:
-                    try:
-                        record(fut)
-                    except Exception as more:
-                        stop["failed"] = True
-                        say(f"끝난 실행 하나를 쓰지 못했다: {type(more).__name__}: {more}", file=sys.stderr)
-
-        if stop["why"] is not None and all(fut.done() for fut in futures):  # 멈출 때 남은 실행이 없었다
-            drain()
-            say(f"알림: {stop['why']}", file=sys.stderr)
-        elif stop["why"] is not None:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다
+        if stop["why"] is not None:  # 남은 실행은 띄우지 않고, 돌던 claude는 그룹째(MCP 서버까지) 바로 끝낸다
             try:
                 with _RUNNING_LOCK:
                     _STOP.set()
-                    procs = list(_RUNNING)
-                    live = [p for p in procs if p.poll() is None]  # 이미 스스로 끝난 실행은 신호를 보낸 실행이 아니다
+                    live = [p for p in _RUNNING if p.poll() is None]  # 이미 스스로 끝난 실행은 끊은 실행이 아니다
                     _SIGNALED.update(p.pid for p in live)
-                # 그룹 구성원(MCP 서버 등)을 지금 기억해, claude가 먼저 끝나도 남은 구성원까지 끝낸다
-                _MEMBERS.update(group_members([p.pid for p in live]))
                 for p in live:
-                    stop_group(p, signal.SIGTERM)
+                    stop_group(p, signal.SIGKILL)
                 pool.shutdown(wait=False, cancel_futures=True)
-                deadline = time.time() + 10  # SIGTERM을 무시하는 그룹은 10초 뒤 SIGKILL로 끝낸다
-                while time.time() < deadline and any(p.poll() is None for p in procs):
-                    time.sleep(0.2)
-                kill_groups(procs)
                 waiting = [fut for fut in futures if not fut.done()]
                 if waiting:
                     # 시간 초과로 끝낸 실행은 출력이 닫히기를 60초까지 기다리니 그보다 길게 기다린다
-                    say(f"끝난 실행의 기록을 기다린다(최대 75초, {len(waiting)}건)", file=sys.stderr)
+                    say(f"끝난 실행의 기록을 기다린다(최대 75초, {len(waiting)}건 — 돌던 claude는 이미 끝냈다)",
+                        file=sys.stderr)
                     cf.wait(waiting, timeout=75)
-                drain()  # 정리하는 동안 스스로 끝난 실행도 든다
+                for fut in futures:  # 끝났는데 아직 쓰지 못한 실행을 실행마다 따로 쓴다(하나가 실패해도 나머지는 쓴다)
+                    if fut.done() and fut not in recorded:
+                        try:
+                            record(fut)
+                        except Exception as more:
+                            say(f"끝난 실행 하나를 쓰지 못했다: {type(more).__name__}: {more}", file=sys.stderr)
                 say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에 "
                     "들지 않는다)", file=sys.stderr)
-                say_totals(rows, base, stop)
-            except BaseException:
-                force_exit(None, None)
-            # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
-            # 줄마다 flush했다
-            os._exit(1)
+                say_totals(rows, base)
+            finally:
+                # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
+                # 줄마다 flush했다
+                os._exit(1)
     finally:
         try:
             f.close()
@@ -884,13 +736,9 @@ def main() -> None:
             say(f"results.csv를 닫지 못했다: {e}", file=sys.stderr)
     restore_stop_signals(previous)
     pool.shutdown()
-    say_totals(rows, base, stop)
+    say_totals(rows, base)
     if stop["failed"]:
         sys.exit("결과를 다 쓰지 못했다(위 알림) — results.csv가 모자랄 수 있다")
-    if stop["why"] is not None and stop["first"] is None:  # 키·크레딧 오류 등 신호가 아닌 까닭으로 멈췄다
-        sys.exit(f"멈춘 까닭: {stop['why']}")
-    if stop["skipped"]:
-        sys.exit("쓸 수 없어 뺀 모델이 있다(위 알림)")
 
 if __name__ == "__main__":
     main()
