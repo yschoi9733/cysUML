@@ -110,12 +110,15 @@ def api_key() -> str:
     if not service:
         sys.exit("API 키가 없다 — ANTHROPIC_API_KEY나 BENCH_KEYCHAIN_SERVICE(맥 키체인 서비스 이름)를 준다")
     try:
-        return subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
-                              check=True, capture_output=True, text=True).stdout.strip()
+        key = subprocess.run(["security", "find-generic-password", "-s", service, "-w"],
+                             check=True, capture_output=True, text=True).stdout.strip()
     except FileNotFoundError:
         sys.exit("security 명령이 없다(맥 키체인은 macOS에서만 읽는다) — ANTHROPIC_API_KEY를 준다")
     except subprocess.CalledProcessError:
         sys.exit(f"맥 키체인에 서비스 이름이 {service!r}인 항목이 없다 — BENCH_KEYCHAIN_SERVICE를 확인한다")
+    if not key:
+        sys.exit(f"맥 키체인 항목 {service!r}의 값이 비어 있다")
+    return key
 
 
 def result_text(content) -> str:
@@ -124,9 +127,9 @@ def result_text(content) -> str:
     return next((b.get("text", "").strip() for b in content or [] if isinstance(b, dict) and b.get("type") == "text"), "")
 
 
-def first_line(content) -> str:
-    text = result_text(content)
-    return text.splitlines()[0] if text else ""
+def verdict_of(text: str) -> str:
+    """판정 머리로 시작하는 첫 줄로 가른다. 저장에 실패하면 서버가 그 오류 글을 검사 요약 앞에 붙인다."""
+    return next((v for v in map(verdict, text.splitlines()) if v != "other"), "other")
 
 
 def verdict(line: str) -> str:
@@ -141,10 +144,14 @@ def verdict(line: str) -> str:
     return "other"
 
 
+def tool_module(tool: str):
+    return importlib.import_module("cysuml." + tool.removeprefix("draw_").replace("_", ""))
+
+
 def tool_spec(tool: str):
     """cysUML이 그 도구에 쓰는 Spec(draw_use_case_diagram → cysuml.usecasediagram). 기본값(요소 목록 칸·kind·navigable)을
     손으로 옮겨 적지 않으려고 그대로 읽는다."""
-    return importlib.import_module("cysuml." + tool.removeprefix("draw_").replace("_", "")).SPEC
+    return tool_module(tool).SPEC
 
 
 def _name_forms(lines: tuple[str, ...]) -> tuple[str, str]:
@@ -194,7 +201,7 @@ def _diagram(data: dict, tool: str) -> B.Diagram:
     if isinstance(rels, list):
         rels = [{"via": [[0, 0], [1, 1]], **r} if isinstance(r, dict) and r.get("from") == r.get("to") else r
                 for r in rels]
-    return B.parse(s, {s.list_field: items, "relations": rels})
+    return tool_module(tool).parse({s.list_field: items, "relations": rels})  # 상태도·액티비티도는 parse_flow로 읽는다
 
 
 def _shape(d: B.Diagram, known: dict[str, str]) -> tuple[list, list]:
@@ -342,7 +349,7 @@ class Stopped(Exception):
 
 
 def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict:
-    """실행 한 줄(run_one과 rescore.py가 같이 쓴다). meta에서 model·effort·problem·run·exit·wall_s를 읽는다."""
+    """실행 한 줄(run_one과 rescore.py가 같이 쓴다)."""
     row = {k: meta.get(k) for k in ("model", "effort", "problem", "run")} | {"tool": tool, "exit": meta.get("exit"),
                                                                           "wall_s": meta.get("wall_s")}
     row.update(parse_stream(lines, tool, spec))
@@ -389,7 +396,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
     result = next((e for e in reversed(events) if e.get("type") == "result"), {})
     seq, problem = [], None
     for i in ids:
-        v = verdict(first_line(results[i].get("content"))) if i in results else "missing"
+        v = verdict_of(result_text(results[i].get("content"))) if i in results else "missing"
         if v == "pass" and spec is not None:
             problem = problem or problem_shape(spec, tool)  # 한 실행 안에서 문제는 그대로라 한 번만 만든다
         if v == "pass" and spec is not None and not faithful(inputs.get(i, {}), spec, tool, problem):
@@ -409,7 +416,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         "turns": result.get("num_turns"),
         "duration_s": round(result["duration_ms"] / 1000, 1) if result.get("duration_ms") is not None else None,
         "subtype": result.get("subtype"),
-        "ended": result.get("subtype"),  # 끝의 결과 이벤트의 subtype(이벤트가 없으면 None, build_row가 subtype을 바꿔도 남는다)
+        "ended": result.get("subtype"),  # build_row가 subtype을 바꿔도 남는다
         "is_error": result.get("is_error"),
         "api_status": result.get("api_error_status"),
         "error": (str(result.get("result") or result.get("errors") or "")[:200] or None) if result.get("is_error") else None,
@@ -429,6 +436,21 @@ _SIGNALED: set[int] = set()  # _RUNNING_LOCK 안에서 넣는다
 KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG",
             "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy",
             "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR"}
+
+
+STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+
+def ignore_stop_signals() -> None:
+    for s in STOP_SIGNALS:
+        signal.signal(s, signal.SIG_IGN)
+
+
+def say(text: str, file=None) -> None:
+    try:
+        print(text, file=file or sys.stdout, flush=True)
+    except OSError:  # 터미널이 닫혔어도 정리는 이어 간다
+        pass
 
 
 def stop_group(proc: subprocess.Popen, sig: int) -> None:
@@ -553,15 +575,16 @@ def main() -> None:
     with (base / "results.csv").open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
         w.writeheader()
+        f.flush()  # 멈출 때 os._exit로 끝내 버퍼가 버려지니, 끝난 실행이 없어도 머리줄은 남긴다
         futures: dict = {}
         written = set()
         writing = {"now": False, "stop": False}
 
-        def on_sigint(signum, frame):  # 한 줄을 쓰는 도중의 Ctrl-C는 다 쓴 뒤로 미룬다(줄이 잘리거나 두 번 쓰이지 않게)
+        def on_stop(signum, frame):  # 한 줄을 쓰는 도중의 신호는 다 쓴 뒤로 미룬다(줄이 잘리거나 두 번 쓰이지 않게)
             if writing["now"]:
                 writing["stop"] = True
-            else:  # 정리에 들어가는 순간부터 또 누른 Ctrl-C는 받지 않는다(정리를 건너뛰지 않게)
-                signal.signal(signal.SIGINT, signal.SIG_IGN)
+            else:  # 정리에 들어가는 순간부터 또 온 신호는 받지 않는다(정리를 건너뛰지 않게)
+                ignore_stop_signals()
                 raise KeyboardInterrupt
 
         def record(fut) -> dict:
@@ -570,25 +593,29 @@ def main() -> None:
             try:
                 try:
                     row = fut.result()
-                except Exception as e:  # 한 실행이 죽어도 나머지는 계속 잰다
+                except Exception as e:
                     row = {"model": j["model"], "effort": j["effort"], "problem": j["problem"], "run": j["run"],
                            "subtype": f"harness_error: {type(e).__name__}: {e}"}
                 rows.append(row)
                 w.writerow(row)
                 f.flush()
                 written.add(fut)
-                print(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed",
-                                                           "first_pass_draw", "draws", "cost_usd", "duration_s",
-                                                           "subtype")}, ensure_ascii=False), flush=True)
+                say(json.dumps({k: row.get(k) for k in ("model", "effort", "problem", "run", "passed", "first_pass_draw",
+                                                         "draws", "cost_usd", "duration_s", "subtype")}, ensure_ascii=False))
             finally:
                 writing["now"] = False
-            if writing["stop"]:
+            # 키·모델 이름이 틀리면(401·403·404) 남은 실행도 모두 같은 오류로 끝나 표에서 빠지니 바로 멈춘다
+            config_error = row.get("subtype") == "api_error" and str(row.get("api_status")) in ("401", "403", "404")
+            if config_error and not _STOP.is_set():
+                say(f"API 키나 모델 이름이 틀려 멈춘다({row['api_status']}): {row.get('error')}", file=sys.stderr)
+            if writing["stop"] or (config_error and not _STOP.is_set()):
                 writing["stop"] = False
-                signal.signal(signal.SIGINT, signal.SIG_IGN)
+                ignore_stop_signals()
                 raise KeyboardInterrupt
             return row
 
-        signal.signal(signal.SIGINT, on_sigint)
+        for s in STOP_SIGNALS:  # Ctrl-C·kill·터미널 닫기. claude는 새 세션이라 이 신호를 받지 못해 직접 끝낸다
+            signal.signal(s, on_stop)
         try:  # 띄우기부터 정리까지 어디서 Ctrl-C가 와도 아래에서 멈춘다
             for j in jobs:
                 futures[pool.submit(run_one, j, key)] = j
@@ -596,7 +623,7 @@ def main() -> None:
                 record(fut)
             pool.shutdown()
         except KeyboardInterrupt:  # 남은 실행은 띄우지 않고, 돌던 claude도 직접 끝낸다(SIGINT가 파이썬에만 왔을 수 있다)
-            signal.signal(signal.SIGINT, signal.SIG_IGN)  # 정리(길어야 10초) 중에 또 누른 Ctrl-C는 받지 않는다
+            ignore_stop_signals()  # 정리(길어야 10초) 중에 또 온 신호는 받지 않는다
             with _RUNNING_LOCK:
                 _STOP.set()
                 procs = list(_RUNNING)
@@ -615,8 +642,8 @@ def main() -> None:
             for fut in futures:
                 if fut.done() and not fut.cancelled() and fut not in written and not isinstance(fut.exception(), Stopped):
                     record(fut)
-            print(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)",
-                  file=sys.stderr, flush=True)
+            say(f"멈췄다: 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(돌던 실행은 끝냈고 CSV에 들지 않는다)",
+                file=sys.stderr)
             # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
             # 줄마다 flush했다
             os._exit(1)

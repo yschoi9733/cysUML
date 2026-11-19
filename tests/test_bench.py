@@ -21,8 +21,8 @@ def test_problem_is_read_and_matches_itself(pid):
 
 
 @pytest.mark.parametrize("pid", list(bench.PROBLEMS))
-def test_readme_example_with_layout_matches_its_problem(pid):
-    # README 예시 그림의 입력(자리가 든 원본)은 자리를 지운 문제와 같은 그림이어야 한다
+def test_layout_fields_are_not_compared(pid):
+    # 자리가 든 README 예시 입력과, 거기서 자리를 지운 문제는 같은 그림으로 본다(자리 칸은 견주지 않는다)
     drawn = json.loads((bench.EXAMPLES / f"{bench.PROBLEMS[pid]}.cysuml.json").read_text(encoding="utf-8"))
     tool, spec = bench.load_problem(pid)
     assert bench.faithful(drawn, spec, tool)
