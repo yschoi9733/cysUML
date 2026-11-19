@@ -187,6 +187,36 @@ def test_tool_exception_and_internal_crash_are_not_the_models_failure():
     assert row["subtype"] == "no_result"
 
 
+def test_tool_that_never_answered_before_timeout_is_not_measured():
+    tool, spec = bench.load_problem("order")
+    unanswered = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "late", "name": "mcp__cysuml__draw_class_diagram", "input": spec}]}}
+    row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": None, "wall_s": 9.0},
+                          [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), unanswered]], tool, spec, True)
+    assert row["verdicts"] == "fail missing" and row["subtype"] == "tool_error (timeout)"
+
+
+def test_budget_cut_during_a_tool_call_is_the_models_failure():
+    # 옛 기록에 실제로 있는 꼴: 도구 호출이 끝나기 전에 비용 상한으로 claude가 스스로 끝났다(도구가 멈춘 것이 아니다)
+    tool, spec = bench.load_problem("order")
+    pending = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "late", "name": "mcp__cysuml__draw_class_diagram", "input": spec}]}}
+    budget = {"type": "result", "subtype": "error_max_budget_usd", "is_error": True}
+    row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 1, "wall_s": 9.0},
+                          [json.dumps(e) for e in [INIT, *_draws(spec, [FAIL]), pending, budget]], tool, spec, False)
+    assert row["verdicts"] == "fail missing" and row["subtype"] == "error_max_budget_usd"
+
+
+def test_blind_spots_follow_the_comparison_anchors():
+    # 이름이 겹치는 요소는 대조가 이름으로 가리키지 못하니, 그런 요소에만 닿은 이름 없는 요소는 경고한다
+    spec = {"elements": [{"kind": "initial", "id": "s"}, {"kind": "action", "id": "a1", "name": "Item"},
+                         {"kind": "action", "id": "a2", "name": "Item"}, {"kind": "merge", "id": "m1"},
+                         {"kind": "merge", "id": "m2"}, {"kind": "final", "id": "f"}],
+            "relations": [{"from": "s", "to": "a1"}, {"from": "a1", "to": "m1"}, {"from": "m1", "to": "a2"},
+                          {"from": "a2", "to": "m2"}, {"from": "m2", "to": "f"}]}
+    assert set(bench.blind_spots(spec, "draw_activity_diagram")) >= {"m1", "m2"}
+
+
 def test_non_object_lines_are_skipped():
     tool, spec = bench.load_problem("order")
     lines = ["null", "3", '"x"', *[json.dumps(e) for e in [INIT, *_draws(spec, [PASS]), ENDED]]]
@@ -197,7 +227,8 @@ def test_non_object_lines_are_skipped():
 
 def test_tool_call_rejected_by_the_sdk_is_an_input_error():
     tool, spec = bench.load_problem("order")
-    events = [INIT, *_draws(spec, ["Error executing tool draw_class_diagram: 1 validation error"])]
+    sdk = "Error executing tool draw_class_diagram: 1 validation error for draw_class_diagramArguments\nfile_name"
+    events = [INIT, *_draws(spec, [sdk])]
     events[-1]["message"]["content"][0]["is_error"] = True
     row = bench.build_row({"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 0, "wall_s": 9.0},
                           [json.dumps(e) for e in [*events, ENDED]], tool, spec, False)

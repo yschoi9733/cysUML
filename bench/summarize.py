@@ -89,7 +89,7 @@ def main() -> None:
     for p in problems:
         cells = []
         for key in models:
-            rs = [r for r in groups[key] if r["problem"] == p]
+            rs = sorted((r for r in groups[key] if r["problem"] == p), key=lambda r: int(r.get("run") or 0))
             cells.append(", ".join(cell(r) for r in rs))
         print(f"| {p} | " + " | ".join(cells) + " |")
     print()

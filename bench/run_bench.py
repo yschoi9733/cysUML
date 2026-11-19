@@ -264,15 +264,19 @@ _SHAPES: dict[str, tuple] = {}
 
 
 def blind_spots(spec: dict, tool: str) -> list[str]:
-    """이름 없는 요소 가운데 이름 있는 요소에 닿지 않고 종류도 겹치는 것(이웃으로만 가리는 대조의 한계에 걸릴 수 있다)."""
+    """이름으로 가리킬 수 없는 요소(이름이 없거나 겹침) 가운데 그런 요소에만 닿고 종류도 겹치는 것(이웃으로만 가리는 대조의
+    한계에 걸릴 수 있다)."""
     d = _diagram(spec, tool)
-    named = {e.key for e in d.boxes if e.name}
+    counts = Counter(_name_forms(e.name)[0] for e in d.boxes if e.name)
+    named = {e.key for e in d.boxes if e.name and counts[_name_forms(e.name)[0]] == 1}  # _shape가 이름으로 가리키는 요소
     near = {e.key: set() for e in d.boxes}
-    for r in d.relations:
-        near[r.source].add(r.target)
-        near[r.target].add(r.source)
-    kinds = Counter(e.kind for e in d.boxes if not e.name)
-    return [e.key for e in d.boxes if not e.name and not near[e.key] & named and kinds[e.kind] > 1]
+    links = [(r.source, r.target) for r in d.relations] + [(e.key, e.parent) for e in d.boxes if e.parent]
+    for a, b in links:
+        near[a].add(b)
+        near[b].add(a)
+    loose = [e for e in d.boxes if e.key not in named]
+    kinds = Counter(e.kind for e in loose)
+    return [e.key for e in loose if not near[e.key] & named and kinds[e.kind] > 1]
 
 
 def problem_shape(spec: dict, tool: str) -> tuple[dict[str, str], tuple[list, list]]:
@@ -350,6 +354,7 @@ def run_tool(run_dir: Path, fallback: str | None = None) -> str | None:
 
 # 모델을 잰 것이 아닌 실행의 subtype 머리(summarize.py가 표에서 뺀다): MCP 서버가 안 붙음, claude가 시작하지 못함,
 # 모델이 한 번도 답하지 않은 채 시간이 다 감, 서버 쪽 API 오류, 끝의 결과 없이 끝남(크래시 등), 하네스 오류, 멈출 때 끊김
+SDK_VALIDATION = re.compile(r"validation errors? for \w+Arguments")  # MCP SDK가 인자를 거절한 글(pydantic)
 NOT_MEASURED = ("mcp_failed", "no_init", "no_answer", "api_error", "no_result", "tool_error", "harness_error", "stopped")
 NATURAL_ENDS = ("success", "error_max_budget_usd", "error_max_turns")  # claude가 스스로 끝낸 결과 이벤트의 subtype
 BILLING = re.compile(r"credit balance", re.I)  # 크레딧이 떨어지면 400 "Your credit balance is too low"로 온다
@@ -407,7 +412,9 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
     no_answer = not row["draws"] and timed_out  # 한 번도 그리기 전에 시간이 다 갔다(API가 멈춘 것과 가를 수 없다)
     # 그리는 도중 MCP 서버가 끊기거나 도구가 예외를 내 그 차례로 끝났다(그 뒤에도 그렸으면 잠깐 그런 것이라 잰 실행이다)
     last = (row["verdicts"].split() or [""])[-1]
-    broke = not row["passed"] and row["draws"] < MAX_DRAWS and last in ("mcp_error", "tool_error")
+    # 답 없는 차례(missing)는 claude가 스스로 끝내지 않았을 때만 도구가 멈춘 것이다(비용 상한에 걸려 끝나도 생긴다)
+    hung = last == "missing" and row["ended"] not in NATURAL_ENDS
+    broke = not row["passed"] and row["draws"] < MAX_DRAWS and (last in ("mcp_error", "tool_error") or hung)
     if no_tool or no_answer or broke:  # 모델의 불합격이 아니다
         why = ((f"mcp_failed: {row['mcp']}" if row["mcp"] else "no_init") if no_tool
                else "no_answer" if no_answer else "mcp_failed: during run" if last == "mcp_error" else "tool_error")
@@ -461,7 +468,7 @@ def parse_stream(lines, tool: str | None = None, spec: dict | None = None) -> di
         if v == "other" and results[i].get("is_error"):
             # MCP 서버가 죽거나 요청 시간이 넘었다(mcp_error), SDK가 인자를 거절했다(input_error, 모델 탓), 도구가 예외를
             # 냈다(tool_error, cysUML 탓)
-            v = ("mcp_error" if text.startswith("MCP error") else "input_error" if "validation error" in text
+            v = ("mcp_error" if text.startswith("MCP error") else "input_error" if SDK_VALIDATION.search(text)
                  else "tool_error")
         # 저장에 실패하면 서버는 오류 결과에 검사 요약을 붙인다. 판정은 요약으로 하되, 모델은 결과가 합격으로 시작하지 않아
         # 계속 그릴 수 있어 summarize.py가 알리게 센다
@@ -514,6 +521,15 @@ KEEP_ENV = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM", "LANG"
 STOP_SIGNALS = tuple(getattr(signal, n) for n in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, n))  # Windows엔 SIGHUP이 없다
 
 
+def kill_groups(procs) -> None:
+    """SIGKILL을 아직 거두지 않은 claude의 그룹과, 멈출 때 기억한 구성원 가운데 아직 그 그룹에 남은 것에만 보낸다."""
+    for p in procs:
+        stop_group(p, signal.SIGKILL)
+    for pgid, pids in list(_MEMBERS.items()):
+        for pid in pids:
+            kill_if_member(pid, pgid)
+
+
 def force_exit(signum, frame) -> None:
     """정리 중에 신호가 한 번 더 오면 돌던 claude와 기억한 그룹 구성원을 바로 끝내고 나간다(정리가 막혔을 때의 탈출구)."""
     # 막 띄우는 중인 claude도 목록에 든 뒤에 보도록 잠금을 잡고, 그 뒤로는 새로 띄우지 않게 한다
@@ -522,11 +538,7 @@ def force_exit(signum, frame) -> None:
     procs = list(_RUNNING)
     if locked:
         _RUNNING_LOCK.release()
-    for p in procs:
-        stop_group(p, signal.SIGKILL)
-    for pgid, pids in list(_MEMBERS.items()):
-        for pid in pids:
-            kill_if_member(pid, pgid)
+    kill_groups(procs)
     try:  # print는 신호가 끊은 출력과 겹치면 RuntimeError를 낸다
         os.write(2, "정리를 기다리지 않고 바로 끝냈다(돌던 claude는 끝냈다)\n".encode("utf-8"))
     except OSError:
@@ -728,7 +740,7 @@ def main() -> None:
                 return
             try:
                 row = fut.result()
-            except Stopped:  # 멈출 때 띄우지 않았거나 끊긴 실행은 쓰지 않는다
+            except Stopped:
                 recorded.add(fut)
                 return
             except Exception as e:
@@ -800,12 +812,7 @@ def main() -> None:
                 deadline = time.time() + 10  # SIGTERM을 무시하는 그룹은 10초 뒤 SIGKILL로 끝낸다
                 while time.time() < deadline and any(p.poll() is None for p in procs):
                     time.sleep(0.2)
-                for p in procs:  # SIGKILL은 아직 거두지 않은 claude의 그룹과, 아직 그 그룹에 남은 구성원에만
-                    if p.poll() is None:
-                        stop_group(p, signal.SIGKILL)
-                for pgid, pids in list(_MEMBERS.items()):
-                    for pid in pids:
-                        kill_if_member(pid, pgid)
+                kill_groups(procs)
                 cf.wait([fut for fut in futures if not fut.done()], timeout=10)
                 drain()  # 정리하는 동안 스스로 끝난 실행도 든다
                 say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에 "
