@@ -257,7 +257,7 @@ def test_classification_does_not_depend_on_branch_order():
     assert row["subtype"] == "api_error"
 
 
-def test_result_is_settled_only_by_judged_draws():
+def test_result_is_settled_when_the_ten_draws_are_answered():
     # 10번째 그리기가 답을 기다리는 중이거나 고장 났으면 결과가 정해진 것이 아니다
     tool, spec = bench.load_problem("order")
     meta = {"model": "m", "effort": "high", "problem": "order", "run": 1, "exit": 143, "wall_s": 9.0, "signaled": True}
@@ -269,7 +269,8 @@ def test_result_is_settled_only_by_judged_draws():
     broken[-1]["message"]["content"][0]["is_error"] = True
     row = bench.build_row(meta | {"signaled": False, "exit": 0}, [json.dumps(e) for e in [*broken, ENDED]], tool, spec,
                           False)
-    assert row["subtype"] == "mcp_failed: during run"
+    # 10번째 호출이 고장으로 끝났어도 지시한 10번을 다 써 결과가 정해졌다(그 뒤 합격해도 지시를 넘긴 것이다)
+    assert row["subtype"] == "success" and not row["passed"] and bench.is_measured(row["subtype"])
 
 
 def test_broken_draws_still_count_toward_the_ten_draws():

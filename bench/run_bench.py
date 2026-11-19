@@ -254,12 +254,6 @@ def _refine(d: B.Diagram, known: dict[str, str]):
     return labels, anchored, own, parent, rels
 
 
-def _shape(d: B.Diagram, known: dict[str, str]) -> tuple[list, list]:
-    """cysUML이 읽은 그림을 견줄 꼴(요소 목록, 관계 목록)로 만든다. 자리(left·top·크기·name_side·via)와 열쇠(id)는 보지 않고,
-    요소는 _refine의 꼬리표로 가리킨다 — id를 어떻게 바꿔 써도 같은 그림이면 같은 꼴, 흐름을 바꿔 이으면 다른 꼴이 된다."""
-    return _digests(_refine(d, known))
-
-
 def _digests(refined: tuple) -> tuple[list, list]:
     labels, _, own, parent, rels = refined
     elements = sorted(_digest([labels[i], own[i], labels[parent[i]] if parent[i] is not None else None])
@@ -273,7 +267,8 @@ def faithful(drawn: dict, spec: dict, tool: str) -> bool:
     입력은 문제와 같다고 볼 수 없다."""
     known, want = problem_shape(spec, tool)
     try:
-        return _shape(_diagram(drawn, tool), known) == want
+        drawn_d = _diagram(drawn, tool)
+        return _digests(_refine(drawn_d, known)) == want
     except InputError:
         return False
 
@@ -422,7 +417,7 @@ def is_measured(subtype) -> bool:
 
 
 class Stopped(Exception):
-    """Ctrl-C로 멈출 때 띄우지 않았거나 끝낸 실행. CSV에 쓰지 않는다."""
+    """Ctrl-C로 멈출 때 띄우지 않았거나 끝낸 실행. CSV에 쓰지 않는다(기록이 잘려 해석하지 못한 것은 harness_error로 남는다)."""
 
 
 def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict:
@@ -437,8 +432,10 @@ def build_row(meta: dict, lines, tool: str, spec: dict, timed_out: bool) -> dict
     seq = row["verdicts"].split()
     last = (seq or [""])[-1]
     server = server_side(row)
-    judged = sum(v not in UNJUDGED for v in seq)  # 검사 판정을 받은 차례
-    if row["passed"] or judged >= MAX_DRAWS:  # 결과가 정해졌다(합격이나 10번 다 판정받음): 잰 실행이다
+    # 결과가 정해졌다: 합격했거나, 지시한 10번을 다 그려 10번째까지 답을 받았다(고장 난 호출도 그린 횟수에 든다 — 첫 합격
+    # 차례와 같은 셈). 10번째가 답을 기다리던 중이면 아직 정해지지 않았다
+    used_up = len(seq) >= MAX_DRAWS and seq[MAX_DRAWS - 1] != "missing"
+    if row["passed"] or used_up:
         why = "timeout" if timed_out else None
     # 그 밖은 결과가 정해지기 전에 끝났다. 누가 끝냈는지를 차례로 본다
     elif meta.get("signaled") and not timed_out and not server and (
@@ -746,8 +743,9 @@ def main() -> None:
         if stop["why"] is not None and stop["first"] is None:  # 키·크레딧 오류 등으로 이미 멈추는 중이면 첫 신호가 "한 번 더"다
             force_exit(signum, frame)
         # uv run은 받은 신호를 python에도 그대로 넘기고 셸은 앞그룹 전체에 보내, 한 번의 Ctrl-C·터미널 닫기가 같은 신호로 두 번
-        # 온다. 그래서 2초 안에 다시 온 같은 신호는 하나로 보고, 그 밖의 신호가 또 오면 정리가 막혔어도 바로 끝낸다
-        if stop["first"] is not None and (now - stop["first"] > 2 or signum != stop["signum"]):
+        # 온다(거의 동시에). 그래서 0.3초 안에 다시 온 같은 신호는 하나로 보고, 그 밖의 신호가 또 오면 정리가 막혔어도 바로
+        # 끝낸다(사람이 빠르게 두 번 누른 것도 대개 0.3초를 넘는다)
+        if stop["first"] is not None and (now - stop["first"] > 0.3 or signum != stop["signum"]):
             force_exit(signum, frame)
         if stop["first"] is None:
             stop["first"], stop["signum"] = now, signum
@@ -759,7 +757,8 @@ def main() -> None:
     for s in watched:
         signal.signal(s, on_stop)
     # 결과는 실행이 끝날 때마다 한 줄씩 써서, 중간에 멈춰도 끝난 실행은 남는다
-    with (base / "results.csv").open("w", newline="", encoding="utf-8") as f:
+    f = (base / "results.csv").open("w", newline="", encoding="utf-8")
+    try:
         w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
         w.writeheader()
         f.flush()  # 멈출 때 os._exit로 끝내 버퍼가 버려지니, 끝난 실행이 없어도 머리줄은 남긴다
@@ -853,12 +852,18 @@ def main() -> None:
                     cf.wait(waiting, timeout=75)
                 drain()  # 정리하는 동안 스스로 끝난 실행도 든다
                 say(f"멈췄다({stop['why']}): 끝난 {len(rows)}건은 {base / 'results.csv'}에 있다(멈추며 끊은 실행은 CSV에 "
-                    "들지 않는다)", file=sys.stderr)
+                    "들지 않는다 — 기록이 잘려 읽지 못한 것은 harness_error로 남는다)", file=sys.stderr)
             except BaseException:
                 force_exit(None, None)
             # 일꾼 스레드를 기다리지 않고 끝낸다(끝낸 그룹 밖 자손이 출력을 쥐고 있으면 --timeout까지 매달린다). CSV는
             # 줄마다 flush했다
             os._exit(1)
+    finally:
+        try:
+            f.close()
+        except OSError as e:  # 디스크가 가득 차 마지막 줄을 비우지 못했다
+            stop["failed"] = True
+            say(f"results.csv를 닫지 못했다: {e}", file=sys.stderr)
     restore_stop_signals(previous)
     pool.shutdown()
     total = sum(r.get("cost_usd") or 0 for r in rows)
