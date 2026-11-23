@@ -374,6 +374,7 @@ def test_name_beside_blocked_on_both_sides_moves_to_the_nearest_roomy_spot_along
     # 떨어진 가장 가까운 빈 자리에 둔다. 한 칸 덜 옮긴 자리 둘은 상자를 LABEL_CLEAR 넘게 비켰지만 여유가 모자라 지나친다(#82)
     beside_only(monkeypatch)
     d = C.render(walled(120, 260, kind="dependency", name="has"))
+    (name,) = owned(d, "A->B", Text)
     (label,) = d.layout.relations[0].labels
     assert K.check(d).passed
     away = abs(label.x - 195)
@@ -385,8 +386,9 @@ def test_name_beside_blocked_on_both_sides_moves_to_the_nearest_roomy_spot_along
 
 
 def test_name_moved_off_a_box_in_its_way_keeps_name_gap_from_it():
-    # README 첫 배치(한글판): 고객→결제 선 가운데가 주문항목 밑에 가려져 "낸다"를 선을 따라 옮긴다. 주문항목 위 변을 막 비킨
-    # 자리(3.7px)가 아니라 NAME_GAP 넘게 떨어진 자리에 둔다(#82)
+    # #82 재현 입력(README 그림 PR #80 초안의 첫 배치 — 지금 README 그림과는 다르다): 고객→결제 선 가운데가 주문항목 밑에 가려져
+    # "낸다"를 선을 따라 옮긴다. 주문항목 위 변을 막 비킨 자리(3.7px)가 아니라 NAME_GAP 넘게 떨어진 자리에 둔다. 불합격은 선이
+    # 주문항목을 지나는 것 하나뿐이다(첫 배치라 일부러 남긴 것)
     data = {"classes": [{"name": "고객", "left": 0, "top": 0, "attributes": ["-이름: String", "-이메일: String"]},
                         {"name": "주문", "left": 240, "top": 0, "attributes": ["-번호: long", "-주문일: Date"],
                          "operations": ["+합계(): Money"]},
@@ -404,8 +406,24 @@ def test_name_moved_off_a_box_in_its_way_keeps_name_gap_from_it():
     d = C.render(data)
     (pay,) = [r for r in d.layout.relations if r.owner == "고객->결제"]
     name = pay.labels[0]
+    k = B._segments_by_length(pay.points)[0]
     assert name.lines == ("낸다",) and name.segment is not None
+    assert math.dist((name.x, name.y), B._along(pay.points[k], pay.points[k + 1])) > 0  # 선 위 가운데 자리에서 옮겼다
     assert nearest_box(d, (name.x, name.y), name.lines) >= B.NAME_GAP
+    assert [(f.kind, f.elements) for f in K.check(d).failures] == [("line_through_box", ("고객->결제", "주문항목"))]
+
+
+def test_name_leaves_its_longest_segment_when_that_has_only_snug_free_spots():
+    # 가장 긴 구간(가로, y 24)은 Up1(x 95~182)·Up2(x 213~335) 사이 틈(x 197.5)만 빈 자리인데 두 상자와 5px이라 여유가 모자라다. 선을
+    # 따라 어디에도 여유 있는 빈 자리가 없을 때만 그런 자리를 쓰므로(#82), 다음 구간(세로)의 가운데 자리로 간다
+    data = {"classes": [{"name": "A", "left": 0, "top": 0}, {"name": "B", "left": 300, "top": 200},
+                        {"name": "Up1", "left": 95, "top": -40, "width": 87, "height": 59},
+                        {"name": "Up2", "left": 213, "top": -40, "width": 122, "height": 59}],
+            "relations": [{"kind": "dependency", "from": "A", "to": "B", "name": "has", "via": [[345, 24]]}]}
+    d = C.render(data)
+    (label,) = d.layout.relations[0].labels
+    assert K.check(d).passed and (label.x, label.y, label.segment) == (345, 112, 1)
+    assert C.LABEL_CLEAR < nearest_box(d, (197.5, 24), ("has",), ("Up1", "Up2")) < B.NAME_GAP
 
 
 def test_loop_name_moved_beside_its_line_keeps_name_gap_from_boxes():
