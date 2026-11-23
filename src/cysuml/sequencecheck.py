@@ -620,9 +620,10 @@ class _Scene:
                                              f"{_message(m)}의 고리 세로 선(x {fmt_num(r[0])})이 {_frame(f)}의 {side}"
                                              f"(x {fmt_num(x)})에 {PAD}px 안으로 붙는다.")
                 for x, side in sides:
-                    if (any(_crosses_v(x, f.top, f.bottom, _row_box(row)) for row in m.rows)
-                            or _crosses_v(x, f.top, f.bottom, m.arrow)):
-                        yield self.found("line_on_frame", (m.owner, f.owner), (x, m.y, x, m.y),
+                    ys = [row[0] for row in m.rows if _crosses_v(x, f.top, f.bottom, _row_box(row))]
+                    ys += [m.tip_y] if _crosses_v(x, f.top, f.bottom, m.arrow) else []
+                    if ys:  # 자리는 건넌 선분(화살촉이면 돌아오는 높이)에 둔다
+                        yield self.found("line_on_frame", (m.owner, f.owner), (x, ys[0], x, ys[0]),
                                          f"{_message(m)}의 선이나 화살촉이 {_frame(f)}의 {side}(x {fmt_num(x)})을 건넌다.")
 
     def frames_on_participants(self) -> Iterator[Finding]:

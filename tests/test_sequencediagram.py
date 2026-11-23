@@ -196,8 +196,8 @@ def test_spacing_constants_keep_bar_ends_in_event_order():
     assert S.FRAME_GAP + S.FRAME_HEAD >= S.ACT_H
     assert S.FRAME_AFTER >= S.EDGE_CLEAR and S.REF_AFTER >= S.EDGE_CLEAR
     assert S.LOOP_AFTER >= S.CLEAR and S.EDGE_CLEAR > 0
-    # 나가는 선은 자기 호출 막대 윗변을 건너고, 화살촉은 고리 안에 든다
-    assert S.LOOP_H >= S.CLEAR and S.LOOP_W > S.ACT_W / 2 + S.ARROW
+    # 나가는 선은 자기 호출 막대 윗변을 건너고, 화살촉은 고리 안에 든다(돌아오는 선은 NEST만큼 오른쪽 막대 변에서 끝난다)
+    assert S.LOOP_H >= S.CLEAR and S.LOOP_W - S.NEST > S.ARROW
 
 
 def test_alt_with_more_branches_than_messages_is_one_problem():

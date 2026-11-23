@@ -487,6 +487,14 @@ def test_self_call_loop_is_checked_on_all_its_lines(looped, kind, change):
     assert kind in kinds(found), [f.problem for f in found]
 
 
+def test_frame_side_crossed_only_by_the_return_line_is_placed_at_the_return_height(looped):
+    m = looped.messages[4]
+    lay = swap(looped, "frames", looped.frames[0], replace(looped.frames[0], top=mid(m), right=m.turn - 5))
+    (f,) = [f for f in SC.find(lay) if f.kind == "line_on_frame" and "오른쪽 변" in f.problem and "건넌다" in f.problem
+            and "세로 선" not in f.problem]
+    assert f.where[1] == m.back
+
+
 def test_self_call_arrowhead_points_left_at_the_return_height(looped):
     m = looped.messages[2]
     assert m.arrow == (m.end, m.back - S.ARROW_HALF, m.end + S.ARROW, m.back + S.ARROW_HALF)
