@@ -989,6 +989,24 @@ class _Best(NamedTuple):
         """빈 자리다(피할 것·선·앞서 놓은 글자에 다 안 닿는다)."""
         return self.score[0] and self.score[1]
 
+    @property
+    def roomy(self) -> bool:
+        """여유 있는 빈 자리다 — 흰 바탕이 피할 것과 NAME_GAP - LABEL_CLEAR 이상 떨어져, 변을 마주 보는 피할 것과 글자 상자 사이가
+        NAME_GAP 이상이다."""
+        return self.free and self.score[2] >= NAME_GAP - LABEL_CLEAR
+
+
+def _first_roomy(tries: Iterable[tuple[_Best, Optional[int]]]) -> Optional[tuple[_Best, Optional[int]]]:
+    """선을 따라 본 묶음들(가운데에서 가까운 차례)마다의 (가장 나은 자리, 얹은 구간 번호) 가운데 여유 있는 빈 자리(_Best.roomy)가
+    처음 나온 것, 그런 자리가 없으면 빈 자리가 처음 나온 것. 요소에 막혀 옮긴 글자가 그 요소를 막 비킨 자리에 붙지 않게 한다."""
+    first = None
+    for best, extra in tries:
+        if best.roomy:
+            return best, extra
+        if first is None and best.free:
+            first = best, extra
+    return first
+
 
 def _places(boxes: Iterable[T.Box]) -> int:
     """자리 수 — PLACE_EPS 안으로 같은 상자는 한 자리로 친다(검사가 같은 자리를 지나는 선들을 한 항목으로 묶는 것과 같다)."""
@@ -1088,26 +1106,29 @@ class _Spots:
     def pick_name(self, lines: tuple[str, ...], points: tuple[Point, ...], avoid: Obstacles,
                   slide: bool = True, wide: bool = True) -> tuple[Point, bool, bool]:
         """이름 글자 자리와, 선을 따라 옮겼는지와, 좁은 조건이라면 옮기지 않았을 이름인지. 가운데 후보 둘이 다 빈 자리가 아니면(wide가
-        아니면 둘 다 피할 것에 걸리면 — 좁은 조건) slide일 때 선을 따라 더 본 자리(slide_spots)를 구간마다 묶음 차례로 보아 처음 빈
-        자리가 나온 묶음의 가장 나은 자리로 옮기고, 빈 자리가 없으면 가운데 후보에 둔다. 피할 것만 비키고 선에 닿는 자리로는 옮기지
-        않는다 — 선 여러 개에 닿아 불합격이 늘 수 있다."""
+        아니면 둘 다 피할 것에 걸리면 — 좁은 조건) slide일 때 선을 따라 더 본 자리(slide_spots)를 구간마다 묶음 차례로 보아 여유 있는
+        빈 자리가 처음 나온 묶음(없으면 빈 자리가 처음 나온 묶음 — _first_roomy)의 가장 나은 자리로 옮기고, 빈 자리가 없으면 가운데
+        후보에 둔다. 피할 것만 비키고 선에 닿는 자리로는 옮기지 않는다 — 선 여러 개에 닿아 불합격이 늘 수 있다."""
         best = self._best(lines, name_spots(points, lines), avoid)
         if slide and not (best.free if wide else best.off):
-            for band, rings in slide_spots(points, lines):
-                pool = self._pool(band, avoid)  # 구간마다 한 번만 거른다
-                for ring in rings:
-                    found = self._best(lines, ring, avoid, pool)
-                    if found.free:
-                        return self._keep(found), True, best.off
+            def tries() -> Iterator[tuple[_Best, Optional[int]]]:
+                for band, rings in slide_spots(points, lines):
+                    pool = self._pool(band, avoid)  # 구간마다 한 번만 거른다
+                    for ring in rings:
+                        yield self._best(lines, ring, avoid, pool), None
+
+            if (got := _first_roomy(tries())) is not None:
+                return self._keep(got[0]), True, best.off
         return self._keep(best), False, False
 
     def pick_on_line(self, lines: tuple[str, ...], points: tuple[Point, ...], avoid: Obstacles, owner: object,
                      slide: bool = True, show: tuple[float, float] = (0.0, 0.0)) -> Optional[tuple[Point, int, bool]]:
         """이름 글자를 그 관계(owner)의 선 위에 얹을 자리와, 얹은 구간 번호와, 선을 따라 옮겼는지. 선 위 가운데 자리(가장 긴 구간의
-        가운데)가 빈 자리가 아니면 slide일 때 선을 따라 더 본 자리(on_spots)를 구간마다 묶음 차례로 보아 처음 빈 자리가 나온 묶음의
-        가장 나은 자리로 옮기고, 빈 자리가 끝내 없으면 놓지 않고 None을 돌려준다(그 이름은 선 옆에 놓는다). slide가 아니면 빈
-        자리가 아니어도 선 위 가운데 자리에 둔다 — 다만 글자 상자를 LABEL_CLEAR만큼 넓힌 것을 구간 방향으로 비춘 폭이 가장 긴 구간
-        안에 들지 않으면(_room) None이다. 구간을 넘친 글자의 흰 바탕(BG_MARGIN)이 구간 끝의 꺾인 곳을 지울 수 있어서다.
+        가운데)가 빈 자리가 아니면 slide일 때 선을 따라 더 본 자리(on_spots)를 구간마다 묶음 차례로 보아 여유 있는 빈 자리가 처음 나온
+        묶음(없으면 빈 자리가 처음 나온 묶음 — _first_roomy)의 가장 나은 자리로 옮기고, 빈 자리가 끝내 없으면 놓지 않고 None을
+        돌려준다(그 이름은 선 옆에 놓는다). slide가 아니면 빈 자리가 아니어도 선 위 가운데 자리에 둔다 — 다만 글자 상자를
+        LABEL_CLEAR만큼 넓힌 것을 구간 방향으로 비춘 폭이 가장 긴 구간 안에 들지 않으면(_room) None이다. 구간을 넘친 글자의 흰
+        바탕(BG_MARGIN)이 구간 끝의 꺾인 곳을 지울 수 있어서다.
 
         slide일 때는 들지 않아도 가운데를 그대로 본다. 빈 자리일 때만 쓰니 흰 바탕이 꺾인 곳에 닿지 않고(빈 자리면 구간 끝의
         요소·이웃 구간·선 끝 모양에서 LABEL_CLEAR 넘게 떨어져 있다), 비스듬한 구간에서는 비춘 폭이 글자가 선 위에서 실제로 차지하는
@@ -1133,13 +1154,19 @@ class _Spots:
                 return self._keep(best), k, False
         elif not slide:
             return None
-        for j, band, rings in on_spots(points, lines):
-            pool = self._pool(band, avoid)  # 구간마다 한 번만 거른다
-            for ring in rings:
-                ring = [spot for spot in ring if shown(j, spot)]
-                if ring and (found := self._best(lines, ring, avoid, pool, on=(owner, j))).free:
-                    return self._keep(found), j, True
-        return None
+
+        def tries() -> Iterator[tuple[_Best, Optional[int]]]:
+            for j, band, rings in on_spots(points, lines):
+                pool = self._pool(band, avoid)  # 구간마다 한 번만 거른다
+                for ring in rings:
+                    if ring := [spot for spot in ring if shown(j, spot)]:
+                        yield self._best(lines, ring, avoid, pool, on=(owner, j)), j
+
+        if (got := _first_roomy(tries())) is None:
+            return None
+        found, j = got
+        assert j is not None
+        return self._keep(found), j, True
 
 
 def _shows(heads: tuple[Union[Line, Polygon], ...], marks: tuple[HeadMark, ...], points: tuple[Point, ...]
