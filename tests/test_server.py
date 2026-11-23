@@ -1304,14 +1304,14 @@ def test_sequence_input_errors_come_back_with_their_place_and_nothing_is_written
     monkeypatch.chdir(tmp_path)
     r = draw_seq(file_name="docs/checkout", participants=PEOPLE,
                  messages=[{"from": "Shop", "to": "Bank", "name": "pay()"},
-                           {"from": "Shop", "to": "Shop", "name": "log()"}],
+                           {"from": "Shop", "to": "Shop", "kind": "reply"}],
                  frames=[{"kind": "opt", "first": 0, "last": 5}], notes=[""])
     assert r.is_error
     lines = text(r).splitlines()
     assert lines[0] == "입력 오류 — 5건"
     assert lines[1].startswith("- file_name에 파일 이름으로 쓸 수 없는 글자가 있다: '/'")
     assert lines[2] == "- messages[0].to: 이름이 'Bank'인 참여자가 없다(있는 참여자: 'Customer', 'Shop', 'Payment')"
-    assert lines[3].startswith("- messages[1]: 자기 자신('Shop')에게 보내는 메시지는 그리지 않는다")
+    assert lines[3].startswith("- messages[1]: 자기 자신('Shop')에게 보내는 반환은 받지 않는다")
     assert lines[4] == "- frames[0].last: 0~1 사이여야 한다(받은 값 5)"
     assert lines[5] == "- notes[0]: 비어 있다"
     assert list(tmp_path.iterdir()) == []

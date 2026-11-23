@@ -52,6 +52,34 @@ def test_base_drawing_passes_and_has_what_the_cases_change(base):
     assert base.participants[3].lives[0].top > 0  # C는 만드는 메시지 높이로 내려온다
 
 
+# 자기 호출이 든 기본 그림: 열린 막대 없이 하는 자기 호출(0), 겹친 막대 없이 일하는 중의 자기 호출(2), 맨 오른쪽 참여자의 opt 안
+# 자기 호출(4), loop 안 자기 호출(6), 그 loop 바로 뒤 ref
+LOOPED = {"participants": life("U", "A", "B", actor=("U",)),
+          "messages": [call("A", "A", "init()"), call("U", "A", "order()"), call("A", "A", "check()"), call("A", "B", "find(id)"),
+                       call("B", "B", "hold()"), reply("B", "A", "n"), call("A", "A", "sum()"), reply("A", "U", "no")],
+          "frames": [{"kind": "opt", "first": 4, "last": 4, "condition": "stock"},
+                     {"kind": "loop", "first": 6, "last": 6, "condition": "each"}, {"kind": "ref", "name": "Pay", "before": 7}]}
+LOOPS = (0, 2, 4, 6)
+LOOPED_KINDS = {"loop_on_lifeline"}  # CASES 가운데 LOOPED에서 거는 종류
+
+
+@pytest.fixture(scope="module")
+def looped():
+    return S.render(LOOPED).layout
+
+
+def test_looped_drawing_passes_and_has_what_the_cases_change(looped):
+    assert SC.find(looped) == ()
+    assert [k for k, m in enumerate(looped.messages) if m.turn is not None] == list(LOOPS)
+    assert len(looped.frames) == 2 and len(looped.refs) == 1
+
+
+def loop_bar(lay, k):
+    """messages[k](자기 호출)가 돌아오는 높이에서 연 막대."""
+    m = lay.messages[k]
+    return next(b for b in lay.bars if b.top == m.back and abs(b.rect[2] - m.end) < 1e-6)
+
+
 def part(lay, name):
     return next(p for p in lay.participants if p.participant.name == name)
 
@@ -75,6 +103,10 @@ def relabel(lay, k, **kw):
     return swap(lay, "messages", m, replace(m, labels=(replace(m.labels[0], **kw),)))
 
 
+def remessage(lay, k, **kw):
+    return swap(lay, "messages", lay.messages[k], replace(lay.messages[k], **kw))
+
+
 def moved(item, top):
     return replace(item, top=top, bottom=top + item.bottom - item.top)
 
@@ -90,6 +122,7 @@ CASES = {
     "line_overlap": lambda lay: swap(lay, "messages", lay.messages[2], replace(lay.messages[2], y=lay.messages[1].y + 1)),
     "line_through_participant": lambda lay: swap(lay, "participants", part(lay, "B"),
                                           relife(part(lay, "B"), top=lay.messages[3].y - S.HEAD_H / 2)),
+    "loop_on_lifeline": lambda lay: remessage(lay, 2, turn=part(lay, "B").x + 1),  # LOOPED: 고리가 B의 생명선을 건넌다
     "frame_cuts_bar": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], top=bar(lay, "B").top - 2)),
     "bar_outside_frame": lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], right=part(lay, "A").x)),
     "frame_overlap": lambda lay: swap(lay, "refs", lay.refs[0], moved(lay.refs[0], lay.frames[0].bottom - 5)),
@@ -113,8 +146,8 @@ def test_every_kind_has_a_case_and_a_hint():
 
 
 @pytest.mark.parametrize("kind", SC.KINDS)
-def test_each_kind_is_caught(base, kind):
-    found = SC.find(CASES[kind](base))
+def test_each_kind_is_caught(base, looped, kind):
+    found = SC.find(CASES[kind](looped if kind in LOOPED_KINDS else base))
     assert kind in kinds(found), [f.problem for f in found]
     assert kinds(found) == sorted(kinds(found), key=SC.KINDS.index)
 
@@ -418,6 +451,48 @@ def test_elements_are_input_places(base):
     assert ("messages[1]", "participants[1]") in [f.elements for f in found if f.kind == "text_on_bar"]
 
 
+def mid(m):
+    return (m.y + m.back) / 2
+
+
+@pytest.mark.parametrize("kind, change", [
+    # 돌아오는 끝이 자기 호출 막대 변에서 떨어진다
+    ("message_off_bar", lambda lay: remessage(lay, 2, end=lay.messages[2].end + 3)),
+    # 자기 호출 막대 윗변이 돌아오는 높이가 아니라 나가는 높이다
+    ("bar_off_message", lambda lay: swap(lay, "bars", loop_bar(lay, 2), replace(loop_bar(lay, 2), top=lay.messages[2].y))),
+    # 나가는 선이 자기 호출 막대 윗변에 붙는다
+    ("line_at_bar_end", lambda lay: swap(lay, "bars", loop_bar(lay, 2), replace(loop_bar(lay, 2), top=lay.messages[2].y + 2))),
+    # 다른 메시지 선이 고리 세로 선을 건넌다
+    ("line_overlap", lambda lay: remessage(lay, 3, y=mid(lay.messages[2]))),
+    # 고리 세로 선이 다른 메시지 글자를 지난다
+    ("line_through_text", lambda lay: relabel(lay, 3, x=lay.messages[2].turn, y=mid(lay.messages[2]))),
+    # 고리 세로 선이 (그 높이로 내려온) 머리를 지난다
+    ("line_through_participant", lambda lay: swap(lay, "participants", part(lay, "B"), replace(
+        relife(part(lay, "B"), top=mid(lay.messages[2]) - S.HEAD_H / 2), x=lay.messages[2].turn + 20))),
+    # 고리가 남의 막대에 닿는다
+    ("loop_on_lifeline", lambda lay: replace(lay, bars=lay.bars + (replace(bar(lay, "B"), x=lay.messages[2].turn,
+                                                                           top=lay.messages[2].y, bottom=lay.messages[2].back),))),
+    # 고리 세로 선이 프레임 윗변을 건넌다(나가는 선·돌아오는 선과는 떨어져 있다)
+    ("line_on_frame", lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], top=mid(lay.messages[4])))),
+    # 고리 세로 선이 프레임 오른쪽 변에 붙는다
+    ("line_on_frame", lambda lay: swap(lay, "frames", lay.frames[0], replace(lay.frames[0], right=lay.messages[4].turn + 1))),
+    # ref 상자가 고리의 아래쪽(돌아오는 높이)에만 걸친다
+    ("message_in_ref", lambda lay: swap(lay, "refs", lay.refs[0], moved(lay.refs[0], lay.messages[6].back - 1))),
+    # 노트가 고리 세로 선만 덮는다
+    ("note_covers", lambda lay: replace(lay, notes=(S.PlacedNote("n", "notes[0]", lay.messages[2].turn - 2, mid(lay.messages[2]) - 2,
+                                                                 4, 4),))),
+])
+def test_self_call_loop_is_checked_on_all_its_lines(looped, kind, change):
+    found = SC.find(change(looped))
+    assert kind in kinds(found), [f.problem for f in found]
+
+
+def test_self_call_arrowhead_points_left_at_the_return_height(looped):
+    m = looped.messages[2]
+    assert m.arrow == (m.end, m.back - S.ARROW_HALF, m.end + S.ARROW, m.back + S.ARROW_HALF)
+    assert m.rows == ((m.y, m.start, m.turn), (m.back, m.end, m.turn)) and m.riser == (m.turn, m.y, m.turn, m.back)
+
+
 def test_kind_names_shared_with_the_placed_diagram_check_mean_the_same():
     # 두 검사 결과를 같은 꼴로 돌려주므로, 이름이 같으면 뜻도 같다(선끼리 포개진다·선이 글자를 지난다·글자끼리 겹친다).
     # AI가 배치하는 그림의 검사(boxcheck)는 클래스도와 새 그림 도구가 함께 쓴다
@@ -643,6 +718,35 @@ def recreating_diagram(seed):
             "notes": [word() for _ in range(rnd.randint(0, 1))]}
 
 
+def looping_diagram(seed):
+    """nested_diagram처럼 부르고 돌려주되, 일하는 쪽(없으면 아무 참여자)이 자기 자신을 자주 부르는 입력. 자기 호출은 짧은 막대로
+    끝나 대답을 기다리지 않는다. 액터의 자기 호출은 입력 오류라 뽑지 않는다."""
+    rnd = random.Random(seed)
+    word = lambda: rnd.choice(WORDS)  # noqa: E731
+    n = rnd.randint(1, 5)
+    parts = [{"name": f"{rnd.choice(NAMES)}{i}",
+              "kind": "actor" if i < n - 1 and rnd.random() < (0.5 if i == 0 else 0.1) else "lifeline"} for i in range(n)]
+    names = [p["name"] for p in parts]
+    actors = [p["name"] for p in parts if p["kind"] == "actor"]
+    waiting = []  # (불린 쪽, 부른 쪽)
+    messages = []
+    for _ in range(rnd.randint(1, 16)):
+        src = waiting[-1][0] if waiting else rnd.choice(names)
+        r = rnd.random()
+        if src not in actors and r < 0.35:
+            messages.append(call(src, src, word()))
+        elif waiting and r < 0.6:
+            callee, caller = waiting.pop()
+            messages.append(reply(callee, caller, word() if rnd.random() < 0.7 else None))
+        elif n > 1:
+            dst = rnd.choice([x for x in names if x != src])
+            messages.append(call(src, dst, word()))
+            if dst not in actors or rnd.random() < 0.5:
+                waiting.append((dst, src))
+    return {"participants": parts, "messages": messages, "frames": random_frames(rnd, len(messages), word),
+            "notes": [word() for _ in range(rnd.randint(0, 1))]}
+
+
 def messages_of(seq):
     """(보내는 쪽, 받는 쪽, 종류) 차례를 메시지로 — 호출·만들기와 반환 둘에 하나는 글자를 단다."""
     return [{"from": s, "to": t, "kind": k, **({"name": WORDS[(i * 5) % len(WORDS)]} if k != "reply" or i % 2 else {})}
@@ -652,10 +756,10 @@ def messages_of(seq):
 def recreate_variants():
     """같은 참여자 X를 alt 칸마다 다시 만드는 작은 짜임 전부. 참여자 A·B·C 가운데 X는 가운데나 오른쪽이고 A는 액터일 수도 있다.
     칸 둘이면 칸마다 [만들기]·[만들기, 메시지]·[메시지, 만들기](메시지는 세 참여자 사이 호출·반환 전부)에 alt 뒤 A가 X를 부르는지,
-    칸 셋이면 첫 칸 [만들기]·[만들기, 메시지], 가운데 칸 메시지 하나, 끝 칸 [만들기]다. 틀린 입력(앞 칸 X를 다시 만들기 전에 쓰기
-    등)은 건너뛴다."""
+    칸 셋이면 첫 칸 [만들기]·[만들기, 메시지], 가운데 칸 메시지 하나, 끝 칸 [만들기]다. 메시지에는 생명선의 자기 호출도 든다. 틀린
+    입력(앞 칸 X를 다시 만들기 전에 쓰기 등)은 건너뛴다."""
     names = ("A", "B", "C")
-    options = [(s, t, k) for s in names for t in names if s != t for k in ("call", "reply")]
+    options = [(s, t, k) for s in names for t in names if s != t for k in ("call", "reply")] + [(s, s, "call") for s in names]
     for x in ("B", "C"):
         makes = [(s, x, "create") for s in names if s != x]
         first = [[c] for c in makes] + [[c, o] for c in makes for o in options]
@@ -698,10 +802,10 @@ def frame_variants(n):
 
 
 def small_diagrams(n_messages, kinds_=("call", "reply", "create"), actor_sets=((), ("A",), ("B",)), frames_of=frame_variants):
-    """참여자 셋(액터 자리는 actor_sets)에 메시지 n개의 모든 짝(보내는 쪽·받는 쪽·종류)과 frames_of가 내는 프레임 배치. 틀린
-    입력(이미 쓴 참여자를 만들기 등)은 건너뛴다."""
+    """참여자 셋(액터 자리는 actor_sets)에 메시지 n개의 모든 짝(보내는 쪽·받는 쪽·종류)과 자기 호출, frames_of가 내는 프레임
+    배치. 틀린 입력(이미 쓴 참여자를 만들기, 액터의 자기 호출 등)은 건너뛴다."""
     names = ("A", "B", "C")
-    options = [(s, t, k) for s in names for t in names if s != t for k in kinds_]
+    options = [(s, t, k) for s in names for t in names if s != t for k in kinds_] + [(s, s, "call") for s in names]
     for actors in actor_sets:
         parts = life(*names, actor=actors)
         for seq in itertools.product(options, repeat=n_messages):
@@ -755,6 +859,12 @@ def test_recreating_inputs_pass(seed):
     assert r.passed, r.summary()
 
 
+@pytest.mark.parametrize("seed", range(400))
+def test_looping_inputs_pass(seed):
+    r = SC.check(S.render(looping_diagram(seed), scale=0.5))
+    assert r.passed, r.summary()
+
+
 def test_every_small_recreating_diagram_passes():
     cases = list(recreate_variants())
     assert len(cases) > 5000
@@ -776,8 +886,12 @@ def test_every_three_message_call_and_reply_passes():
 def test_generated_inputs_cover_the_interesting_cases():
     seen = set()
     for seed in range(400):
-        for generate in (random_diagram, nested_diagram, recreating_diagram):
+        for generate in (random_diagram, nested_diagram, recreating_diagram, looping_diagram):
             lay = S.layout(S.parse(generate(seed)))
+            loops = [m for m in lay.messages if m.turn is not None]
+            seen |= {"self call"} if loops else set()
+            seen |= {"self call in a frame"} if any(f.top < m.y and m.back < f.bottom for m in loops for f in lay.frames) else set()
+            seen |= {"nested self call"} if any(b.depth >= 2 and b.top == m.back for b in lay.bars for m in loops) else set()
             seen |= {f.fragment.kind for f in lay.frames} | ({"ref"} if lay.refs else set())
             seen |= {"nested"} if any(b.depth for b in lay.bars) else set()
             seen |= {"create"} if any(m.message.kind == "create" for m in lay.messages) else set()
@@ -787,7 +901,8 @@ def test_generated_inputs_cover_the_interesting_cases():
             seen |= {"actor answers"} if any(m.message.kind == "reply" and p.participant.kind == "actor"
                                              and p.participant.name == m.message.source
                                              for m in lay.messages for p in lay.participants) else set()
-    assert seen >= {"loop", "opt", "alt", "ref", "nested", "create", "recreate", "crossing", "actor answers"}
+    assert seen >= {"loop", "opt", "alt", "ref", "nested", "create", "recreate", "crossing", "actor answers", "self call",
+                    "self call in a frame", "nested self call"}
 
 
 @pytest.mark.parametrize("seed", range(0, 400, 40))
