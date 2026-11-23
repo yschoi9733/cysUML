@@ -663,15 +663,16 @@ def test_names_go_back_beside_their_lines_when_putting_them_on_lines_gets_more_f
     real_labels, real_beside = B._labels, B._beside_layout
     seen = {}
 
-    def spy_labels(spots, *args, wide, on):
+    def spy_labels(spots, *args, wide, on):  # 여유 있는 빈 자리를 먼저 고르는 배치만 본다(처음 빈 자리 배치로도 다시 놓는다)
         out = real_labels(spots, *args, wide=wide, on=on)
-        if on:
+        if on and spots.roomy:
             seen["on"] = spots.misses(0)
         return out
 
     def spy_beside(*args):
         out = real_beside(*args)
-        seen["beside"] = out[1]
+        if args[-1]:  # roomy
+            seen["beside"] = out[1]
         return out
 
     with monkeypatch.context() as m:
