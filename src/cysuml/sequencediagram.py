@@ -1079,7 +1079,7 @@ def _columns(d: Diagram, plan: _Plan) -> _Columns:
     """이웃 생명선 간격 = 머리가 닿지 않고, 막대가 이웃 머리에 닿지 않고, 그 사이를 지나는 메시지마다 글자가 들어가는 칸이
     하나는 있을 만큼. 칸은 그 메시지 높이를 막대가 지나는 사이 생명선으로 나눈다(막대가 없는 생명선은 글자가 건너고 그 밑
     점선은 지운다). 여러 칸을 건너는 메시지는 가장 덜 모자란 칸을 넓히고, 모자란 만큼 그 칸의 간격에 나눈다. 자기 호출은
-    오른쪽 이웃 막대 왼쪽 변과 고리·글자 사이가 LABEL_GAP 넘게 남도록 그 이웃과의 간격을 넓힌다(맨 오른쪽이면 _finish가
+    오른쪽 이웃 막대 왼쪽 변과 고리·글자 사이가 LABEL_GAP 이상 남도록 그 이웃과의 간격을 넓힌다(맨 오른쪽이면 _finish가
     그림 오른쪽 끝을 늘린다)."""
     ps, index = d.participants, plan.index
     width = tuple(float(max(ACTOR_W, math.ceil(T.text_width(p.name, True) + ACTOR_PAD))) if p.kind == "actor"
