@@ -992,20 +992,8 @@ class _Best(NamedTuple):
     @property
     def roomy(self) -> bool:
         """여유 있는 빈 자리다 — 흰 바탕이 피할 것과 NAME_GAP - LABEL_CLEAR 이상 떨어져, 변을 마주 보는 피할 것과 글자 상자 사이가
-        NAME_GAP 이상이다."""
+        NAME_GAP 이상이다(모서리 쪽에서는 그보다 조금 더 떨어져야 한다)."""
         return self.free and self.score[2] >= NAME_GAP - LABEL_CLEAR
-
-
-def _first_roomy(tries: Iterable[tuple[_Best, Optional[int]]]) -> Optional[tuple[_Best, Optional[int]]]:
-    """선을 따라 본 묶음들(가운데에서 가까운 차례)마다의 (가장 나은 자리, 얹은 구간 번호) 가운데 여유 있는 빈 자리(_Best.roomy)가
-    처음 나온 것, 그런 자리가 없으면 빈 자리가 처음 나온 것. 요소에 막혀 옮긴 글자가 그 요소를 막 비킨 자리에 붙지 않게 한다."""
-    first = None
-    for best, extra in tries:
-        if best.roomy:
-            return best, extra
-        if first is None and best.free:
-            first = best, extra
-    return first
 
 
 def _places(boxes: Iterable[T.Box]) -> int:
@@ -1028,14 +1016,29 @@ class _Spots:
     이름인지 분명하다. 걸린 것의 수는 검사와 같이 LABEL_CLEAR로 세고, 얹은 구간은 세지 않는다.
 
     segments는 그린 선분(관계선과 선 끝 모양 테두리), owners는 선분마다 그린 관계, paths는 선분마다 그 관계 선의 구간 번호다(선
-    끝 모양은 None)."""
+    끝 모양은 None). roomy면 선을 따라 옮기는 이름을 여유 있는 빈 자리에 먼저 둔다(_slid)."""
 
     def __init__(self, segments: list[Segment], owners: Optional[list[str]] = None,
-                 paths: Optional[list[Optional[int]]] = None):
+                 paths: Optional[list[Optional[int]]] = None, roomy: bool = True):
         self.segments: list[_Seg] = [(p, q, span((p, q)), owners[i] if owners else i, paths[i] if paths else None)
                                      for i, (p, q) in enumerate(segments)]
         self.labels: list[T.Box] = []
         self.marks: list[tuple[int, int]] = []  # 글자마다 (걸린 것의 수, 피할 것에 걸렸다)
+        self.roomy = roomy
+        self.passed = False  # 여유 있는 빈 자리를 고르느라 앞선 빈 자리를 지나친 적이 있다
+
+    def _slid(self, tries: Iterable[tuple[_Best, Optional[int]]]) -> Optional[tuple[_Best, Optional[int]]]:
+        """선을 따라 본 묶음들(on_spots·slide_spots가 낸 차례 — 가장 긴 구간의 가운데에서 바깥쪽으로, 그다음 구간들)마다의 (가장 나은
+        자리, 얹은 구간 번호) 가운데 옮겨 갈 것. roomy면 여유 있는 빈 자리(_Best.roomy)가 처음 나온 것, 그런 자리가 없으면 빈 자리가
+        처음 나온 것이다 — 요소에 막혀 옮긴 글자가 그 요소를 막 비킨 자리에 붙지 않게 한다. roomy가 아니면 빈 자리가 처음 나온 것이다."""
+        first = None
+        for best, extra in tries:
+            if best.roomy or (best.free and not self.roomy):
+                self.passed |= first is not None
+                return best, extra
+            if first is None and best.free:
+                first = best, extra
+        return first
 
     def _keep(self, best: _Best) -> Point:
         self.labels.append(best.box)
@@ -1106,9 +1109,9 @@ class _Spots:
     def pick_name(self, lines: tuple[str, ...], points: tuple[Point, ...], avoid: Obstacles,
                   slide: bool = True, wide: bool = True) -> tuple[Point, bool, bool]:
         """이름 글자 자리와, 선을 따라 옮겼는지와, 좁은 조건이라면 옮기지 않았을 이름인지. 가운데 후보 둘이 다 빈 자리가 아니면(wide가
-        아니면 둘 다 피할 것에 걸리면 — 좁은 조건) slide일 때 선을 따라 더 본 자리(slide_spots)를 구간마다 묶음 차례로 보아 여유 있는
-        빈 자리가 처음 나온 묶음(없으면 빈 자리가 처음 나온 묶음 — _first_roomy)의 가장 나은 자리로 옮기고, 빈 자리가 없으면 가운데
-        후보에 둔다. 피할 것만 비키고 선에 닿는 자리로는 옮기지 않는다 — 선 여러 개에 닿아 불합격이 늘 수 있다."""
+        아니면 둘 다 피할 것에 걸리면 — 좁은 조건) slide일 때 선을 따라 더 본 자리(slide_spots)를 구간마다 묶음 차례로 보아 _slid가
+        고른 묶음(roomy면 여유 있는 빈 자리가 처음 나온 묶음, 없으면 빈 자리가 처음 나온 묶음)의 가장 나은 자리로 옮기고, 빈 자리가
+        없으면 가운데 후보에 둔다. 피할 것만 비키고 선에 닿는 자리로는 옮기지 않는다 — 선 여러 개에 닿아 불합격이 늘 수 있다."""
         best = self._best(lines, name_spots(points, lines), avoid)
         if slide and not (best.free if wide else best.off):
             def tries() -> Iterator[tuple[_Best, Optional[int]]]:
@@ -1117,15 +1120,15 @@ class _Spots:
                     for ring in rings:
                         yield self._best(lines, ring, avoid, pool), None
 
-            if (got := _first_roomy(tries())) is not None:
+            if (got := self._slid(tries())) is not None:
                 return self._keep(got[0]), True, best.off
         return self._keep(best), False, False
 
     def pick_on_line(self, lines: tuple[str, ...], points: tuple[Point, ...], avoid: Obstacles, owner: object,
                      slide: bool = True, show: tuple[float, float] = (0.0, 0.0)) -> Optional[tuple[Point, int, bool]]:
         """이름 글자를 그 관계(owner)의 선 위에 얹을 자리와, 얹은 구간 번호와, 선을 따라 옮겼는지. 선 위 가운데 자리(가장 긴 구간의
-        가운데)가 빈 자리가 아니면 slide일 때 선을 따라 더 본 자리(on_spots)를 구간마다 묶음 차례로 보아 여유 있는 빈 자리가 처음 나온
-        묶음(없으면 빈 자리가 처음 나온 묶음 — _first_roomy)의 가장 나은 자리로 옮기고, 빈 자리가 끝내 없으면 놓지 않고 None을
+        가운데)가 빈 자리가 아니면 slide일 때 선을 따라 더 본 자리(on_spots)를 구간마다 묶음 차례로 보아 _slid가 고른 묶음(roomy면
+        여유 있는 빈 자리가 처음 나온 묶음, 없으면 빈 자리가 처음 나온 묶음)의 가장 나은 자리로 옮기고, 빈 자리가 끝내 없으면 놓지 않고 None을
         돌려준다(그 이름은 선 옆에 놓는다). slide가 아니면 빈 자리가 아니어도 선 위 가운데 자리에 둔다 — 다만 글자 상자를
         LABEL_CLEAR만큼 넓힌 것을 구간 방향으로 비춘 폭이 가장 긴 구간 안에 들지 않으면(_room) None이다. 구간을 넘친 글자의 흰
         바탕(BG_MARGIN)이 구간 끝의 꺾인 곳을 지울 수 있어서다.
@@ -1162,7 +1165,7 @@ class _Spots:
                     if ring := [spot for spot in ring if shown(j, spot)]:
                         yield self._best(lines, ring, avoid, pool, on=(owner, j)), j
 
-        if (got := _first_roomy(tries())) is None:
+        if (got := self._slid(tries())) is None:
             return None
         found, j = got
         assert j is not None
@@ -1431,7 +1434,9 @@ def layout(diagram: Diagram) -> Layout:
     차례로 놓고, 앞서 놓은 글자를 뒤 글자가 피한다(_labels). 이름은 그 관계의 선 위에 얹는다(선 위 배치) — 선 위에 빈 자리가 없는
     이름과 같은 요소로 돌아오는 고리 선의 이름은 선 옆에 놓는다. 선 위 배치에 걸린 것이 있으면 이름을 모두 선 옆에 놓은 배치(선 옆
     배치, _beside_layout)로도 놓아 보고, 그림 전체의 (걸린 것의 수, 피할 것에 걸린 글자 수)가 선 위 배치 쪽이 더 크면 선 옆 배치를
-    쓴다(둘 다 같으면 선 위 배치) — 얹은 이름이 뒤 관계의 글자가 쓸 자리를 차지해 뒤 글자가 밀리면 선 위에 얹어 더 나빠질 수 있다."""
+    쓴다(둘 다 같으면 선 위 배치) — 얹은 이름이 뒤 관계의 글자가 쓸 자리를 차지해 뒤 글자가 밀리면 선 위에 얹어 더 나빠질 수 있다.
+    선을 따라 옮기는 이름은 여유 있는 빈 자리에 먼저 두는데(_Spots._slid), 그렇게 놓은 배치에 걸린 것이 있으면 처음 빈 자리로 옮기는
+    배치로도 놓아 보고 같은 두 수가 더 작을 때만 그쪽을 쓴다(_label_layout)."""
     spec = diagram.spec
     lines_of = lineage({e.key: e.parent for e in diagram.boxes})  # 품은 사이는 여기서 한 번 재서 검사(Layout)까지 넘긴다
     placed = _split_aims(spec, diagram, _place(spec, diagram, lines_of))
@@ -1470,32 +1475,54 @@ def layout(diagram: Diagram) -> Layout:
                 owners.append(p.owner)
                 paths.append(j if rec is line else None)
     avoids: dict[frozenset[str], Obstacles] = {}  # 끝을 품은 요소들마다 한 번만 만든다
-    spots = _Spots(segments, owners, paths)
-    out, widened = _labels(spots, bare, placed, lines_of, avoids, shows, wide=True, on=True)
-    # 걸린 것이 없으면 선 옆 배치가 더 나을 수 없다. 선 위에 얹은 이름이 없으면 이 배치가 곧 넓힌 조건의 선 옆 배치라, 넓혀서 옮긴
-    # 이름이 없을 때도 선 옆 배치가 같게 나온다
-    if spots.misses(0) != (0, 0) and (widened or any(lab.segment is not None for p in out for lab in p.labels)):
-        beside, missed = _beside_layout(segments, owners, bare, placed, lines_of, avoids)
-        if spots.misses(0) > missed:
-            out = beside
+    out, missed, passed = _label_layout(segments, owners, paths, bare, placed, lines_of, avoids, shows, roomy=True)
+    # 여유 있는 빈 자리로 더 멀리 옮긴 이름이 뒤 글자가 쓸 자리를 차지해 걸린 것이 늘 수 있다. 앞선 빈 자리를 지나쳐 옮긴 이름이
+    # 없으면 처음 빈 자리로 옮겨도 같은 배치다
+    if missed != (0, 0) and passed:
+        first, first_missed, _ = _label_layout(segments, owners, paths, bare, placed, lines_of, avoids, shows, roomy=False)
+        if missed > first_missed:
+            out = first
     return Layout(spec, placed, tuple(out), lines_of)
 
 
+def _label_layout(segments: list[Segment], owners: list[str], paths: list[Optional[int]], bare: list[PlacedRelation],
+                  placed: tuple[PlacedBox, ...], lines_of: Mapping[str, tuple[str, ...]],
+                  avoids: dict[frozenset[str], Obstacles], shows: Mapping[str, tuple[float, float]], roomy: bool
+                  ) -> tuple[list[PlacedRelation], tuple[int, int], bool]:
+    """선 위 배치와, 걸린 것이 있으면 선 옆 배치(_beside_layout)로도 놓아 본 가운데 나은 쪽(layout)과 그 그림 전체의 (걸린 것의 수,
+    피할 것에 걸린 글자 수), 놓아 본 배치에서 여유 있는 빈 자리를 고르느라 앞선 빈 자리를 지나친 이름이 있었는지. roomy는
+    _Spots의 것이다."""
+    spots = _Spots(segments, owners, paths, roomy)
+    out, widened = _labels(spots, bare, placed, lines_of, avoids, shows, wide=True, on=True)
+    missed, passed = spots.misses(0), spots.passed
+    # 걸린 것이 없으면 선 옆 배치가 더 나을 수 없다. 선 위에 얹은 이름이 없으면 이 배치가 곧 넓힌 조건의 선 옆 배치라, 넓혀서 옮긴
+    # 이름이 없을 때도 선 옆 배치가 같게 나온다
+    if missed != (0, 0) and (widened or any(lab.segment is not None for p in out for lab in p.labels)):
+        beside, beside_missed, beside_passed = _beside_layout(segments, owners, bare, placed, lines_of, avoids, roomy)
+        passed |= beside_passed
+        if missed > beside_missed:
+            out, missed = beside, beside_missed
+    return out, missed, passed
+
+
 def _beside_layout(segments: list[Segment], owners: list[str], bare: list[PlacedRelation], placed: tuple[PlacedBox, ...],
-                   lines_of: Mapping[str, tuple[str, ...]], avoids: dict[frozenset[str], Obstacles]
-                   ) -> tuple[list[PlacedRelation], tuple[int, int]]:
-    """이름을 모두 선 옆에 놓은 배치(선 옆 배치)와 그 그림 전체의 (걸린 것의 수, 피할 것에 걸린 글자 수). 이름은 가운데 후보 둘이 다
-    빈 자리가 아니면 선을 따라 옮기는데, 좁은 조건(둘 다 피할 것에 걸릴 때만 옮긴다)이라면 옮기지 않았을 이름이 남으면 좁은
-    조건으로도 놓아 보고, 그림 전체의 두 수가 더 작은 쪽을 쓴다(둘 다 같으면 넓힌 쪽) — 옮긴 이름이 뒤 관계의 글자가 쓸 자리를
-    차지해 뒤 글자가 밀리면 넓혀서 더 나빠질 수 있다."""
-    spots = _Spots(segments, owners)
+                   lines_of: Mapping[str, tuple[str, ...]], avoids: dict[frozenset[str], Obstacles], roomy: bool = True
+                   ) -> tuple[list[PlacedRelation], tuple[int, int], bool]:
+    """이름을 모두 선 옆에 놓은 배치(선 옆 배치)와 그 그림 전체의 (걸린 것의 수, 피할 것에 걸린 글자 수), 놓아 본 배치에서 여유 있는
+    빈 자리를 고르느라 앞선 빈 자리를 지나친 이름이 있었는지(roomy는 _Spots의 것). 이름은 가운데 후보 둘이 다 빈 자리가 아니면
+    선을 따라 옮기는데, 좁은 조건(둘 다 피할 것에 걸릴 때만 옮긴다)이라면 옮기지 않았을 이름이 남으면 좁은 조건으로도 놓아 보고,
+    그림 전체의 두 수가 더 작은 쪽을 쓴다(둘 다 같으면 넓힌 쪽) — 옮긴 이름이 뒤 관계의 글자가 쓸 자리를 차지해 뒤 글자가 밀리면
+    넓혀서 더 나빠질 수 있다."""
+    spots = _Spots(segments, owners, roomy=roomy)
     out, widened = _labels(spots, bare, placed, lines_of, avoids, {}, wide=True, on=False)
     if widened and spots.misses(0) != (0, 0):  # 걸린 것이 없으면 좁은 조건이 더 나을 수 없다
-        narrow = _Spots(segments, owners)
+        narrow = _Spots(segments, owners, roomy=roomy)
         kept, _ = _labels(narrow, bare, placed, lines_of, avoids, {}, wide=False, on=False)
+        passed = spots.passed or narrow.passed
         if spots.misses(0) > narrow.misses(0):
-            return kept, narrow.misses(0)
-    return out, spots.misses(0)
+            return kept, narrow.misses(0), passed
+        return out, spots.misses(0), passed
+    return out, spots.misses(0), spots.passed
 
 
 def _labels(spots: _Spots, bare: list[PlacedRelation], placed: tuple[PlacedBox, ...], lines_of: Mapping[str, tuple[str, ...]],

@@ -650,7 +650,7 @@ def test_widened_moves_are_undone_when_the_whole_diagram_gets_more_faults(monkey
         m.setattr(B, "_labels", lambda spots, *args, wide, on: real(spots, *args, wide=False, on=on))
         narrow = C.render(data)
     with monkeypatch.context() as m:
-        m.setattr(B, "_beside_layout", lambda *args: ([], (math.inf, math.inf)))  # 견주지 않고 넓힌 쪽(첫 배치)을 쓴다
+        m.setattr(B, "_beside_layout", lambda *args: ([], (math.inf, math.inf), False))  # 견주지 않고 넓힌 쪽(첫 배치)을 쓴다
         wide = C.render(data)
     assert labels_of(d) == labels_of(narrow) != labels_of(wide)
     assert (len(K.check(wide).failures), len(K.check(d).failures)) == (5, 4)
@@ -680,33 +680,58 @@ def test_names_go_back_beside_their_lines_when_putting_them_on_lines_gets_more_f
         d = C.render(data)
     assert seen == {"on": (2, 1), "beside": (1, 1)}
     assert all(lab.segment is None for r in d.layout.relations for lab in r.labels)
-    monkeypatch.setattr(B, "_beside_layout", lambda *args: ([], (math.inf, math.inf)))  # 되돌리지 않는다
+    monkeypatch.setattr(B, "_beside_layout", lambda *args: ([], (math.inf, math.inf), False))  # 되돌리지 않는다
     kept = C.render(data)
     assert any(lab.segment is not None for r in kept.layout.relations for lab in r.labels)
     assert len(K.check(kept).failures) > len(K.check(d).failures)
 
 
+# 선이 Up을 지나는 두 선 위에 places·uses를 얹고, 그 사이를 비스듬히 지나는 선에 longer name을 얹는다
+CROWDED = {"classes": [{"name": "A", "left": 0, "top": 0}, {"name": "B", "left": 260, "top": 0},
+                       {"name": "C", "left": 0, "top": 60}, {"name": "D", "left": 260, "top": 60},
+                       {"name": "Up", "left": 126, "top": 30, "width": 30, "height": 59}],
+           "relations": [{"kind": "association", "from": "A", "to": "B", "name": "places", "from_multiplicity": "1",
+                          "to_multiplicity": "0..*"},
+                         {"kind": "aggregation", "from": "C", "to": "D", "name": "uses", "from_multiplicity": "1",
+                          "to_multiplicity": "1..*"},
+                         {"kind": "association", "from": "A", "to": "D", "name": "longer name"}]}
+
+
+def test_names_go_back_to_the_first_free_spots_when_roomy_spots_get_more_faults(monkeypatch):
+    # places·uses를 여유 있는 빈 자리까지 더 옮기면 longer name이 선 위에 얹을 빈 자리를 잃어 그림 전체가 선 옆 배치로 바뀌고 불합격이
+    # 2건에서 5건이 된다. 그래서 처음 빈 자리로 옮기는 배치(#82 전과 같다)로도 놓아 보고 걸린 것이 적은 그쪽을 쓴다(#82)
+    d = C.render(CROWDED)
+    assert kinds_of(d) == ["line_through_box", "line_through_box"]
+    assert [r.labels[0].segment for r in d.layout.relations] == [0, 0, 0]
+    real = B._label_layout
+    monkeypatch.setattr(B, "_label_layout", lambda *args, roomy: real(*args, roomy=roomy)[:2] + (False,))  # 다시 놓지 않는다
+    roomy = C.render(CROWDED)
+    assert len(kinds_of(roomy)) == 5 and all(r.labels[0].segment is None for r in roomy.layout.relations)
+
+
 def test_layouts_are_laid_out_again_only_when_they_can_do_better(monkeypatch):
     calls = []
     real = B._labels
-    monkeypatch.setattr(B, "_labels", lambda spots, *args, wide, on: calls.append((on, wide)) or real(spots, *args, wide=wide,
-                                                                                                         on=on))
-    # 선 위 배치에 걸린 것이 없으면 선 옆 배치로 다시 놓지 않는다
+    monkeypatch.setattr(B, "_labels", lambda spots, *args, wide, on: calls.append((on, wide, spots.roomy))
+                        or real(spots, *args, wide=wide, on=on))
+    # 선 위 배치에 걸린 것이 없으면 선 옆 배치로도, 처음 빈 자리로 옮기는 배치로도 다시 놓지 않는다
     d = C.render(walled(140, 250, kind="association", name="has", from_multiplicity="1"))
-    assert calls == [(True, True)] and d.layout.relations[0].labels[0].segment == 0
+    assert calls == [(True, True, True)] and d.layout.relations[0].labels[0].segment == 0
     # 걸린 것이 있어도 선 위에 얹은 이름도 넓혀서 옮긴 이름도 없으면(이름이 상자에 막혀 선 옆 가운데 후보에 있다) 선 옆 배치가 이
-    # 배치와 같으니 다시 놓지 않는다
+    # 배치와 같으니 다시 놓지 않는다. 옮긴 이름이 없으니 처음 빈 자리로 옮기는 배치도 같다
     calls.clear()
     d = C.render(walled(95, 285, kind="association", name="has"))
-    assert calls == [(True, True)] and d.layout.relations[0].labels[0].segment is None
-    # 선 위에 얹은 이름이 있으면 선 옆 배치로도 놓는다. 선 옆 배치에 넓혀서 옮긴 이름이 없으면 좁은 조건으로 다시 놓지 않는다
+    assert calls == [(True, True, True)] and d.layout.relations[0].labels[0].segment is None
+    # 선 위에 얹은 이름이 있으면 선 옆 배치로도 놓는다. 선 옆 배치에 넓혀서 옮긴 이름이 없으면 좁은 조건으로 다시 놓지 않는다. 걸린
+    # 것이 있고 여유 있는 빈 자리를 고르느라 앞선 빈 자리를 지나친 이름이 있으니, 처음 빈 자리로 옮기는 배치로도 같게 놓는다(#82)
     calls.clear()
     C.render(BACK_BESIDE)
-    assert calls == [(True, True), (False, True)]
-    # 선 위에 얹은 이름이 없어도 넓혀서 옮긴 이름이 있으면 선 옆 배치를 넓힌 조건·좁은 조건으로 놓는다
+    assert calls == [(True, True, True), (False, True, True), (True, True, False), (False, True, False)]
+    # 선 위에 얹은 이름이 없어도 넓혀서 옮긴 이름이 있으면 선 옆 배치를 넓힌 조건·좁은 조건으로 놓는다. 앞선 빈 자리를 지나쳐 옮긴
+    # 이름이 없으니 처음 빈 자리로 옮기는 배치로는 다시 놓지 않는다
     calls.clear()
     C.render(STACKED)
-    assert calls == [(True, True), (False, True), (False, False)]
+    assert calls == [(True, True, True), (False, True, True), (False, False, True)]
 
 
 def test_label_faults_count_each_element_each_relation_line_and_each_label():
