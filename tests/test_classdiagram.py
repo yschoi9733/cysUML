@@ -350,20 +350,28 @@ def walled(left, right, **relation):
     return data
 
 
-def test_name_on_its_line_blocked_in_the_middle_moves_along_it_to_the_nearest_free_spot():
-    # 선 위 가운데 자리(195, 24)가 위아래 상자에 걸리면 선 위에 얹은 채 NAME_STEP씩 옮겨 가장 먼저 빈 자리에 둔다
+def nearest_box(drawing, spot, lines, keys=None):
+    """spot에 둔 글자 상자와 가장 가까운 상자(keys가 있으면 그 상자들 가운데) 사이 거리(G.gap — 겹치면 -1)."""
+    box = B.lines_box(*spot, lines)
+    return min(G.gap(box, p.rect) for p in drawing.layout.boxes if keys is None or p.key in keys)
+
+
+def test_name_on_its_line_blocked_in_the_middle_moves_along_it_to_the_nearest_roomy_spot():
+    # 선 위 가운데 자리(195, 24)가 위아래 상자에 걸리면 선 위에 얹은 채 NAME_STEP씩 옮겨, 글자 상자가 상자들과 NAME_GAP 이상 떨어진
+    # 가장 가까운 빈 자리에 둔다. 한 칸 덜 옮긴 자리는 상자를 LABEL_CLEAR 넘게 비켜 빈 자리지만 여유가 모자라 지나친다(#82)
     d = C.render(walled(140, 250, kind="dependency", name="has"))
     (label,) = d.layout.relations[0].labels
     assert K.check(d).passed and (label.y, label.segment) == (24, 0)
     away = abs(label.x - 195)
     assert away > 0 and away % B.NAME_STEP == 0
+    assert nearest_box(d, (label.x, 24), ("has",)) >= B.NAME_GAP
     closer = 195 + (away - B.NAME_STEP) * (1 if label.x > 195 else -1)  # 가운데 쪽으로 한 칸 덜 옮긴 자리
-    wide = G.grow(B.lines_box(closer, 24, ("has",)), C.LABEL_CLEAR)
-    assert any(G.gap(wide, p.rect) < 0 for p in d.layout.boxes if p.key in ("Up", "Down"))
+    assert C.LABEL_CLEAR < nearest_box(d, (closer, 24), ("has",), ("Up", "Down")) < B.NAME_GAP
 
 
-def test_name_beside_blocked_on_both_sides_moves_to_the_nearest_free_spot_along_the_line(monkeypatch):
-    # 선 옆에 놓는 이름은 선 가운데(x 195) 위아래가 다 막혀 있으면 선을 따라 NAME_STEP씩 옮겨 가장 먼저 빈 자리에 둔다
+def test_name_beside_blocked_on_both_sides_moves_to_the_nearest_roomy_spot_along_the_line(monkeypatch):
+    # 선 옆에 놓는 이름은 선 가운데(x 195) 위아래가 다 막혀 있으면 선을 따라 NAME_STEP씩 옮겨, 글자 상자가 상자들과 NAME_GAP 이상
+    # 떨어진 가장 가까운 빈 자리에 둔다. 한 칸 덜 옮긴 자리 둘은 상자를 LABEL_CLEAR 넘게 비켰지만 여유가 모자라 지나친다(#82)
     beside_only(monkeypatch)
     d = C.render(walled(120, 260, kind="dependency", name="has"))
     (name,) = owned(d, "A->B", Text)
@@ -371,10 +379,86 @@ def test_name_beside_blocked_on_both_sides_moves_to_the_nearest_free_spot_along_
     assert K.check(d).passed
     away = abs(label.x - 195)
     assert away > 0 and away % B.NAME_STEP == 0 and label.y in (s[1] for s in C.name_spots(((90, 24), (300, 24)), "has"))
+    assert nearest_box(d, (label.x, label.y), ("has",)) >= B.NAME_GAP
     closer = 195 + (away - B.NAME_STEP) * (1 if label.x > 195 else -1)  # 가운데 쪽으로 한 칸 덜 옮긴 자리
     for spot in C.name_spots(((closer - 1, 24), (closer + 1, 24)), "has"):
-        wide = G.grow(B.lines_box(*spot, ("has",)), C.LABEL_CLEAR)
-        assert any(G.gap(wide, p.rect) < 0 for p in d.layout.boxes if p.key in ("Up", "Down"))
+        assert C.LABEL_CLEAR < nearest_box(d, spot, ("has",), ("Up", "Down")) < B.NAME_GAP
+
+
+def test_name_moved_off_a_box_in_its_way_keeps_name_gap_from_it():
+    # #82 재현 입력(README 그림 PR #80 초안의 첫 배치 — 지금 README 그림과는 다르다): 고객→결제 선 가운데가 주문항목 밑에 가려져
+    # "낸다"를 선을 따라 옮긴다. 주문항목 위 변을 막 비킨 자리(3.7px)가 아니라 NAME_GAP 넘게 떨어진 자리에 둔다. 불합격은 선이
+    # 주문항목을 지나는 것 하나뿐이다(첫 배치라 일부러 남긴 것)
+    data = {"classes": [{"name": "고객", "left": 0, "top": 0, "attributes": ["-이름: String", "-이메일: String"]},
+                        {"name": "주문", "left": 240, "top": 0, "attributes": ["-번호: long", "-주문일: Date"],
+                         "operations": ["+합계(): Money"]},
+                        {"name": "결제", "left": 0, "top": 360, "kind": "abstract", "width": 110, "attributes": ["-금액: Money"]},
+                        {"name": "카드결제", "left": 0, "top": 520, "width": 110, "attributes": ["-카드번호: String"]},
+                        {"name": "주문항목", "left": 0, "top": 200, "attributes": ["-수량: int"], "operations": ["+소계(): Money"]},
+                        {"name": "상품", "left": 500, "top": 200, "attributes": ["-이름: String", "-가격: Money"]}],
+            "relations": [{"kind": "association", "from": "고객", "to": "주문", "name": "주문한다", "from_multiplicity": "1",
+                           "to_multiplicity": "0..*"},
+                          {"kind": "composition", "from": "주문", "to": "주문항목", "to_multiplicity": "1..*"},
+                          {"kind": "association", "from": "주문항목", "to": "상품", "to_multiplicity": "1"},
+                          {"kind": "association", "from": "고객", "to": "결제", "name": "낸다", "to_multiplicity": "0..*"},
+                          {"kind": "association", "from": "주문", "to": "결제", "to_multiplicity": "0..1"},
+                          {"kind": "generalization", "from": "카드결제", "to": "결제"}]}
+    d = C.render(data)
+    (pay,) = [r for r in d.layout.relations if r.owner == "고객->결제"]
+    name = pay.labels[0]
+    k = B._segments_by_length(pay.points)[0]
+    assert name.lines == ("낸다",) and name.segment is not None
+    assert math.dist((name.x, name.y), B._along(pay.points[k], pay.points[k + 1])) > 0  # 선 위 가운데 자리에서 옮겼다
+    assert nearest_box(d, (name.x, name.y), name.lines) >= B.NAME_GAP
+    assert [(f.kind, f.elements) for f in K.check(d).failures] == [("line_through_box", ("고객->결제", "주문항목"))]
+
+
+def test_name_leaves_its_longest_segment_when_that_has_only_snug_free_spots():
+    # 가장 긴 구간(가로, y 24)은 Up1(x 95~182)·Up2(x 213~335) 사이 틈(x 197.5)만 빈 자리인데 두 상자와 5px이라 여유가 모자라다. 선을
+    # 따라 어디에도 여유 있는 빈 자리가 없을 때만 그런 자리를 쓰므로(#82), 다음 구간(세로)의 가운데 자리로 간다
+    data = {"classes": [{"name": "A", "left": 0, "top": 0}, {"name": "B", "left": 300, "top": 200},
+                        {"name": "Up1", "left": 95, "top": -40, "width": 87, "height": 59},
+                        {"name": "Up2", "left": 213, "top": -40, "width": 122, "height": 59}],
+            "relations": [{"kind": "dependency", "from": "A", "to": "B", "name": "has", "via": [[345, 24]]}]}
+    d = C.render(data)
+    (label,) = d.layout.relations[0].labels
+    assert K.check(d).passed and (label.x, label.y, label.segment) == (345, 112, 1)
+    assert C.LABEL_CLEAR < nearest_box(d, (197.5, 24), ("has",), ("Up1", "Up2")) < B.NAME_GAP
+
+
+def test_loop_name_moved_beside_its_line_keeps_name_gap_from_boxes():
+    # 고리 선의 이름은 늘 선 옆에 놓는다. 가장 긴 구간(y -120, x 45~245) 가운데 위아래를 Lid·Mid가 막아 선을 따라 옮기는데, Lid를
+    # 막 비킨 자리(4.7px)가 아니라 NAME_GAP 넘게 떨어진 자리에 둔다(#82)
+    data = {"classes": [{"name": "A", "left": 0, "top": 0},
+                        {"name": "Lid", "left": 115, "top": -192, "width": 60},
+                        {"name": "Mid", "left": 115, "top": -110, "width": 60}],
+            "relations": [{"kind": "association", "from": "A", "to": "A", "name": "has",
+                           "via": [[45, -120], [245, -120], [245, 24]]}]}
+    d = C.render(data)
+    (label,) = d.layout.relations[0].labels
+    assert K.check(d).passed and label.segment is None and label.x != 145
+    assert nearest_box(d, (label.x, label.y), ("has",)) >= B.NAME_GAP
+
+
+def test_name_falls_back_to_the_first_free_spot_when_no_spot_along_its_line_has_name_gap():
+    # Up(x 100~250)이 선 위 가운데를 막는다. 선을 따라 옮길 수 있는 자리는 x 265까지라(B 쪽 화살촉 앞 선이 보여야 한다) 여유 NAME_GAP인
+    # 자리가 없으니, 지금처럼 Up을 LABEL_CLEAR 넘게 비킨 첫 빈 자리에 둔다
+    data = two_boxes(kind="dependency", name="has")
+    data["classes"].append({"name": "Up", "left": 100, "top": -40, "width": 150, "height": 59})
+    d = C.render(data)
+    (label,) = d.layout.relations[0].labels
+    assert K.check(d).passed and (label.x, label.y, label.segment) == (265, 24, 0)
+    assert C.LABEL_CLEAR < nearest_box(d, (265, 24), ("has",), ("Up",)) < B.NAME_GAP
+
+
+def test_name_free_in_the_middle_of_its_line_stays_even_close_to_a_box():
+    # 선 위 가운데 자리(195, 24)가 Up(x 100~180)을 LABEL_CLEAR 넘게 비켜 빈 자리면, NAME_GAP 안이어도 옮기지 않는다(#82)
+    data = two_boxes(kind="dependency", name="has")
+    data["classes"].append({"name": "Up", "left": 100, "top": -40, "width": 80, "height": 59})
+    d = C.render(data)
+    (label,) = d.layout.relations[0].labels
+    assert K.check(d).passed and (label.x, label.y, label.segment) == (195, 24, 0)
+    assert C.LABEL_CLEAR < nearest_box(d, (195, 24), ("has",), ("Up",)) < B.NAME_GAP
 
 
 def test_name_moves_to_another_segment_when_the_longest_one_has_no_room():
@@ -566,7 +650,7 @@ def test_widened_moves_are_undone_when_the_whole_diagram_gets_more_faults(monkey
         m.setattr(B, "_labels", lambda spots, *args, wide, on: real(spots, *args, wide=False, on=on))
         narrow = C.render(data)
     with monkeypatch.context() as m:
-        m.setattr(B, "_beside_layout", lambda *args: ([], (math.inf, math.inf)))  # 견주지 않고 넓힌 쪽(첫 배치)을 쓴다
+        m.setattr(B, "_beside_layout", lambda *args: ([], (math.inf, math.inf), False))  # 견주지 않고 넓힌 쪽(첫 배치)을 쓴다
         wide = C.render(data)
     assert labels_of(d) == labels_of(narrow) != labels_of(wide)
     assert (len(K.check(wide).failures), len(K.check(d).failures)) == (5, 4)
@@ -579,15 +663,16 @@ def test_names_go_back_beside_their_lines_when_putting_them_on_lines_gets_more_f
     real_labels, real_beside = B._labels, B._beside_layout
     seen = {}
 
-    def spy_labels(spots, *args, wide, on):
+    def spy_labels(spots, *args, wide, on):  # 여유 있는 빈 자리를 먼저 고르는 배치만 본다(처음 빈 자리 배치로도 다시 놓는다)
         out = real_labels(spots, *args, wide=wide, on=on)
-        if on:
+        if on and spots.roomy:
             seen["on"] = spots.misses(0)
         return out
 
     def spy_beside(*args):
         out = real_beside(*args)
-        seen["beside"] = out[1]
+        if args[-1]:  # roomy
+            seen["beside"] = out[1]
         return out
 
     with monkeypatch.context() as m:
@@ -596,33 +681,58 @@ def test_names_go_back_beside_their_lines_when_putting_them_on_lines_gets_more_f
         d = C.render(data)
     assert seen == {"on": (2, 1), "beside": (1, 1)}
     assert all(lab.segment is None for r in d.layout.relations for lab in r.labels)
-    monkeypatch.setattr(B, "_beside_layout", lambda *args: ([], (math.inf, math.inf)))  # 되돌리지 않는다
+    monkeypatch.setattr(B, "_beside_layout", lambda *args: ([], (math.inf, math.inf), False))  # 되돌리지 않는다
     kept = C.render(data)
     assert any(lab.segment is not None for r in kept.layout.relations for lab in r.labels)
     assert len(K.check(kept).failures) > len(K.check(d).failures)
 
 
+# 선이 Up을 지나는 두 선 위에 places·uses를 얹고, 그 사이를 비스듬히 지나는 선에 longer name을 얹는다
+CROWDED = {"classes": [{"name": "A", "left": 0, "top": 0}, {"name": "B", "left": 260, "top": 0},
+                       {"name": "C", "left": 0, "top": 60}, {"name": "D", "left": 260, "top": 60},
+                       {"name": "Up", "left": 126, "top": 30, "width": 30, "height": 59}],
+           "relations": [{"kind": "association", "from": "A", "to": "B", "name": "places", "from_multiplicity": "1",
+                          "to_multiplicity": "0..*"},
+                         {"kind": "aggregation", "from": "C", "to": "D", "name": "uses", "from_multiplicity": "1",
+                          "to_multiplicity": "1..*"},
+                         {"kind": "association", "from": "A", "to": "D", "name": "longer name"}]}
+
+
+def test_names_go_back_to_the_first_free_spots_when_roomy_spots_get_more_faults(monkeypatch):
+    # places·uses를 여유 있는 빈 자리까지 더 옮기면 longer name이 선 위에 얹을 빈 자리를 잃어 그림 전체가 선 옆 배치로 바뀌고 불합격이
+    # 2건에서 5건이 된다. 그래서 처음 빈 자리로 옮기는 배치(#82 전과 같다)로도 놓아 보고 걸린 것이 적은 그쪽을 쓴다(#82)
+    d = C.render(CROWDED)
+    assert kinds_of(d) == ["line_through_box", "line_through_box"]
+    assert [r.labels[0].segment for r in d.layout.relations] == [0, 0, 0]
+    real = B._label_layout
+    monkeypatch.setattr(B, "_label_layout", lambda *args, roomy: real(*args, roomy=roomy)[:2] + (False,))  # 다시 놓지 않는다
+    roomy = C.render(CROWDED)
+    assert len(kinds_of(roomy)) == 5 and all(r.labels[0].segment is None for r in roomy.layout.relations)
+
+
 def test_layouts_are_laid_out_again_only_when_they_can_do_better(monkeypatch):
     calls = []
     real = B._labels
-    monkeypatch.setattr(B, "_labels", lambda spots, *args, wide, on: calls.append((on, wide)) or real(spots, *args, wide=wide,
-                                                                                                         on=on))
-    # 선 위 배치에 걸린 것이 없으면 선 옆 배치로 다시 놓지 않는다
+    monkeypatch.setattr(B, "_labels", lambda spots, *args, wide, on: calls.append((on, wide, spots.roomy))
+                        or real(spots, *args, wide=wide, on=on))
+    # 선 위 배치에 걸린 것이 없으면 선 옆 배치로도, 처음 빈 자리로 옮기는 배치로도 다시 놓지 않는다
     d = C.render(walled(140, 250, kind="association", name="has", from_multiplicity="1"))
-    assert calls == [(True, True)] and d.layout.relations[0].labels[0].segment == 0
+    assert calls == [(True, True, True)] and d.layout.relations[0].labels[0].segment == 0
     # 걸린 것이 있어도 선 위에 얹은 이름도 넓혀서 옮긴 이름도 없으면(이름이 상자에 막혀 선 옆 가운데 후보에 있다) 선 옆 배치가 이
-    # 배치와 같으니 다시 놓지 않는다
+    # 배치와 같으니 다시 놓지 않는다. 옮긴 이름이 없으니 처음 빈 자리로 옮기는 배치도 같다
     calls.clear()
     d = C.render(walled(95, 285, kind="association", name="has"))
-    assert calls == [(True, True)] and d.layout.relations[0].labels[0].segment is None
-    # 선 위에 얹은 이름이 있으면 선 옆 배치로도 놓는다. 선 옆 배치에 넓혀서 옮긴 이름이 없으면 좁은 조건으로 다시 놓지 않는다
+    assert calls == [(True, True, True)] and d.layout.relations[0].labels[0].segment is None
+    # 선 위에 얹은 이름이 있으면 선 옆 배치로도 놓는다. 선 옆 배치에 넓혀서 옮긴 이름이 없으면 좁은 조건으로 다시 놓지 않는다. 걸린
+    # 것이 있고 여유 있는 빈 자리를 고르느라 앞선 빈 자리를 지나친 이름이 있으니, 처음 빈 자리로 옮기는 배치로도 같게 놓는다(#82)
     calls.clear()
     C.render(BACK_BESIDE)
-    assert calls == [(True, True), (False, True)]
-    # 선 위에 얹은 이름이 없어도 넓혀서 옮긴 이름이 있으면 선 옆 배치를 넓힌 조건·좁은 조건으로 놓는다
+    assert calls == [(True, True, True), (False, True, True), (True, True, False), (False, True, False)]
+    # 선 위에 얹은 이름이 없어도 넓혀서 옮긴 이름이 있으면 선 옆 배치를 넓힌 조건·좁은 조건으로 놓는다. 앞선 빈 자리를 지나쳐 옮긴
+    # 이름이 없으니 처음 빈 자리로 옮기는 배치로는 다시 놓지 않는다
     calls.clear()
     C.render(STACKED)
-    assert calls == [(True, True), (False, True), (False, False)]
+    assert calls == [(True, True, True), (False, True, True), (False, False, True)]
 
 
 def test_label_faults_count_each_element_each_relation_line_and_each_label():
