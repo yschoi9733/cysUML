@@ -147,24 +147,57 @@ def test_input_problems_point_at_the_field(data, expected):
     assert any(expected in p for p in problems(data)), problems(data)
 
 
-def test_self_message_is_an_input_error_that_points_to_notes():
-    (p,) = problems({"participants": life("A"), "messages": [call("A", "A")]})
-    assert p.startswith("messages[0]: 자기 자신('A')에게") and "notes" in p
+def test_self_call_of_a_lifeline_is_read():
+    d = S.parse({"participants": life("A"), "messages": [call("A", "A", "check()")]})
+    assert d.messages == (S.Message("A", "A", "check()", "call"),)
+
+
+@pytest.mark.parametrize("participants, message, expected", [
+    (life("U", actor=("U",)), call("U", "U"), "messages[0]: 액터('U')는 자기 자신을 부를 수 없다 — 그 일은 'notes'에 노트로 적는다"),
+    (life("A"), reply("A", "A"), "messages[0]: 자기 자신('A')에게 보내는 반환은 받지 않는다 — 자기 호출 막대는 짧게 끝나 반환으로 "
+                                 "닫을 막대가 없다. 이 반환을 뺀다"),
+    (life("A"), make("A", "A"), "messages[0]: 자기 자신('A')을 만드는 메시지는 받지 않는다 — 만드는 메시지는 다른 생명선에 보낸다"),
+])
+def test_self_message_that_is_not_drawn_is_an_input_error(participants, message, expected):
+    assert list(problems({"participants": participants, "messages": [message]})) == [expected]
+
+
+def test_actor_self_call_is_reported_beside_other_problems_of_the_message():
+    found = problems({"participants": life("U", actor=("U",)), "messages": [{"from": "U", "to": "U"}]})
+    assert list(found) == ["messages[0]: 호출 메시지는 'name'(부르는 연산)이 있어야 한다",
+                           "messages[0]: 액터('U')는 자기 자신을 부를 수 없다 — 그 일은 'notes'에 노트로 적는다"]
+
+
+def test_self_call_to_a_missing_participant_is_one_problem():
+    assert list(problems({"participants": life("A"), "messages": [call("Z", "Z")]})) == [
+        "messages[0].from: 이름이 'Z'인 참여자가 없다(있는 참여자: 'A')"]
+
+
+def test_self_call_where_a_recreated_lifeline_is_missing_is_one_problem():
+    found = problems({"participants": life("A", "X"), "messages": [make("A", "X"), call("X", "X"), make("A", "X")],
+                      "frames": [{"kind": "alt", "branches": [{"condition": "a", "first": 0, "last": 0},
+                                                              {"condition": "b", "first": 1, "last": 2}]}]})
+    assert list(found) == ["messages[1].from: 'X'의 생명선은 frames[0].branches[0]와 함께 끝나 messages[2]에서 다시 만들기 전에는 "
+                           "없다"]
 
 
 def test_all_problems_are_reported_together():
     found = problems({"participants": life("A", "B"),
-                      "messages": [call("A", "A"), call("A", "Z"), {"from": "A", "to": "B"}],
+                      "messages": [reply("A", "A"), call("A", "Z"), {"from": "A", "to": "B"}],
                       "frames": [{"kind": "ref", "before": 9}], "notes": [""]})
     assert len(found) >= 5
 
 
 def test_spacing_constants_keep_bar_ends_in_event_order():
-    # 막대 밑변을 "몇 번째 일 + 얼마"로 적고 차례만으로 견주는 셈(_after)이 기대는 순서 — 다음 메시지는 앞 일에서 생긴
-    # 밑변 후보보다 아래에 놓인다
+    # 막대 밑변을 "몇 번째 일 + 얼마"로 적고 차례만으로 견주는 셈(_after)이 기대는 순서 — 다음 일은 앞 일에서 생긴
+    # 밑변 후보보다 아래에 놓인다. 자기 호출 막대 밑변(나가는 높이 + LOOP_H + ACT_H) 아래로는 다음 메시지가 LOOP_AFTER,
+    # 프레임·ref 가로 선이 EDGE_CLEAR만큼 떨어진다
     assert S.DY >= S.ACT_H >= S.CLEAR
     assert S.FRAME_GAP + S.FRAME_HEAD >= S.ACT_H
     assert S.FRAME_AFTER >= S.EDGE_CLEAR and S.REF_AFTER >= S.EDGE_CLEAR
+    assert S.LOOP_AFTER >= S.CLEAR and S.EDGE_CLEAR > 0
+    # 나가는 선은 자기 호출 막대 윗변을 건너고, 화살촉은 고리 안에 든다(돌아오는 선은 NEST만큼 오른쪽 막대 변에서 끝난다)
+    assert S.LOOP_H >= S.CLEAR and S.LOOP_W - S.NEST > S.ARROW
 
 
 def test_alt_with_more_branches_than_messages_is_one_problem():
@@ -432,6 +465,119 @@ def test_actor_gets_a_short_bar_only_when_called():
     (u,) = bars_of(lay, "U")
     assert (u.top, u.bottom) == (lay.messages[1].y, lay.messages[1].y + S.ACT_H)
     assert lay.messages[0].start == lay.participants[0].x  # 액터는 막대 없이 생명선에서 보낸다
+
+
+def loop_bars(lay, k):
+    """messages[k](자기 호출)의 (바깥 막대, 자기 호출 막대) — 나가는 끝과 돌아오는 끝이 닿는 막대."""
+    m = lay.messages[k]
+    inner = next(b for b in lay.bars if b.top == m.back and b.x + S.ACT_W / 2 == m.end)
+    outer = next(b for b in lay.bars if b.owner == inner.owner and b.x + S.ACT_W / 2 == m.start and b.top <= m.y <= b.bottom)
+    return outer, inner
+
+
+def assert_loop(lay, k):
+    """자기 호출 모양: 바깥 막대 오른쪽 변에서 LOOP_W만큼 나가 LOOP_H 내려와, 한 단계 깊은 자기 호출 막대 오른쪽 변으로 돌아온다.
+    자기 호출 막대는 ACT_H로 끝나고 바깥 막대는 적어도 그 밑변까지 간다. 글자는 나가는 선 위, 바깥 막대 오른쪽 변에서 LABEL_GAP
+    띄운 곳부터다."""
+    m = lay.messages[k]
+    outer, inner = loop_bars(lay, k)
+    assert (m.turn, m.back) == (m.start + S.LOOP_W, m.y + S.LOOP_H)
+    assert inner.depth == outer.depth + 1 and inner.x == outer.x + S.NEST and inner.bottom == inner.top + S.ACT_H
+    assert outer.bottom >= inner.bottom and not inner.continued
+    (lab,) = m.labels
+    assert lab.box[0] == pytest.approx(m.start + S.LABEL_GAP) and lab.box[3] < m.y
+    return outer, inner
+
+
+def test_self_call_without_an_open_bar_opens_the_outer_bar_and_ends_with_it():
+    # 열린 막대 없이 자기 호출하고, 바로 다음에 다른 생명선이 보내 바깥 막대가 닫힌다 — 두 막대가 같은 높이에서 끝난다
+    lay = lay_of(life("U", "A", "B", actor=("U",)), [call("A", "A", "init()"), call("U", "B", "go()")])
+    outer, inner = assert_loop(lay, 0)
+    assert outer.top == lay.messages[0].y and outer.bottom == inner.bottom
+    assert lay.messages[1].y == inner.bottom + S.LOOP_AFTER
+    assert rule_breaks(lay) == []
+
+
+def test_self_call_from_a_nested_bar_nests_one_deeper():
+    lay = lay_of(life("A", "B"), [call("A", "B"), call("B", "A", "cb()"), call("A", "A", "check()"), reply("A", "B"),
+                                  reply("B", "A")])
+    outer, inner = assert_loop(lay, 2)
+    assert (outer.depth, inner.depth) == (1, 2)
+    assert rule_breaks(lay) == []
+
+
+def test_self_calls_one_after_another_share_the_outer_bar():
+    lay = lay_of(life("U", "A", actor=("U",)), [call("U", "A", "go()"), call("A", "A", "a()"), call("A", "A", "b()"),
+                                                reply("A", "U")])
+    (o1, i1), (o2, i2) = assert_loop(lay, 1), assert_loop(lay, 2)
+    assert o1 == o2 and i2.top >= i1.bottom + S.BAR_GAP and i1.depth == i2.depth == 1
+    assert rule_breaks(lay) == []
+
+
+def test_reply_right_after_a_self_call_leaves_the_outer_bar_below_the_self_call_bar():
+    lay = lay_of(life("U", "A", actor=("U",)), [call("U", "A", "go()"), call("A", "A", "a()"), reply("A", "U", "ok")])
+    outer, inner = assert_loop(lay, 1)
+    back = lay.messages[2]
+    assert back.y == inner.bottom + S.LOOP_AFTER and outer.bottom == back.y and back.start == outer.x - S.ACT_W / 2
+    assert rule_breaks(lay) == []
+
+
+def test_self_call_bars_end_inside_their_branch_frame_and_before_a_ref():
+    # alt 칸의 첫 메시지(1), 프레임 안 마지막 메시지(3), ref 바로 앞(4)의 자기 호출
+    lay = lay_of(life("U", "A", "B", actor=("U",)),
+                 [call("U", "A", "go()"), call("A", "A", "a()"), call("A", "B", "f()"), call("A", "A", "b()"), call("A", "A", "c()"),
+                  reply("A", "U")],
+                 [{"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 2}, {"condition": "y", "first": 3, "last": 3}]},
+                  {"kind": "ref", "name": "R", "before": 5}])
+    (f,), (r,) = lay.frames, lay.refs
+    (divider,) = f.dividers
+    inners = [assert_loop(lay, k)[1] for k in (1, 3, 4)]
+    assert f.top < lay.messages[1].y and inners[0].bottom + S.EDGE_CLEAR <= divider
+    assert divider < lay.messages[3].y and inners[1].bottom + S.EDGE_CLEAR <= f.bottom
+    assert inners[2].bottom + S.EDGE_CLEAR <= r.top
+    assert rule_breaks(lay) == []
+
+
+def test_self_call_from_a_bar_going_on_in_the_next_branch():
+    # 앞 칸에서 반환한 A의 막대를 다음 칸 나눔선 아래에서 이어 가고, 그 막대에서 자기 호출한다
+    lay = lay_of(life("U", "A", actor=("U",)), [call("U", "A", "go()"), reply("A", "U", "no"), call("A", "A", "retry()"),
+                                                reply("A", "U", "ok")],
+                 [{"kind": "alt", "branches": [{"condition": "x", "first": 1, "last": 1}, {"condition": "y", "first": 2, "last": 3}]}])
+    outer, _ = assert_loop(lay, 2)
+    assert outer.continued
+    assert rule_breaks(lay) == []
+
+
+def test_self_call_widens_the_gap_to_the_right_neighbour():
+    lay = lay_of(life("A", "B"), [call("A", "A", "aVeryLongOperationName(withArguments)")])
+    m, b = lay.messages[0], lay.participants[1]
+    assert b.x - S.ACT_W / 2 - m.labels[0].box[2] == pytest.approx(S.LABEL_GAP)
+    assert rule_breaks(lay) == []
+
+
+def test_frame_takes_in_the_loop_of_the_rightmost_participant():
+    lay = lay_of(life("A", "B"), [call("A", "B", "f()"), call("B", "B", "aVeryLongOperationName()")],
+                 [{"kind": "opt", "first": 1, "last": 1}])
+    m, (f,) = lay.messages[1], lay.frames
+    assert f.right == max(m.turn, m.labels[0].box[2]) + S.FRAME_RIGHT
+    assert rule_breaks(lay) == []
+
+
+def test_loop_of_the_rightmost_participant_counts_toward_the_size_limit(monkeypatch):
+    data = {"participants": life("A"), "messages": [call("A", "A", "x" * 60)]}
+    label_right = S.layout(S.parse(data)).messages[0].labels[0].box[2]
+    monkeypatch.setattr(S, "MAX_EXTENT", label_right)  # 참여자만 보면 그림 폭이 이보다 훨씬 좁다
+    with pytest.raises(S.InputError, match="그림이 너무 크다"):
+        S.layout(S.parse(data))
+
+
+def test_self_call_draws_a_loop_with_the_arrowhead_at_the_return_height():
+    d = S.render({"participants": life("A"), "messages": [call("A", "A", "f()")]})
+    m = d.layout.messages[0]
+    (line,) = [r for r in d.canvas.records if isinstance(r, Line) and r.owner == "messages[0]"]
+    assert line.points == ((m.start, m.y), (m.turn, m.y), (m.turn, m.back), (m.end, m.back)) and line.dash is None
+    (head,) = [r for r in d.canvas.records if isinstance(r, Polygon) and r.owner == "messages[0]"]
+    assert (m.end, m.back) in head.points and all(x >= m.end for x, _ in head.points)
 
 
 def test_created_lifeline_head_comes_down_to_the_create_message():

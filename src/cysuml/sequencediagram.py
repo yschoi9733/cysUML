@@ -6,7 +6,8 @@
 1. 활성 막대(_Activations): 메시지를 차례대로 넣어 막대를 잇는다. 막대는 그 생명선이 반환하거나, 부른 쪽이 다음 메시지를
    보낼 때까지 이어진다. 밑변은 "몇 번째 일의 높이 + 얼마"들 가운데 가장 낮은 곳으로 적어 두어, 높이를 정하기 전에도 어느
    막대가 어느 메시지 옆을 지나는지 안다. 프레임이 열릴 때 열려 있던 막대는 프레임을 위아래로 감싸고, 프레임(alt는 칸) 안에서
-   연 막대는 그 안에서 닫는다 — 프레임 선이 막대를 자르지 않게.
+   연 막대는 그 안에서 닫는다 — 프레임 선이 막대를 자르지 않게. 생명선이 자기 자신을 부르는 호출(자기 호출)은 오른쪽으로 나갔다
+   돌아오는 고리로 그리고, 돌아오는 높이에서 연 짧은 막대로 끝낸다.
 2. 가로(_columns): 이웃 생명선 사이를 그 사이를 지나는 메시지 글자가 들어갈 만큼 띄운다.
 3. 세로(_Placer): 메시지·프레임·ref를 차례대로 놓되, 앞서 놓은 글자·선·머리·막대에 걸리면 걸리지 않는 곳까지 내린다.
 
@@ -78,7 +79,7 @@ NEST = 7           # 같은 생명선에 겹친 막대를 오른쪽으로 비키
 
 # 메시지
 FIRST = 80         # 첫 메시지 높이(머리 윗변 0 기준)
-DY = 28            # 메시지 사이 최소 간격 — ACT_H 이상이어야 한다(막대 밑변 셈이 이것에 기댄다)
+DY = 28            # 메시지 사이 최소 간격 — ACT_H 이상이어야 한다(막대 밑변 셈이 이것에 기댄다. 자기 호출 뒤는 LOOP_AFTER)
 DY_FACING = 40     # 앞 글자가 선 아래, 이번 글자가 선 위에 있어 마주 볼 때
 LABEL_DY = 10      # 선에서 글자 가운데까지
 CREATE_DY = 25     # 만드는 메시지의 두 줄 가운데 선에서 먼 줄(두 줄 상자가 겹치지 않게 LABEL_DY에서 15)
@@ -89,6 +90,11 @@ ARROW = 10
 ARROW_HALF = 5
 REPLY_DASH = (4, 3)
 CREATE_LABEL = "«create»"
+
+# 자기 호출
+LOOP_W = 36        # 바깥 막대 오른쪽 변에서 고리 오른쪽 세로 선까지
+LOOP_H = 20        # 나가는 높이에서 돌아오는 높이(자기 호출 막대 윗변)까지
+LOOP_AFTER = 12    # 자기 호출 막대 밑변에서 다음 메시지까지 — 막대 밑변 셈이 자기 호출 뒤에는 이것에 기댄다
 
 # 간격 규칙
 PAD = 3            # 새로 놓는 것과 앞서 놓은 글자·선·머리 사이(흰 바탕 BG_MARGIN보다 넓게)
@@ -274,7 +280,9 @@ class PlacedBar:
 
 @dataclass(frozen=True)
 class PlacedMessage:
-    """start는 선이 시작하는 x, end는 화살촉 끝 x다. 막대가 있으면 막대 변, 만드는 메시지는 만들어지는 머리의 변이다."""
+    """start는 선이 시작하는 x, end는 화살촉 끝 x다. 막대가 있으면 막대 변, 만드는 메시지는 만들어지는 머리의 변이다. 자기
+    호출은 y(나가는 높이)에서 오른쪽 turn까지 나가 back(돌아오는 높이)으로 내려온 뒤 왼쪽 end로 돌아오는 고리이고, 그 밖의
+    메시지는 turn·back이 None이다."""
 
     message: Message
     owner: str
@@ -282,10 +290,37 @@ class PlacedMessage:
     start: float
     end: float
     labels: tuple[Label, ...]
+    turn: Optional[float] = None
+    back: Optional[float] = None
+
+    @property
+    def tip_y(self) -> float:
+        """화살촉 끝 높이."""
+        return self.y if self.back is None else self.back
+
+    @cached_property
+    def rows(self) -> tuple[tuple[float, float, float], ...]:
+        """가로 선분 (높이, 왼쪽 x, 오른쪽 x). 자기 호출은 나가는 선과 돌아오는 선 둘이다."""
+        if self.turn is None:
+            return ((self.y, min(self.start, self.end), max(self.start, self.end)),)
+        return ((self.y, self.start, self.turn), (self.tip_y, self.end, self.turn))
+
+    @property
+    def riser(self) -> Optional[Box]:
+        """자기 호출 고리의 세로 선(폭 0인 상자). 자기 호출이 아니면 None."""
+        return None if self.turn is None else (self.turn, self.y, self.turn, self.tip_y)
+
+    @property
+    def extent(self) -> Box:
+        """선이 차지하는 상자(화살촉 빼고)."""
+        (_, x0, x1), *_ = self.rows
+        return (x0, self.y, x1, self.y) if self.turn is None else (self.start, self.y, self.turn, self.tip_y)
 
     @cached_property
     def arrow(self) -> Box:
         """화살촉이 차지하는 상자."""
+        if self.turn is not None:
+            return _arrow_box(self.end, -1, self.tip_y)
         return _arrow_box(self.end, 1 if self.end > self.start else -1, self.y)
 
 
@@ -427,12 +462,13 @@ class _SeqReader(Reader):
             return name, None
         return name, Participant(name, kind)
 
-    def message(self, v, path: str) -> tuple[Optional[str], Optional[str], Optional[Message]]:
-        """(읽은 from, 읽은 to, 메시지). 다른 필드가 틀려도 from·to가 없는 참여자를 가리키는지 함께 알리려고 따로 돌려준다."""
+    def message(self, v, path: str) -> tuple[Optional[str], Optional[str], Optional[str], Optional[Message]]:
+        """(읽은 from, 읽은 to, 읽은 kind, 메시지). 다른 필드가 틀려도 from·to가 없는 참여자를 가리키는지, 액터가 자기 자신을
+        부르는지 함께 알리려고 따로 돌려준다(참여자 종류는 diagram()이 안다)."""
         before = len(self.problems)
         o = self.obj(v, path, MESSAGE_FIELDS, ("from", "to"))
         if o is None:
-            return None, None, None
+            return None, None, None, None
         kind = self.choice(o["kind"], _at(path, "kind"), MESSAGE_KINDS) if "kind" in o else "call"
         source = self.text(o["from"], _at(path, "from"), bold=True, name=True) if "from" in o else None
         target = self.text(o["to"], _at(path, "to"), bold=True, name=True) if "to" in o else None
@@ -440,10 +476,14 @@ class _SeqReader(Reader):
         if kind == "call" and "name" not in o:
             self.fail(path, "호출 메시지는 'name'(부르는 연산)이 있어야 한다")
         if source is not None and source == target:
-            self.fail(path, f"자기 자신({_show(source)})에게 보내는 메시지는 그리지 않는다 — 그 일은 'notes'에 노트로 적는다")
+            if kind == "reply":
+                self.fail(path, f"자기 자신({_show(source)})에게 보내는 반환은 받지 않는다 — 자기 호출 막대는 짧게 끝나 반환으로 닫을 "
+                                "막대가 없다. 이 반환을 뺀다")
+            elif kind == "create":
+                self.fail(path, f"자기 자신({_show(source)})을 만드는 메시지는 받지 않는다 — 만드는 메시지는 다른 생명선에 보낸다")
         if len(self.problems) > before:
-            return source, target, None
-        return source, target, Message(source, target, name, kind)
+            return source, target, kind, None
+        return source, target, kind, Message(source, target, name, kind)
 
     def span(self, o: dict, path: str, n: int, condition: Optional[str]) -> Optional[Branch]:
         first = self.position(o["first"], _at(path, "first"), n - 1) if "first" in o else None
@@ -556,8 +596,13 @@ class _SeqReader(Reader):
         talks: dict[str, list[tuple[int, str]]] = defaultdict(list)  # 참여자 → 주고받은 (메시지 자리, "from"·"to")
         for i, v in enumerate(raw_m):
             path = _at("messages", i)
-            source, target, m = self.message(v, path)
+            source, target, kind, m = self.message(v, path)
             missing = [(key, who) for key, who in (("from", source), ("to", target)) if who is not None and who not in seen]
+            if source is not None and source == target:
+                missing = missing[:1]  # 한 이름을 from·to로 두 번 가리키므로, 없는 참여자는 한 번만 알린다
+                if not missing and kind == "call" and kinds.get(source) == "actor":
+                    self.fail(path, f"액터({_show(source)})는 자기 자신을 부를 수 없다 — 그 일은 'notes'에 노트로 적는다")
+                    m = None
             for key, who in missing:
                 self.fail(_at(path, key), f"이름이 {_show(who)}인 참여자가 없다(있는 참여자: {known or '없음'})")
             if m is not None and not missing:
@@ -575,7 +620,8 @@ class _SeqReader(Reader):
                 used.setdefault(source, i)
                 used.setdefault(target, i)
                 talks[source].append((i, "from"))
-                talks[target].append((i, "to"))
+                if target != source:  # 자기 호출은 한 번만 — 생명선이 없는 구간이면 한 번만 알리게
+                    talks[target].append((i, "to"))
 
         frames = [self.frame(v, _at("frames", i), n, i) for i, v in enumerate(lists["frames"])]
         fragments = sorted((f for f in frames if isinstance(f, Fragment)), key=lambda f: (f.first, f.index))
@@ -629,11 +675,13 @@ class _Bar:
     parent: Optional[_Bar] = None  # 이 막대를 연 호출을 보낸 막대 — 닫을 때 밑변을 넘겨받는다
     depth: int = 0
     last: int = 0  # terms 가운데 가장 늦은 일의 차례(다 놓인 뒤에야 밑변이 정해진다)
+    loop: bool = False  # 자기 호출 막대 — 윗변이 그 메시지의 돌아오는 높이(top번째 일의 높이 + LOOP_H)다
 
 
 def _after(term: tuple[int, float], e: int) -> bool:
-    """밑변 후보가 e번째 일의 높이보다 아래인지. 다음 메시지는 앞 일에서 생기는 후보보다 아래에 놓이므로(DY ≥ ACT_H,
-    프레임·ref 뒤 간격 ≥ EDGE_CLEAR — 테스트가 상수 순서를 확인한다) 차례만으로 가려진다."""
+    """밑변 후보가 e번째 일의 높이보다 아래인지. 다음 일은 앞 일에서 생기는 후보보다 아래에 놓이므로(DY ≥ ACT_H, 자기 호출
+    뒤에는 LOOP_H + ACT_H보다 LOOP_AFTER만큼 아래, 프레임·ref 뒤 간격 ≥ EDGE_CLEAR — 테스트가 상수 순서를 확인한다) 차례만으로
+    가려진다."""
     j, off = term
     return j > e or (j == e and off > 0)
 
@@ -655,6 +703,9 @@ class _Activations:
       잇는다(대답을 기다리는 막대 — 그 막대와 그 막대를 부른 막대들은 다른 생명선이 메시지를 보내도 닫히지 않고, 부른
       쪽이 먼저 반환해도 그 막대는 대답까지 남는다). 아니면 높이 ACT_H로 그리고 쌓지 않는다.
       액터는 대답할 때 그 막대에서, 그 밖에는 막대 없이 생명선에서 보낸다. 만드는 메시지는 막대를 만들지 않는다.
+    - 생명선의 자기 호출은 보내는 쪽 규칙대로 보내는 막대(바깥 막대 — 없으면 그 자리에서 연다)를 정하고, 돌아오는 높이에서
+      자기 호출 막대를 연다. 그 막대는 높이 ACT_H로 끝나 쌓지 않고(그 뒤 메시지는 바깥 막대에서 나간다), 바깥 막대를 그
+      밑변까지 잇는다 — 액터가 받는 호출 가운데 대답까지 잇지 않는 것과 같다.
     닫는 막대의 밑변은 "윗변 + ACT_H"와 그 막대가 마지막으로 주고받은 높이 가운데 아래쪽이고, 그 막대가 부른 막대보다는
     아래다. 부른 막대가 메시지 높이에서 끝났으면 그보다 CLEAR만큼 더 잇는다 — 그 메시지 선이 이 막대 생명선을 지날 때 선이
     막대 밑변을 따라가지 않게(그 밑변은 메시지 높이와 같이 움직여 메시지를 내려서는 못 비킨다).
@@ -675,15 +726,18 @@ class _Activations:
         self.kept: list[_Bar] = []    # 지금 프레임이 열릴 때 열려 있던 막대(쌓인 차례대로, alt는 지금 칸에서 잇는 막대)
         self.ended: list[bool] = []   # kept 자리마다, 앞 칸에서 반환한 적이 있는지
 
-    def open(self, life: int, e: int, fixed: bool = False, parent: Optional[_Bar] = None, sticky: bool = False) -> _Bar:
-        """막대를 연다. fixed(액터가 받는 호출)면 높이 ACT_H로 끝나 쌓지 않고, 부른 막대를 그만큼 잇는다(부른 쪽이 먼저
-        끝나지 않게). 다만 sticky(액터가 대답할 호출)면 쌓아 두고 대답할 때 닫는다."""
-        b = _Bar(life, e, {(e, ACT_H)}, parent=parent, sticky=sticky)
+    def open(self, life: int, e: int, fixed: bool = False, parent: Optional[_Bar] = None, sticky: bool = False,
+             loop: bool = False) -> _Bar:
+        """막대를 연다. fixed(액터가 받는 호출·자기 호출)면 높이 ACT_H로 끝나 쌓지 않고, 부른 막대를 그 밑변까지 잇는다(부른
+        쪽이 먼저 끝나지 않게). 다만 sticky(액터가 대답할 호출)면 쌓아 두고 대답할 때 닫는다. loop(자기 호출)면 윗변이 돌아오는
+        높이라 밑변이 LOOP_H만큼 더 내려간다."""
+        bottom = (e, LOOP_H + ACT_H if loop else ACT_H)
+        b = _Bar(life, e, {bottom}, parent=parent, sticky=sticky, loop=loop)
         self.bars.append(b)
         if not fixed or sticky:
             self.stack.append(b)
         elif parent is not None:
-            parent.terms.add((e, ACT_H))
+            parent.terms.add(bottom)
         return b
 
     def find(self, life: int) -> Optional[_Bar]:
@@ -754,7 +808,9 @@ class _Activations:
         else:
             if s is not None:
                 s.terms.add((e, 0))
-            if kind == "call":
+            if kind == "call" and src == dst:  # 자기 호출(생명선만 — 액터는 입력 오류다)
+                d = self.open(dst, e, fixed=True, parent=s, loop=True)
+            elif kind == "call":
                 d = self.open(dst, e, fixed=dst_actor, parent=s, sticky=dst_actor and sticky)
         return s, d
 
@@ -994,6 +1050,17 @@ def _label_below(m: Message, rightward: bool) -> bool:
     return m.kind == "reply" or not rightward
 
 
+def _loop_reach(m: Message, depth: int) -> float:
+    """자기 호출 고리와 글자가 생명선 가운데에서 오른쪽으로 닿는 곳. depth는 바깥 막대 깊이다 — 고리는 그 막대 오른쪽 변에서
+    나가고, 글자는 그 변에서 LABEL_GAP 띄운 곳부터 쓴다."""
+    out = NEST * depth + ACT_W / 2
+    reach = out + LOOP_W
+    if m.name:
+        left_off, right_off = _extent([m.name])
+        reach = max(reach, out + LABEL_GAP + right_off - left_off)
+    return reach
+
+
 def _margin(m: Message, s: int, t: int, z: int, toward_right: bool, cols: _Columns) -> float:
     """메시지 글자가 칸 경계 생명선 z에서 떨어져야 하는 거리(z 가운데부터). toward_right면 칸이 z의 오른쪽에 있다."""
     if z == t and m.kind == "create":
@@ -1011,7 +1078,9 @@ def _margin(m: Message, s: int, t: int, z: int, toward_right: bool, cols: _Colum
 def _columns(d: Diagram, plan: _Plan) -> _Columns:
     """이웃 생명선 간격 = 머리가 닿지 않고, 막대가 이웃 머리에 닿지 않고, 그 사이를 지나는 메시지마다 글자가 들어가는 칸이
     하나는 있을 만큼. 칸은 그 메시지 높이를 막대가 지나는 사이 생명선으로 나눈다(막대가 없는 생명선은 글자가 건너고 그 밑
-    점선은 지운다). 여러 칸을 건너는 메시지는 가장 덜 모자란 칸을 넓히고, 모자란 만큼 그 칸의 간격에 나눈다."""
+    점선은 지운다). 여러 칸을 건너는 메시지는 가장 덜 모자란 칸을 넓히고, 모자란 만큼 그 칸의 간격에 나눈다. 자기 호출은
+    오른쪽 이웃 막대 왼쪽 변과 고리·글자 사이가 LABEL_GAP 이상 남도록 그 이웃과의 간격을 넓힌다(맨 오른쪽이면 _finish가
+    그림 오른쪽 끝을 늘린다)."""
     ps, index = d.participants, plan.index
     width = tuple(float(max(ACTOR_W, math.ceil(T.text_width(p.name, True) + ACTOR_PAD))) if p.kind == "actor"
                   else float(max(LIFE_W, math.ceil(T.text_width(p.name, True) + HEAD_PAD))) for p in ps)
@@ -1032,6 +1101,14 @@ def _columns(d: Diagram, plan: _Plan) -> _Columns:
                    key=lambda k: (abs(index[d.messages[k].source] - index[d.messages[k].target]), k))
     for k in order:
         m = d.messages[k]
+        if m.source == m.target:
+            s = index[m.source]
+            if s + 1 < len(ps):
+                xs = offsets()
+                lack = _loop_reach(m, plan.attach[k][0].depth) + LABEL_GAP + ACT_W / 2 - (xs[s + 1] - xs[s])
+                if lack > 0:
+                    gaps[s] += lack
+            continue
         lines = _label_lines(m)
         if not lines:
             continue
@@ -1103,6 +1180,9 @@ class _Placer:
     def _bar_x(self, b: _Bar) -> float:
         return self.cols.x[b.life] + NEST * b.depth
 
+    def _top(self, b: _Bar) -> float:
+        return self.ys[b.top] + (LOOP_H if b.loop else b.top_off)
+
     def _bottom(self, b: _Bar, e: int) -> float:
         """e번째 일을 놓을 때 막대 밑변. 아직 안 놓인 일에 달렸으면 INF."""
         if b.last >= e:
@@ -1117,7 +1197,7 @@ class _Placer:
         for b in self.plan.bars:
             if b.top < e:
                 x = self._bar_x(b)
-                out.append((b, (x - ACT_W / 2, self.ys[b.top] + b.top_off, x + ACT_W / 2, self._bottom(b, e))))
+                out.append((b, (x - ACT_W / 2, self._top(b), x + ACT_W / 2, self._bottom(b, e))))
         return out
 
     def _closed_bottom(self, e: int) -> float:
@@ -1142,9 +1222,10 @@ class _Placer:
         return label
 
     def _settle(self, e: int, base: float, pieces: list[tuple[Box, bool]], new_bars: list[_Bar],
-                span: tuple[float, float], attached: tuple) -> float:
-        """pieces(높이 0 기준 상자, 막대를 피해야 하는지)와 새 막대가 앞서 놓은 것에 걸리지 않고, 선(높이 0, 가로 span)이
-        건너는 막대의 끝에서 CLEAR 넘게 떨어지는 가장 위 높이(base 이상)."""
+                rows: list[tuple[float, float, float]], attached: tuple) -> float:
+        """pieces(높이 0 기준 상자, 막대를 피해야 하는지)와 새 막대가 앞서 놓은 것에 걸리지 않고, 가로 선분 rows(높이 0 기준
+        (높이, 왼쪽 x, 오른쪽 x))가 건너는 막대의 끝에서 CLEAR 넘게 떨어지는 가장 위 높이(base 이상). 새 자기 호출 막대는
+        돌아오는 높이에서 시작한다."""
         # y는 base 아래로만 움직이므로, 가장 위로 뻗는 조각보다 PAD 넘게 위에서 끝난 것은 걸릴 수 없다
         reach = base + min([0.0] + [p[0][1] for p in pieces]) - max(PAD, CLEAR, BAR_GAP)
         near = [o for o in self.obstacles if o[3] > reach]
@@ -1164,20 +1245,24 @@ class _Placer:
                                 raise LayoutError(f"배치 버그: 끝나지 않은 막대에 걸려 내릴 수 없다({box} / {bx})")
                             need = max(need, bx[3] + PAD - dy0 + EPS)
             for b, bx in bars:
-                if b in attached or not (bx[0] < span[1] and span[0] < bx[2]):
+                if b in attached:
                     continue
-                for end in (bx[1], bx[3]):
-                    if end != INF and abs(y - end) < CLEAR:
-                        need = max(need, end + CLEAR + EPS)
+                for dy, x0, x1 in rows:
+                    if not (bx[0] < x1 and x0 < bx[2]):
+                        continue
+                    for end in (bx[1], bx[3]):
+                        if end != INF and abs(y + dy - end) < CLEAR:
+                            need = max(need, end + CLEAR - dy + EPS)
             for nb in new_bars:
                 x = self._bar_x(nb)
-                box = (x - ACT_W / 2, y, x + ACT_W / 2, y + ACT_H)
+                off = LOOP_H if nb.loop else 0.0
+                box = (x - ACT_W / 2, y + off, x + ACT_W / 2, y + off + ACT_H)
                 for o in near:
                     if overlap(box, o, PAD):
-                        need = max(need, o[3] + PAD + EPS)
+                        need = max(need, o[3] + PAD - off + EPS)
                 for b, bx in bars:
-                    if b.life == nb.life and b.depth == nb.depth and bx[3] != INF and bx[3] > y - BAR_GAP:
-                        need = max(need, bx[3] + BAR_GAP + EPS)
+                    if b.life == nb.life and b.depth == nb.depth and bx[3] != INF and bx[3] > y + off - BAR_GAP:
+                        need = max(need, bx[3] + BAR_GAP - off + EPS)
             if need == -INF:
                 return y
             y = max(need, y + EPS)
@@ -1191,6 +1276,8 @@ class _Placer:
         prev, py = self.plan.events[e - 1], self.ys[e - 1]
         if prev.kind == "message":
             pm = self.d.messages[prev.item]
+            if pm.source == pm.target:  # 자기 호출 막대 밑변(_after가 기대는 곳) 아래
+                return py + LOOP_H + ACT_H + LOOP_AFTER
             prev_below = _label_below(pm, self.index[pm.target] > self.index[pm.source]) if _label_lines(pm) else None
             return max(FIRST, py + (DY_FACING if prev_below is True and below is False else DY))
         if prev.kind in ("start", "branch"):
@@ -1222,9 +1309,36 @@ class _Placer:
                 return best
         raise LayoutError(f"배치 버그: messages[{k}] 글자가 들어갈 칸이 없다")
 
+    def self_call(self, e: int, k: int) -> None:
+        """자기 호출: 바깥 막대 오른쪽 변에서 LOOP_W만큼 나가 LOOP_H 내려온 뒤 자기 호출 막대 오른쪽 변으로 돌아오는 고리.
+        글자는 나가는 선 위에, 바깥 막대 오른쪽 변에서 LABEL_GAP 띄운 곳부터 쓴다."""
+        m = self.d.messages[k]
+        sb, db = self.plan.attach[k]
+        out = self._bar_x(sb) + ACT_W / 2
+        end = self._bar_x(db) + ACT_W / 2
+        turn = out + LOOP_W
+        pieces: list[tuple[Box, bool]] = [((out, 0.0, turn, LOOP_H), True), (_arrow_box(end, -1, LOOP_H), False)]
+        labels_rel = []
+        if m.name:
+            left_off, _ = _extent([m.name])
+            x = out + LABEL_GAP - left_off
+            labels_rel.append((m.name, x, -LABEL_DY))
+            pieces.append((T.place(x, -LABEL_DY, m.name, False, "mm").box, True))
+        new_bars = [b for b in (sb, db) if b.top == e]
+        y = self._settle(e, self._base(e, False), pieces, new_bars, [(0.0, out, turn), (LOOP_H, end, turn)], (sb, db))
+        self.ys.append(y)
+        for (x0, dy0, x1, dy1), _ in pieces:
+            self._add((x0, y + dy0, x1, y + dy1))
+        self.messages.append(PlacedMessage(m, f"messages[{k}]", y, out, end,
+                                           tuple(Label(text, x, y + dy, bg=True) for text, x, dy in labels_rel),
+                                           turn=turn, back=y + LOOP_H))
+
     def message(self, e: int, k: int) -> None:
         m = self.d.messages[k]
         s, t = self.index[m.source], self.index[m.target]
+        if s == t:
+            self.self_call(e, k)
+            return
         sb, db = self.plan.attach[k]
         c = self.cols
         right = t > s  # 생명선은 참여자 순서대로 왼쪽에서 오른쪽이다
@@ -1251,7 +1365,7 @@ class _Placer:
             head = self._head_box(t, -HEAD_H / 2)
             pieces.append((head, True))
         new_bars = [b for b in (sb, db) if b is not None and b.top == e]
-        y = self._settle(e, self._base(e, below), pieces, new_bars, (min(x1, x2), max(x1, x2)), (sb, db))
+        y = self._settle(e, self._base(e, below), pieces, new_bars, [(0.0, min(x1, x2), max(x1, x2))], (sb, db))
         self.ys.append(y)
         for (x0, dy0, x1_, dy1), _ in pieces:
             self._add((x0, y + dy0, x1_, y + dy1))
@@ -1322,7 +1436,7 @@ class _Placer:
             bottom = self._bottom(b, done)
             closer = next((events[j].item for j, off in sorted(b.terms) if events[j].kind == "message" and off in (0, CLEAR)
                            and self.ys[j] + off == bottom), None)
-            bars.append(PlacedBar(d.participants[b.life].name, self._bar_x(b), self.ys[b.top] + b.top_off, bottom, b.depth,
+            bars.append(PlacedBar(d.participants[b.life].name, self._bar_x(b), self._top(b), bottom, b.depth,
                                   b.top_off != 0, closer))
         life_end = max([self.floor] + [b.bottom for b in bars]) + LIFE_TAIL
         participants = []
@@ -1336,6 +1450,9 @@ class _Placer:
                 lives = (Life(0.0, dash, life_end),)
             participants.append(PlacedParticipant(p, c.x[i], c.width[i], lives))
         right = max(c.x[i] + max(c.width[i] / 2, c.right_ext[i]) for i in range(len(c.x))) + FRAME_RIGHT
+        for m in self.messages:  # 맨 오른쪽 참여자의 자기 호출 고리·글자를 품게 — 프레임이 없어도 그림 크기 상한을 이것으로 센다
+            if m.turn is not None:
+                right = max(right, max([m.turn] + [lab.box[2] for lab in m.labels]) + FRAME_RIGHT)
         for part in self.frames.values():
             for cond in part.conditions:
                 right = max(right, cond.box[2] + COND_GAP)
@@ -1404,7 +1521,10 @@ def _draw_participant(c: Canvas, p: PlacedParticipant) -> None:
 
 def _draw_message(c: Canvas, m: PlacedMessage) -> None:
     y, o = m.y, m.owner
-    if m.message.kind == "call":
+    if m.turn is not None:
+        c.line([(m.start, y), (m.turn, y), (m.turn, m.tip_y), (m.end, m.tip_y)], owner=o)
+        c.closed_arrow((m.end, m.tip_y), (m.turn, m.tip_y), owner=o)
+    elif m.message.kind == "call":
         c.line([(m.start, y), (m.end, y)], owner=o)
         c.closed_arrow((m.end, y), (m.start, y), owner=o)
     else:

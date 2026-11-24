@@ -16,6 +16,9 @@ BG_MARGIN)까지 차지한 것으로 본다. 메시지 선이 사이 생명선�
 안에서 끝나거나 시작하지 않는다는 것으로 본다. 다만 프레임 안 메시지에서 끝나는 막대는 윗변만 건너도 된다 — 그 메시지가 막대에
 닿거나, 그 메시지에서 끝난 막대(이 막대가 부른 막대 등)보다 CLEAR 아래에서 끝난 것이다.
 
+메시지 선은 가로 선분(PlacedMessage.rows)으로 본다. 자기 호출은 나가는 선·세로 선·돌아오는 선의 고리라, 선 끝마다 그 끝의
+높이(나가는 높이·돌아오는 높이)로 막대에 닿는지 보고, 고리가 둘러싼 곳이 그 고리가 잇는 두 막대 밖의 생명선·막대에 닿으면 건다.
+
 막대 모양 가운데 교류도 배치 규칙(#8)이 정한 것은 걸지 않는다: alt 앞 칸에서 반환한 생명선의 막대는 다음 칸 나눔선 아래에서 이어
 가다 alt 밑변 EDGE_CLEAR 위에서 메시지 없이 끝나고, 옆으로 비킨(깊이가 다른) 막대는 바깥 막대보다 길게 갈 수 있다(시작할 때만 바깥
 막대가 열려 있으면 된다). 막대끼리 겹치는 것은 같은 깊이끼리, 그리고 다른 생명선끼리만 본다.
@@ -51,6 +54,7 @@ KINDS = (  # 불합격 종류(이 순서로 낸다)
     "line_at_bar_end",           # 메시지 선이 건너는 막대의 윗변·밑변에 붙는다
     "line_overlap",              # 메시지 선끼리 붙어 한 선으로 보인다
     "line_through_participant",  # 메시지 선·화살촉이 머리를 지나거나 머리에 닿는다
+    "loop_on_lifeline",          # 자기 호출 고리가 생명선이나, 그 고리가 잇는 두 막대 밖의 막대에 닿는다
     "frame_cuts_bar",            # 프레임이 막대를 자른다
     "bar_outside_frame",         # 막대가 프레임 옆 변 밖으로 나간다
     "frame_overlap",             # 프레임·ref끼리 겹치거나 붙는다
@@ -81,6 +85,7 @@ HINTS = {
     "line_at_bar_end": "참여자 순서를 바꿔 이 메시지가 건너는 생명선을 줄이거나, 메시지 차례를 바꾼다.",
     "line_overlap": "메시지 차례를 바꾸거나 그림을 나눈다.",
     "line_through_participant": "참여자 순서를 바꿔 이 메시지가 건너는 생명선을 줄인다.",
+    "loop_on_lifeline": "자기 호출의 글자를 줄이거나 참여자 순서를 바꾼다.",
     "frame_cuts_bar": FRAME_HINT,
     "bar_outside_frame": FRAME_HINT,
     "frame_overlap": FRAME_HINT,
@@ -162,16 +167,40 @@ def _holds(b: PlacedBar, y: float) -> bool:
     return b.top - EPS <= y <= b.bottom + EPS
 
 
-def _enters(m: PlacedMessage, b: PlacedBar) -> bool:
-    """메시지 선이 막대 안쪽을 가로로 지나는지(변에 닿기만 하는 것은 아니다)."""
-    x0, x1 = sorted((m.start, m.end))
+Row = tuple[float, float, float]  # 가로 선분 (높이, 왼쪽 x, 오른쪽 x)
+
+
+def _enters(row: Row, b: PlacedBar) -> bool:
+    """가로 선분이 막대 안쪽을 가로로 지나는지(변에 닿기만 하는 것은 아니다). 높이는 보지 않는다."""
+    _, x0, x1 = row
     return x0 < b.rect[2] - EPS and b.rect[0] + EPS < x1
 
 
-def _attached(m: PlacedMessage, b: PlacedBar) -> bool:
-    """메시지 선 끝이 그 막대 변에 바깥에서 닿는지 — 맞은편 변까지 막대를 지나 닿는 것은 아니다."""
-    return (_holds(b, m.y) and any(_on(x, b.rect[0]) or _on(x, b.rect[2]) for x in (m.start, m.end))
-            and not _enters(m, b))
+def _ends(m: PlacedMessage) -> tuple[tuple[str, float, float, Row, str], ...]:
+    """선 끝마다 (이름, x, 높이, 그 끝의 가로 선분, 그 끝의 참여자 이름). 자기 호출은 시작이 나가는 선에, 끝이 돌아오는 선에 있다."""
+    return (("시작", m.start, m.y, m.rows[0], m.message.source), ("끝", m.end, m.tip_y, m.rows[-1], m.message.target))
+
+
+def _touches(m: PlacedMessage, b: PlacedBar) -> list[float]:
+    """메시지 선 끝이 그 막대 변에 바깥에서 닿는 높이들 — 맞은편 변까지 막대를 지나 닿는 것은 아니다."""
+    return [y for _, x, y, row, _ in _ends(m)
+            if _holds(b, y) and (_on(x, b.rect[0]) or _on(x, b.rect[2])) and not _enters(row, b)]
+
+
+def _row_box(row: Row) -> Box:
+    y, x0, x1 = row
+    return x0, y, x1, y
+
+
+def _line_hit(m: PlacedMessage, box: Box) -> Optional[Box]:
+    """메시지 선(자기 호출이면 세로 선까지)이 상자 안을 지나는 곳. 안 지나면 None(화살촉은 보지 않는다)."""
+    for y, x0, x1 in m.rows:
+        if _crosses(y, x0, x1, box):
+            return max(x0, box[0]), y, min(x1, box[2]), y
+    r = m.riser
+    if r is not None and _crosses_v(r[0], r[1], r[3], box):
+        return r[0], max(r[1], box[1]), r[0], min(r[3], box[3])
+    return None
 
 
 def _message(m: PlacedMessage) -> str:
@@ -226,11 +255,14 @@ class _Scene:
         self.stacked = dict(by_depth)
         self.touching: list[list[int]] = [[] for _ in lay.bars]      # 막대마다 선 끝이 그 변에 바깥에서 닿는 메시지
         self.touched: list[list[int]] = [[] for _ in lay.messages]   # 메시지마다 그 선 끝이 변에 바깥에서 닿는 막대
+        self.touch_ys: list[list[float]] = [[] for _ in lay.bars]    # 막대마다 그 변에 바깥에서 닿는 선 끝의 높이
         for i, b in enumerate(lay.bars):
             for k, m in enumerate(lay.messages):
-                if _attached(m, b):
+                ys = _touches(m, b)
+                if ys:
                     self.touching[i].append(k)
                     self.touched[k].append(i)
+                    self.touch_ys[i] += ys
         # 막대마다, 그 막대가 이어 가는 막대(PlacedBar.continued)이고 윗변이 칸 나눔선 EDGE_CLEAR 아래인 alt
         self.continued_in: list[tuple[Framed, ...]] = [
             tuple(g for g in lay.frames if g.top < b.top < g.bottom and any(_on(b.top, d + EDGE_CLEAR) for d in g.dividers))
@@ -341,11 +373,11 @@ class _Scene:
                                  f"{self.bar(b)}.")
 
     def bar_ends(self) -> Iterator[Finding]:
-        """막대 윗변은 그 막대를 여는 메시지 높이다(그 메시지가 막대 변에 닿는다) — alt 칸에서 이어 가는 막대는 칸 나눔선
-        EDGE_CLEAR 아래다. 밑변은 그 막대에 닿는 마지막 메시지에서 끝나거나 CLEAR 이상
-        더 간다 — 그 사이면 화살표 밑에 짧은 꼬리가 남는다."""
+        """막대 윗변은 그 막대를 여는 메시지 높이다(그 메시지 선 끝이 그 높이에서 막대 변에 닿는다 — 자기 호출 막대는 돌아오는
+        높이) — alt 칸에서 이어 가는 막대는 칸 나눔선 EDGE_CLEAR 아래다. 밑변은 그 막대에 닿는 마지막 선 끝에서 끝나거나 CLEAR
+        이상 더 간다 — 그 사이면 화살표 밑에 짧은 꼬리가 남는다."""
         for i, b in enumerate(self.lay.bars):
-            ys = [self.lay.messages[k].y for k in self.touching[i]]
+            ys = self.touch_ys[i]
             if b.continued and not self.continues(i):
                 yield self.found("bar_off_message", (self.who(b.owner),), (b.rect[0], b.top, b.rect[2], b.top),
                                  f"alt 칸에서 이어 가는 막대인데 윗변(y {fmt_num(b.top)})이 칸 나눔선 {EDGE_CLEAR}px 아래가 "
@@ -364,40 +396,40 @@ class _Scene:
         """선 끝은 그 높이에 그 생명선의 막대가 있으면 그 막대 변에 바깥에서, 없으면 생명선에 닿는다. 만드는 메시지의 화살촉은
         그 메시지가 만든 머리(Life.made_by) 변에 닿는다. 막대 변에 닿아도 선이 그 막대를 지나 맞은편 변에 닿거나, 그 끝이 더 옆으로 비킨 막대(위에
         그려진다) 안이면 건다 — 바깥 막대를 지나 안쪽 막대 변에 닿는 것은 겹친 막대를 그리는 보통 모양이다. 그 밖에 다른 생명선의
-        막대 안이나 변 바로 앞에서 멈추는 끝도 건다."""
+        막대 안이나 변 바로 앞에서 멈추는 끝도 건다. 자기 호출은 시작을 나가는 높이에서, 끝을 돌아오는 높이에서 본다."""
         for k, m in enumerate(self.lay.messages):
-            for which, x, name in (("시작", m.start, m.message.source), ("끝", m.end, m.message.target)):
+            for which, x, y, row, name in _ends(m):
                 p = self.parts[self.index[name]]
-                at = f"{_message(m)}의 선 {which}(x {fmt_num(x)}, y {fmt_num(m.y)})"
+                at = f"{_message(m)}의 선 {which}(x {fmt_num(x)}, y {fmt_num(y)})"
                 elements = (m.owner, self.who(name))
-                where = (x, m.y, x, m.y)
+                where = (x, y, x, y)
                 if which == "끝" and m.message.kind == "create":
                     made = [h for life, h in zip(p.lives, p.heads) if life.made_by == k]
-                    if not any(h[1] <= m.y <= h[3] and (_on(x, h[0]) or _on(x, h[2])) for h in made):
+                    if not any(h[1] <= y <= h[3] and (_on(x, h[0]) or _on(x, h[2])) for h in made):
                         what = ", ".join(self.head(p, h) for h in made) or f"참여자 '{name}'에 그런 머리가 없다"
                         yield self.found("message_off_bar", elements, where, f"{at}이 이 메시지가 만든 머리 변에 닿지 않는다: "
                                                                             f"{what}.")
                     continue
-                if not any(life.dash_top - EPS <= m.y <= life.bottom + EPS for life in p.lives):
+                if not any(life.dash_top - EPS <= y <= life.bottom + EPS for life in p.lives):
                     yield self.found("message_off_bar", elements, where,
                                      f"{at}이 참여자 '{name}'의 생명선 밖에 있다(생명선은 y {self.lifelines(p)}).")
                     continue
-                own = [b for b in self.bars_of.get(name, ()) if _holds(b, m.y)]
+                own = [b for b in self.bars_of.get(name, ()) if _holds(b, y)]
                 on = [b for b in own if _on(x, b.rect[0]) or _on(x, b.rect[2])]
-                ok = [b for b in on if not _enters(m, b)
+                ok = [b for b in on if not _enters(row, b)
                       and not any(c.depth > b.depth and c.rect[0] + EPS < x < c.rect[2] - EPS for c in own)]
                 if own and not on:
                     yield self.found("message_off_bar", elements, where,
                                      f"{at}이 그 높이의 막대 변에 닿지 않는다: {', '.join(self.bar(b) for b in own)}.")
                 elif on and not ok:
                     b = on[0]
-                    why = ("선이 그 막대를 지나 맞은편 변에 닿는다" if _enters(m, b)
+                    why = ("선이 그 막대를 지나 맞은편 변에 닿는다" if _enters(row, b)
                            else "더 옆으로 비킨 막대(위에 그려진다) 안에 있다")
                     yield self.found("message_off_bar", elements, where, f"{at}이 막대 변에 닿지만 {why}: {self.bar(b)}.")
                 elif not own and not _on(x, p.x):
                     yield self.found("message_off_bar", elements, where,
                                      f"{at}이 생명선(x {fmt_num(p.x)})에서 떨어져 있다 — 그 높이에 막대가 없다.")
-                near = [b for b in self.lay.bars if b.owner != name and _holds(b, m.y)
+                near = [b for b in self.lay.bars if b.owner != name and _holds(b, y)
                         and b.rect[0] - END_SNAP <= x <= b.rect[2] + END_SNAP]
                 if near:
                     yield self.found("message_off_bar", (*elements, *(self.who(b.owner) for b in near)), where,
@@ -414,42 +446,72 @@ class _Scene:
     def lines_at_bar_ends(self) -> Iterator[Finding]:
         for m in self.lay.messages:
             for b in self.lay.bars:
-                if not _enters(m, b):  # 막대에 바깥에서 닿기만 하는 선(_attached)도 여기 든다
-                    continue
-                for end, edge in ((b.top, "윗변"), (b.bottom, "밑변")):
-                    if abs(m.y - end) < CLEAR - EPS:
-                        yield self.found("line_at_bar_end", (m.owner, self.who(b.owner)),
-                                         (b.rect[0], min(m.y, end), b.rect[2], max(m.y, end)),
-                                         f"{_message(m)}의 선(y {fmt_num(m.y)})이 건너는 막대의 {edge}에 "
-                                         f"{fmt_num(abs(m.y - end))}px로 붙는다({CLEAR}px 이상 떨어져야 한다): {self.bar(b)}.")
+                for row in m.rows:
+                    if not _enters(row, b):  # 막대에 바깥에서 닿기만 하는 선(_touches)도 여기 든다
+                        continue
+                    y = row[0]
+                    for end, edge in ((b.top, "윗변"), (b.bottom, "밑변")):
+                        if abs(y - end) < CLEAR - EPS:
+                            yield self.found("line_at_bar_end", (m.owner, self.who(b.owner)),
+                                             (b.rect[0], min(y, end), b.rect[2], max(y, end)),
+                                             f"{_message(m)}의 선(y {fmt_num(y)})이 건너는 막대의 {edge}에 "
+                                             f"{fmt_num(abs(y - end))}px로 붙는다({CLEAR}px 이상 떨어져야 한다): {self.bar(b)}.")
 
     def line_overlaps(self) -> Iterator[Finding]:
-        """MESSAGE_GAP보다 가까운 높이의 두 메시지 선이 가로로 겹치거나, 한 생명선에서 끝과 끝이 만나면(사이에 막대 폭만큼
-        떨어진 것까지) 한 선으로 보인다."""
-        ms = sorted(self.lay.messages, key=lambda m: m.y)
-        for i, a in enumerate(ms):
-            a0, a1 = sorted((a.start, a.end))
-            for b in ms[i + 1:]:
-                if b.y - a.y >= MESSAGE_GAP - EPS:
+        """MESSAGE_GAP보다 가까운 높이의 두 메시지 가로 선이 가로로 겹치거나, 한 생명선에서 끝과 끝이 만나면(사이에 막대 폭만큼
+        떨어진 것까지) 한 선으로 보인다. 자기 호출 고리의 세로 선에 다른 메시지 선이 PAD 안으로 닿아도 건다."""
+        ms = self.lay.messages
+        rows = sorted(((row, k) for k, m in enumerate(ms) for row in m.rows), key=lambda r: r[0][0])
+        for i, ((ay, a0, a1), ka) in enumerate(rows):
+            for (by, b0, b1), kb in rows[i + 1:]:
+                if by - ay >= MESSAGE_GAP - EPS:
                     break
-                b0, b1 = sorted((b.start, b.end))
-                if a0 < b1 + ACT_W + PAD and b0 < a1 + ACT_W + PAD:
-                    yield self.found("line_overlap", (a.owner, b.owner), between((a0, a.y, a1, a.y), (b0, b.y, b1, b.y)),
-                                     f"메시지 선끼리 {fmt_num(b.y - a.y)}px로 붙어 한 선으로 보인다({MESSAGE_GAP}px 이상 떨어져야 "
-                                     f"한다): {_message(a)}(y {fmt_num(a.y)}), {_message(b)}(y {fmt_num(b.y)}).")
+                if ka != kb and a0 < b1 + ACT_W + PAD and b0 < a1 + ACT_W + PAD:
+                    a, b = ms[ka], ms[kb]
+                    yield self.found("line_overlap", (a.owner, b.owner), between((a0, ay, a1, ay), (b0, by, b1, by)),
+                                     f"메시지 선끼리 {fmt_num(by - ay)}px로 붙어 한 선으로 보인다({MESSAGE_GAP}px 이상 떨어져야 "
+                                     f"한다): {_message(a)}(y {fmt_num(ay)}), {_message(b)}(y {fmt_num(by)}).")
+        for k, m in enumerate(ms):
+            if m.riser is None:
+                continue
+            for j, o in enumerate(ms):
+                row = next((row for row in o.rows if _overlap(_row_box(row), m.riser, PAD)), None) if j != k else None
+                if row is not None:
+                    yield self.found("line_overlap", (m.owner, o.owner), between(_row_box(row), m.riser),
+                                     f"{_message(o)}의 선(y {fmt_num(row[0])})이 {_message(m)}의 고리 세로 선"
+                                     f"(x {fmt_num(m.riser[0])})에 닿는다({PAD}px 이상 떨어져야 한다).")
 
     def lines_through_participants(self) -> Iterator[Finding]:
         for m in self.lay.messages:
-            x0, x1 = sorted((m.start, m.end))
             for i, p in enumerate(self.parts):
                 for h in p.heads:
-                    if _crosses(m.y, x0, x1, h):
-                        yield self.found("line_through_participant", (m.owner, f"participants[{i}]"),
-                                         (max(x0, h[0]), m.y, min(x1, h[2]), m.y),
+                    hit = _line_hit(m, h)
+                    if hit is not None:
+                        yield self.found("line_through_participant", (m.owner, f"participants[{i}]"), hit,
                                          f"{_message(m)}의 선이 머리를 지난다: {self.head(p, h)}.")
                     elif _overlap(m.arrow, h):
                         yield self.found("line_through_participant", (m.owner, f"participants[{i}]"), between(m.arrow, h),
                                          f"{_message(m)}의 화살촉이 머리에 닿는다: {self.head(p, h)}.")
+
+    def loops_on_lifelines(self) -> Iterator[Finding]:
+        """자기 호출 고리가 둘러싼 곳(나가는 선·세로 선·돌아오는 선과 그 안)이 생명선이나, 그 고리가 잇는 두 막대(바깥 막대·
+        자기 호출 막대) 밖의 막대에 PAD 안으로 닿는다 — 고리는 오른쪽 이웃과의 사이에 든다."""
+        for k, m in enumerate(self.lay.messages):
+            if m.riser is None:
+                continue
+            box = m.extent
+            for i, p in enumerate(self.parts):
+                life = next((life for life in p.lives if _crosses_v(p.x, life.dash_top, life.bottom, grow(box, PAD))), None)
+                if life is not None:
+                    yield self.found("loop_on_lifeline", (m.owner, f"participants[{i}]"),
+                                     (p.x, max(box[1], life.dash_top), p.x, min(box[3], life.bottom)),
+                                     f"{_message(m)}의 고리(자리 {fmt_rect(box)})가 참여자 '{p.participant.name}'의 생명선"
+                                     f"(x {fmt_num(p.x)})에 닿는다({PAD}px 이상 떨어져야 한다).")
+            for i, b in enumerate(self.lay.bars):
+                if i not in self.touched[k] and _overlap(b.rect, box, PAD):
+                    yield self.found("loop_on_lifeline", (m.owner, self.who(b.owner)), between(b.rect, box),
+                                     f"{_message(m)}의 고리(자리 {fmt_rect(box)})가 막대에 닿는다({PAD}px 이상 떨어져야 "
+                                     f"한다): {self.bar(b)}.")
 
     # -------- 프레임·ref
 
@@ -527,26 +589,41 @@ class _Scene:
     def messages_in_refs(self) -> Iterator[Finding]:
         for r in self.lay.refs:
             for m in self.lay.messages:
-                if r.top < m.y < r.bottom:
-                    yield self.found("message_in_ref", (m.owner, r.owner), (min(m.start, m.end), m.y, max(m.start, m.end), m.y),
-                                     f"{_message(m)}(y {fmt_num(m.y)})이 {_frame(r)}(y {fmt_num(r.top)}~{fmt_num(r.bottom)}) "
+                if r.top < m.tip_y and m.y < r.bottom:  # 자기 호출은 나가는 높이~돌아오는 높이 가운데 어디든
+                    ys = fmt_num(m.y) if m.riser is None else f"{fmt_num(m.y)}~{fmt_num(m.tip_y)}"
+                    yield self.found("message_in_ref", (m.owner, r.owner), m.extent,
+                                     f"{_message(m)}(y {ys})이 {_frame(r)}(y {fmt_num(r.top)}~{fmt_num(r.bottom)}) "
                                      f"상자 안에 있다.")
 
     def lines_on_frames(self) -> Iterator[Finding]:
         """프레임·ref 가로 선은 메시지 선과 나란해 가까우면 한 선으로 보이거나 화살촉이 닿는다. 옆 변을 건너는 메시지 선·화살촉은
-        프레임 밖으로 나간다."""
+        프레임 밖으로 나간다. 자기 호출 고리의 세로 선은 가로 선을 건너거나 옆 변에 PAD 안으로 붙으면 건다."""
         for f, edges, sides in self.lines:
             for m in self.lay.messages:
-                x0, x1 = sorted((m.start, m.end))
-                for y, edge in edges:
-                    if abs(m.y - y) < FRAME_LINE_CLEAR - EPS and x0 < f.right and f.left < x1:
-                        yield self.found("line_on_frame", (m.owner, f.owner), (max(x0, f.left), min(y, m.y),
-                                                                              min(x1, f.right), max(y, m.y)),
-                                         f"{_message(m)}의 선(y {fmt_num(m.y)})이 {_frame(f)}의 {edge}(y {fmt_num(y)})에 "
-                                         f"{fmt_num(abs(m.y - y))}px로 붙는다({FRAME_LINE_CLEAR}px 이상 떨어져야 한다).")
+                for ry, x0, x1 in m.rows:
+                    for y, edge in edges:
+                        if abs(ry - y) < FRAME_LINE_CLEAR - EPS and x0 < f.right and f.left < x1:
+                            yield self.found("line_on_frame", (m.owner, f.owner), (max(x0, f.left), min(y, ry),
+                                                                                  min(x1, f.right), max(y, ry)),
+                                             f"{_message(m)}의 선(y {fmt_num(ry)})이 {_frame(f)}의 {edge}(y {fmt_num(y)})에 "
+                                             f"{fmt_num(abs(ry - y))}px로 붙는다({FRAME_LINE_CLEAR}px 이상 떨어져야 한다).")
+                r = m.riser
+                if r is not None:
+                    for y, edge in edges:
+                        if f.left < r[0] < f.right and r[1] < y < r[3]:
+                            yield self.found("line_on_frame", (m.owner, f.owner), (r[0], y, r[0], y),
+                                             f"{_message(m)}의 고리 세로 선(x {fmt_num(r[0])})이 {_frame(f)}의 {edge}"
+                                             f"(y {fmt_num(y)})을 건넌다.")
+                    for x, side in sides:
+                        if _overlap((x, f.top, x, f.bottom), r, PAD):
+                            yield self.found("line_on_frame", (m.owner, f.owner), (x, max(f.top, r[1]), x, min(f.bottom, r[3])),
+                                             f"{_message(m)}의 고리 세로 선(x {fmt_num(r[0])})이 {_frame(f)}의 {side}"
+                                             f"(x {fmt_num(x)})에 {PAD}px 안으로 붙는다.")
                 for x, side in sides:
-                    if _crosses_v(x, f.top, f.bottom, (x0, m.y, x1, m.y)) or _crosses_v(x, f.top, f.bottom, m.arrow):
-                        yield self.found("line_on_frame", (m.owner, f.owner), (x, m.y, x, m.y),
+                    ys = [row[0] for row in m.rows if _crosses_v(x, f.top, f.bottom, _row_box(row))]
+                    ys += [m.tip_y] if _crosses_v(x, f.top, f.bottom, m.arrow) else []
+                    if ys:  # 자리는 건넌 선분(화살촉이면 돌아오는 높이)에 둔다
+                        yield self.found("line_on_frame", (m.owner, f.owner), (x, ys[0], x, ys[0]),
                                          f"{_message(m)}의 선이나 화살촉이 {_frame(f)}의 {side}(x {fmt_num(x)})을 건넌다.")
 
     def frames_on_participants(self) -> Iterator[Finding]:
@@ -592,12 +669,12 @@ class _Scene:
 
     def lines_through_texts(self) -> Iterator[Finding]:
         for m in self.lay.messages:
-            x0, x1 = sorted((m.start, m.end))
             arrow = m.arrow
             for t in self.texts:
                 a = t.area
-                if _crosses(m.y, x0, x1, a):
-                    yield self.found("line_through_text", (m.owner, t.element), (max(x0, a[0]), m.y, min(x1, a[2]), m.y),
+                hit = _line_hit(m, a)
+                if hit is not None:
+                    yield self.found("line_through_text", (m.owner, t.element), hit,
                                      f"{_message(m)}의 선이 글자를 지난다: {t.title}.")
                 elif _overlap(arrow, a):
                     yield self.found("line_through_text", (m.owner, t.element), between(arrow, a),
@@ -667,8 +744,7 @@ class _Scene:
                     hits.append((f"participants[{i}]", f"참여자 '{p.participant.name}'의 머리·생명선"))
             hits += [(self.who(b.owner), self.bar(b)) for b in self.lay.bars if _overlap(box, b.rect)]
             for m in self.lay.messages:
-                x0, x1 = sorted((m.start, m.end))
-                if _crosses(m.y, x0, x1, box) or _overlap(m.arrow, box):
+                if _line_hit(m, box) is not None or _overlap(m.arrow, box):
                     hits.append((m.owner, _message(m)))
             hits += [(f.owner, _frame(f)) for f in self.framed if _overlap(box, f.rect)]
             hits += [(t.element, t.title) for t in self.texts if t.element != n.owner and _overlap(box, t.area)]
@@ -700,7 +776,8 @@ class _Scene:
 
     RULES = (  # 검사 순서 — 결과 순서(KINDS)와 같고, 규칙 하나가 한 종류를 낸다
         participant_overlaps, bars_on_participants, bar_overlaps, bars_off_lifelines, bar_ends, message_ends,
-        lines_at_bar_ends, line_overlaps, lines_through_participants, frames_cutting_bars, bars_outside_frames,
+        lines_at_bar_ends, line_overlaps, lines_through_participants, loops_on_lifelines, frames_cutting_bars,
+        bars_outside_frames,
         frame_overlaps, messages_in_refs, lines_on_frames, frames_on_participants, tags_on_lifelines,
         lines_through_texts, texts_on_bars, texts_on_participants, texts_on_lifelines, text_overlaps, notes_covering,
         texts_outside)
