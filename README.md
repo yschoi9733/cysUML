@@ -1,5 +1,7 @@
 # cysUML
 
+[![yschoi9733/cysUML MCP server](https://glama.ai/mcp/servers/yschoi9733/cysUML/badges/score.svg)](https://glama.ai/mcp/servers/yschoi9733/cysUML)
+
 <!-- mcp-name: io.github.yschoi9733/cysuml -->
 
 An MCP server for document-ready UML diagrams: the AI lays them out, cysUML draws and checks them.
