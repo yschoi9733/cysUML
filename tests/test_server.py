@@ -1252,7 +1252,8 @@ def test_readme_before_after_english_and_korean_pictures_share_one_layout(readme
 def test_readme_pictures_exist_and_cover_every_example(readme_images):
     readme = README.read_text(encoding="utf-8")
     base = "https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/"
-    links = re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", readme)
+    badge = "https://glama.ai/mcp/servers/yschoi9733/cysUML/badges/score.svg"  # Glama가 그려 주는 배지라 docs/images/ 밖에 있다
+    links = [link for link in re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", readme) if link != badge]
     assert all(link.startswith(base) for link in links), [link for link in links if not link.startswith(base)]  # PyPI에서 깨지지 않게
     names = [link.removeprefix(base) for link in links]
     assert {f"{n}.png" for n in [*EXAMPLES, *readme_images.BEFORE_AFTER]} <= set(names)
