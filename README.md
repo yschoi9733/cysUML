@@ -374,14 +374,14 @@ cysUML spaces the lifelines to fit the text and draws the activation bars:
 ![The sequence diagram this example draws](https://raw.githubusercontent.com/yschoi9733/cysUML/main/docs/images/checkout.png)
 
 A lifeline can call itself: a call whose `from` and `to` name the same participant is a self-call. The bar of a
-self-call ends short, and the messages that lifeline sends next are drawn as coming after the self-call has ended, so
-write what happens inside a self-call in a note. The tool rejects a self-call by an actor, and a `reply` or `create`
+self-call ends short, and every later message is drawn as coming after the self-call has ended, so write what happens
+inside a self-call in a note that names the call. The tool rejects a self-call by an actor, and a `reply` or `create`
 message whose `from` and `to` are the same. Notes (`notes`) belong to no message: the tool draws them under the
 diagram, in order.
 
-It gets back the check result, the saved file paths, and the picture. As cysUML does the layout, a failed check is a
-cysUML bug. Each finding still says what to change in the input to get around it: the order of participants or
-messages, the messages a frame covers, shorter text, or splitting the diagram.
+The assistant gets back the check result, the saved file paths, and the picture. As cysUML does the layout, a failed
+check is a cysUML bug. Each finding still says what to change in the input to get around it: the order of participants
+or messages, the messages a frame covers, shorter text, or splitting the diagram.
 
 ### All tools
 
@@ -572,8 +572,8 @@ uvx cysuml
   흐름의 조건은 `name`에 대괄호까지 쓴다. 결과와 검사는 패키지도와 같다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
   프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`, 노트만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다.
-  생명선은 자기 자신을 부를 수 있다(`from`과 `to`에 같은 이름을 준 호출, 곧 자기 호출). 자기 호출 막대는 짧게 끝나고, 그
-  생명선이 뒤이어 보내는 메시지는 자기 호출이 끝난 뒤의 일로 그려진다. 그래서 자기 호출 안에서 하는 일은 노트에 적는다. 액터의
+  생명선은 자기 자신을 부를 수 있다(`from`과 `to`에 같은 이름을 준 호출, 곧 자기 호출). 자기 호출 막대는 짧게 끝나고, 그 뒤
+  메시지는 모두 자기 호출이 끝난 뒤의 일로 그려진다. 그래서 자기 호출 안에서 하는 일은 어느 호출의 일인지 밝혀 노트에 적는다. 액터의
   자기 호출과, 자기 자신에게 보내는 반환(`reply`)·만드는 메시지(`create`)는 받지 않는다. 노트(`notes`)는 어느 메시지에도
   붙지 않고, 도구가 그림 아래에 차례대로 모아 그린다. 결과로 검사 결과, 저장한 그림·입력 파일 경로, 그림을 돌려준다. 배치를
   cysUML이 하므로 불합격은 cysUML의 버그다. 그래도 항목마다 입력에서 무엇을 바꾸면 비켜 가는지(참여자·메시지 차례, 프레임이 덮는
