@@ -354,8 +354,8 @@ It gets back the same things as the package diagram tool, and checks the same wa
 ### Sequence diagrams
 
 The tool is `draw_sequence_diagram`. The assistant sends no coordinates: only the participants, the messages in
-order, frames (`loop`, `opt`, `alt`) that cover a range of messages, `ref` boxes placed before a message, and notes.
-cysUML spaces the lifelines to fit the text and draws the activation bars:
+order, frames (`loop`, `opt`, `alt`) that cover a range of messages, `ref` boxes placed before a message, and notes
+(`notes`). cysUML spaces the lifelines to fit the text and draws the activation bars:
 
 ```json
 {
@@ -376,9 +376,8 @@ cysUML spaces the lifelines to fit the text and draws the activation bars:
 A lifeline can call itself: a call whose `from` and `to` name the same participant is a self-call. The bar of a
 self-call ends short, so no other message can go inside a self-call. Every message after a self-call, even the next one
 the same lifeline sends, is drawn after the self-call has ended. So write what happens inside a self-call in a note
-(`notes`) that names the call. The tool rejects a self-call by an actor, and a `reply` or `create` message whose `from`
-and `to` are the same. Notes belong to no message: the tool draws them below the lifelines in the same picture, in
-order.
+that names the call. The tool rejects a self-call by an actor, and a `reply` or `create` message whose `from` and `to`
+are the same. Notes belong to no message: the tool draws them below the lifelines in the same picture, in order.
 
 The assistant gets back the check result, the saved file paths, and the picture. As cysUML does the layout, a failed
 check is a cysUML bug. Each finding still says what to change in the input to get around it: the order of participants
@@ -572,14 +571,15 @@ uvx cysuml
 - **액티비티도**는 `draw_activity_diagram`으로 그린다. 시작·끝 점, 행동, 결정·합류 마름모를 흐름으로 잇는다. 결정에서 나가는
   흐름의 조건은 `name`에 대괄호까지 쓴다. 결과와 검사는 패키지도와 같다.
 - **교류도**는 `draw_sequence_diagram`으로 그린다. 어시스턴트는 좌표 없이 참여자, 메시지 차례, 메시지 범위를 덮는
-  프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`, 노트만 준다. cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다.
-  결과로 검사 결과, 저장한 그림·입력 파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다. 그래도
-  항목마다 입력에서 무엇을 바꾸면 비켜 가는지(참여자·메시지 차례, 프레임이 덮는 범위, 글자 줄이기, 그림 나누기) 알려 준다.
+  프레임(`loop`·`opt`·`alt`), 메시지 앞에 놓는 `ref`, 노트(`notes`)만 준다.
+  cysUML이 글자에 맞춰 생명선을 띄우고 활성 막대를 그린다.
   - 생명선은 자기 자신을 부를 수 있다(`from`과 `to`에 같은 이름을 준 호출, 곧 자기 호출). 자기 호출 막대는 짧게
     끝나서 그 안에 다른 메시지를 넣을 수 없다. 자기 호출 뒤 메시지는 그 생명선이 뒤이어 보내는 것까지 모두 자기 호출이 끝난
-    뒤의 일로 그려진다. 그래서 자기 호출 안에서 하는 일은 어느 호출의 일인지 밝혀 노트(`notes`)에 적는다.
+    뒤의 일로 그려진다. 그래서 자기 호출 안에서 하는 일은 어느 호출의 일인지 밝혀 노트에 적는다.
   - 액터의 자기 호출, 자기 자신에게 보내는 반환(`reply`), 자기 자신을 만드는 메시지(`create`)는 받지 않는다.
   - 노트는 어느 메시지에도 붙지 않고, 도구가 같은 그림 안 생명선 아래에 차례대로 모아 그린다.
+  - 결과로 검사 결과, 저장한 그림·입력 파일 경로, 그림을 돌려준다. 배치를 cysUML이 하므로 불합격은 cysUML의 버그다.
+    그래도 항목마다 입력에서 무엇을 바꾸면 비켜 가는지(참여자·메시지 차례, 프레임이 덮는 범위, 글자 줄이기, 그림 나누기) 알려 준다.
 - 입력 형식 전체는 도구의 인자 설명에 있어 클라이언트가 어시스턴트에게 넘긴다.
 - 그림은 `out_dir`에, 없으면 서버 작업 폴더 아래 `diagrams/`에 저장한다. 같은 `file_name`이면 그림과 아래 입력 파일을 둘 다
   덮어쓴다. 쓸 수 없는 폴더(`/` 등)에서 서버를 띄우는 클라이언트도 있는데, 그때는 도구가 오류로 알리므로 `out_dir`을 주면 된다.
