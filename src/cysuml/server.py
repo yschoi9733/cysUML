@@ -70,7 +70,7 @@ INSTRUCTIONS = f"""cysUML은 문서에 바로 넣을 UML 그림을 PNG로 그리
 연관으로, 유즈케이스끼리는 «include»·«extend»로, 같은 종류끼리는 일반화로 잇는다.
 - 상태도는 draw_state_diagram으로 그린다. 배치는 부르는 AI가 한다. 시작·끝 점, 상태, 선택 마름모를 전이로 잇고, 상태 안에 상태를 넣는다.
 - 액티비티도는 draw_activity_diagram으로 그린다. 배치는 부르는 AI가 한다. 시작·끝 점, 행동, 결정·합류 마름모를 흐름으로 잇는다.
-- 교류도는 draw_sequence_diagram으로 그린다. 배치는 cysUML이 하고, AI는 참여자·메시지·프레임의 차례와 노트만 준다.
+- 교류도는 draw_sequence_diagram으로 그린다. 배치는 cysUML이 하고, AI는 참여자·메시지·프레임의 차례를 주고 필요하면 노트를 더한다.
 불합격 종류와 그림마다의 배치 요령은 각 도구 설명에 있다.
 {SAVED_INPUT}
 
